@@ -248,8 +248,9 @@ src/
   data/ workflows/         (later)
 workers/sentinel/         independent watchdog + kill-switch worker (own wrangler.jsonc, vendored verify.ts,
                           writes the KV kill flag the brain reads — ADR-015)
-research/                 Python (uv): cortex_research.run crypto|equity — runs pinned upstream skills, signs,
-                          POSTs /ingest/batch (research.yml); pytest in CI. ADR-026
+research/                 Python (uv): cortex_research.run crypto|equity|world — runs pinned upstream skills, signs,
+                          POSTs /ingest/batch (research.yml); governor/ (ADR-030); options/ shadow lab (ADR-031);
+                          pytest in CI. ADR-026
 test/                     vitest in Node: pure risk tests + full pulses against test/sim (FakeBroker + node:sqlite
                           with the real D1 migrations) — ADR-019
 .github/workflows/        ci.yml (+ research.yml, governor.yml added in later phases)
@@ -271,7 +272,7 @@ pnpm db:migrate:remote    # apply migrations to the real D1 (operator only)
 pnpm deploy:cortex        # wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists). NOT `pnpm deploy` (pnpm builtin)
 pnpm deploy:sentinel      # deploy the independent watchdog/kill-switch worker
 pnpm discord:setup        # idempotent: CORTEX-54 category + 8 channels, sentinel webhook, guild slash commands
-gh workflow run research -f job=crypto    # or job=equity: run a research batch now
+gh workflow run research -f job=crypto    # or job=equity | world | options: run a research batch now
 pnpm court:smoke BTC/USD ["headline"] [--post]   # real bull/bear/Clef run on live evidence; never trades
 # Discord /court SYMBOL convenes a real session (PAPER, all gates apply); cards go to #bull-vs-bear-court
 pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
@@ -358,5 +359,10 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   once ≥50 outcomes). Brain reads it via HMAC `/governor/export`; DAY_ROLL now carries pulses / max gap / equity.
   First live run posted a report card. Operator enabled "Actions may create PRs"; the workflow still falls back
   to a compare link if that is ever turned off. PRs opened by GITHUB_TOKEN don't trigger CI; CI runs on merge.
+- 2026-10-22: Phase 5 options shadow lab built (branch `phase-5-options-lab`, ADR-031): research.yml
+  job=options, virtual D1 ledger `options_shadow` (migration 0003 applied), three SHADOW strategies, staskh
+  Black-Scholes + PMCC rubric ported (NOTICE.md). Deployed; first opens wait for market hours.
+- GitHub scheduled runs had not fired at all as of 23:43 UTC (manual dispatch works). The batch layer depends
+  on them; a Cloudflare-cron dispatcher fallback needs a fine-grained token from the operator.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

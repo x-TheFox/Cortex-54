@@ -14,4 +14,34 @@ Ideas only (no code copied):
   architectural patterns described in the original design document.
 
 ## Ported files
-_None yet._
+
+| File | From | Upstream commit | Changes |
+|---|---|---|---|
+| `research/cortex_research/options/bs.py` | staskh/trading_skills `src/trading_skills/black_scholes.py` | b71a74fe327b12e314fc96618d7131dca4638ab3 | scipy → `math.erf`; trimmed to price/delta/vega/IV |
+| `research/cortex_research/options/structures.py` (PMCC rubric functions) | staskh/trading_skills `src/trading_skills/scanner_pmcc.py` | b71a74fe327b12e314fc96618d7131dca4638ab3 | condensed scoring; earnings term dropped; Alpaca data instead of yfinance |
+
+### staskh/trading_skills license
+
+```
+MIT License
+
+Copyright (c) 2026 staskh
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```

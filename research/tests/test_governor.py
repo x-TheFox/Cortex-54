@@ -81,3 +81,14 @@ def test_apply_map_matches_typescript_semantics():
     pts = [(0.0, 0.2), (0.5, 0.4), (1.0, 0.9)]
     assert M.apply_map(pts, -1) == 0.2 and M.apply_map(pts, 2) == 0.9
     assert abs(M.apply_map(pts, 0.25) - 0.3) < 1e-12 and abs(M.apply_map(pts, 0.75) - 0.65) < 1e-12
+
+
+def test_options_gate_and_summary():
+    from cortex_research.governor.run import options_gate, options_summary
+
+    ev = [{"trade_id": "a", "kind": "OPEN", "strategy": "OPTIONS_PMCC_V1", "sizer_permits_live": 0},
+          {"trade_id": "a", "kind": "CLOSE", "strategy": "OPTIONS_PMCC_V1", "r": 0.5},
+          {"trade_id": "b", "kind": "OPEN", "strategy": "OPTIONS_PMCC_V1", "sizer_permits_live": 0}]
+    g = options_gate(ev)
+    assert g[0]["status"] == "FAIL" and g[0]["value"] == 1
+    assert "1 open · 1 closed" in options_summary(ev)

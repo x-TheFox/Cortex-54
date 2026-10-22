@@ -9,13 +9,15 @@ on:
     - cron: "40 12 * * 1-5" # equity posture before the US open (08:40 EDT / 07:40 EST)
     - cron: "20 21 * * 1-5" # equity posture after the close
     - cron: "17 * * * *" # world intel (GDELT + EDGAR) hourly
+    - cron: "50 14 * * 1-5" # options shadow lab after the open (10:50 EDT / 09:50 EST)
+    - cron: "40 19 * * 1-5" # options shadow lab before the close
   workflow_dispatch:
     inputs:
       job:
         description: "Which job"
         required: true
         type: choice
-        options: [crypto, equity, world]
+        options: [crypto, equity, world, options]
 
 permissions:
   contents: read
@@ -41,13 +43,15 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "job=${{ inputs.job }}" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "7 */4 * * *" ]; then echo "job=crypto" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "17 * * * *" ]; then echo "job=world" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.event.schedule }}" = "50 14 * * 1-5" ] || [ "${{ github.event.schedule }}" = "40 19 * * 1-5" ]; then echo "job=options" >> "$GITHUB_OUTPUT";
           else echo "job=equity" >> "$GITHUB_OUTPUT"; fi
       - name: Checkout pinned upstream skills
-        if: steps.pick.outputs.job != 'world'
+        if: steps.pick.outputs.job == 'crypto' || steps.pick.outputs.job == 'equity'
         run: |
           git clone --filter=blob:none "https://github.com/${UPSTREAM_REPO}" research/.vendor/upstream
           git -C research/.vendor/upstream checkout --quiet "${UPSTREAM_SHA}"
       - name: Run and ingest
+        if: steps.pick.outputs.job != 'options'
         working-directory: research
         env:
           UPSTREAM_DIR: ${{ github.workspace }}/research/.vendor/upstream
@@ -57,3 +61,13 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
         run: uv run python -m cortex_research.run "${{ steps.pick.outputs.job }}"
+      - name: Options shadow lab (virtual ledger, never sent to a broker)
+        if: steps.pick.outputs.job == 'options'
+        working-directory: research
+        env:
+          CORTEX_URL: ${{ vars.CORTEX_URL }}
+          INGEST_HMAC_SECRET: ${{ secrets.INGEST_HMAC_SECRET }}
+          ALPACA_KEY_ID: ${{ secrets.ALPACA_PAPER_KEY_ID }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_PAPER_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python -m cortex_research.options.lab

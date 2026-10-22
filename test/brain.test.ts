@@ -1039,3 +1039,61 @@ describe("heartbeat stats", () => {
     expect(rolls[1].equity_cents.PAPER).toBe(5400);
   });
 });
+
+describe("options shadow lab ingest (Phase 5)", () => {
+  const leg = { symbol: "SPY261204P00700000", side: "short", kind: "put", strike: 700, expiry: "2026-12-04" };
+  const ev = (over: Record<string, unknown> = {}) => ({
+    trade_id: "OPTIONS_BULL_PUT_SPREAD_V1|SPY|x|2026-10-22",
+    kind: "OPEN",
+    ts: T0,
+    strategy: "OPTIONS_BULL_PUT_SPREAD_V1",
+    structure: "vertical_credit",
+    underlying: "SPY",
+    legs: [leg, { ...leg, symbol: "SPY261204P00692000", side: "long", strike: 692 }],
+    cash: 1.5,
+    max_loss_cents: 65020,
+    max_profit_cents: 14980,
+    fees_cents: 20,
+    pnl_cents: null,
+    r: null,
+    reason: null,
+    sizer_permits_live: false,
+    detail: { dte: 43 },
+    ...over,
+  });
+  const lab = (events: unknown[]) => ({
+    schema_version: 1,
+    job: "options-lab",
+    produced_at: T0,
+    run_url: null,
+    items: [
+      {
+        skill_id: "spread-structurer",
+        version: "lab-v1",
+        as_of: T0,
+        inputs_sha256: "c".repeat(64),
+        payload: { events, card: { title: "🧪 Options shadow lab", sections: [], post: true } },
+      },
+    ],
+    posture: null,
+  });
+
+  it("stores valid virtual events once and rejects disallowed structures or unknown strategies", async () => {
+    const t = setup();
+    const r = await t.brain.ingestBatch(
+      lab([
+        ev(),
+        ev({ structure: "naked_put" }),
+        ev({ strategy: "OPTIONS_MADE_UP_V1" }),
+        ev({ strategy: "OPTIONS_PMCC_V1" }), // structure mismatch with the doctrine (diagonal)
+      ]),
+    );
+    expect(r.message).toContain('"open":1');
+    expect(r.message).toContain('"rejected":3');
+    await t.brain.ingestBatch(lab([ev()]));
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM options_shadow").get()).toEqual({ n: 1 });
+    expect(t.notifier.sent.filter((m) => m.channel === "governor")).toHaveLength(1);
+    // a virtual trade never becomes a broker order
+    expect(t.paper.orders.size).toBe(0);
+  });
+});

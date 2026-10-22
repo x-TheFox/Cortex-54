@@ -121,7 +121,7 @@ skills:
       family: STR,
       source: staskh,
       upstream: [black_scholes, greeks],
-      runtime: ts-hot,
+      runtime: py-batch,
       phase: 5,
       status: SHADOW,
     }
@@ -130,7 +130,7 @@ skills:
       family: STR,
       source: staskh,
       upstream: spreads,
-      runtime: ts-hot,
+      runtime: py-batch,
       phase: 5,
       status: SHADOW,
     }
@@ -139,7 +139,7 @@ skills:
       family: STR,
       source: staskh,
       upstream: scanner_pmcc,
-      runtime: ts-hot,
+      runtime: py-batch,
       phase: 5,
       status: SHADOW,
     }

@@ -40,14 +40,14 @@ export type WorldCandidate = z.infer<typeof WorldCandidateSchema>;
 export const BatchSchema = z
   .object({
     schema_version: z.literal(1),
-    job: z.enum(["crypto-regime", "equity-posture", "world-intel", "governor"]),
+    job: z.enum(["crypto-regime", "equity-posture", "world-intel", "governor", "options-lab"]),
     produced_at: z.number().int(),
     run_url: z.url().nullable(),
     items: z.array(BatchItemSchema).min(1).max(20),
     posture: PostureSchema.nullable(),
   })
-  .refine((b) => (b.job === "world-intel" || b.job === "governor") === (b.posture === null), {
-    message: "posture is required for regime jobs and must be null for world-intel / governor",
+  .refine((b) => ["world-intel", "governor", "options-lab"].includes(b.job) === (b.posture === null), {
+    message: "posture is required for regime jobs and must be null for world-intel / governor / options-lab",
   });
 export type Batch = z.infer<typeof BatchSchema>;
 
@@ -96,3 +96,31 @@ export const ReportCardSchema = z.object({
   sections: z.array(z.object({ name: z.string().max(100), value: z.string().max(1000) })).max(20),
   post: z.boolean(),
 });
+
+/** Options shadow-lab ledger event (Phase 5, ADR-031). Virtual only: the brain stores it, never trades it. */
+export const OptionsLegSchema = z.object({
+  symbol: z.string().regex(/^[A-Z]{1,6}\d{6}[CP]\d{8}$/),
+  side: z.enum(["long", "short"]),
+  kind: z.enum(["call", "put"]),
+  strike: z.number().positive(),
+  expiry: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export const OptionsEventSchema = z.object({
+  trade_id: z.string().min(1).max(200),
+  kind: z.enum(["OPEN", "CLOSE"]),
+  ts: z.number().int(),
+  strategy: z.string().regex(/^OPTIONS_[A-Z0-9_]+_V\d+$/),
+  structure: z.string().max(40),
+  underlying: z.string().regex(/^[A-Z.]{1,8}$/),
+  legs: z.array(OptionsLegSchema).min(1).max(4),
+  cash: z.number().min(-100_000).max(100_000),
+  max_loss_cents: z.number().int().positive(),
+  max_profit_cents: z.number().int().nullable(),
+  fees_cents: z.number().int().nonnegative(),
+  pnl_cents: z.number().int().nullable(),
+  r: z.number().min(-50).max(50).nullable(),
+  reason: z.enum(["TARGET", "STOP", "TIME", "EXPIRY"]).nullable(),
+  sizer_permits_live: z.boolean(),
+  detail: z.record(z.string(), z.unknown()),
+});
+export type OptionsEvent = z.infer<typeof OptionsEventSchema>;

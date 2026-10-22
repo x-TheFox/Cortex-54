@@ -20,6 +20,7 @@ import {
   BatchSchema,
   FitnessSchema,
   GradeSchema,
+  OptionsEventSchema,
   PostmortemSchema,
   ReportCardSchema,
   ReputationSchema,
@@ -1950,6 +1951,7 @@ ${postmortem}`,
       );
     }
     if (b.job === "governor") return this.ingestGovernor(b, now);
+    if (b.job === "options-lab") return this.ingestOptionsLab(b, now);
     if (b.job === "world-intel" || b.posture === null) {
       const pulse = b.items.find((x) => x.skill_id === "gdelt-world-pulse")?.payload as
         | {
@@ -2090,6 +2092,78 @@ ${postmortem}`,
     this.journal.append("SYSTEM", "GOVERNOR", null, counts, now);
     await this.flushJournal();
     return { ok: true, message: `governor: ${JSON.stringify(counts)}` };
+  }
+
+  /**
+   * Options shadow lab (Phase 5, ADR-031): store virtual OPEN/CLOSE events. Nothing here reaches a broker; the
+   * constitution's paper structure list and the doctrine's OPTIONS strategies are re-checked on the way in.
+   */
+  private async ingestOptionsLab(b: Batch, now: number): Promise<{ ok: boolean; message: string }> {
+    const counts = { open: 0, close: 0, rejected: 0, cards: 0 };
+    const allowed = new Set(this.c.allowed.options_structures_paper);
+    for (const item of b.items) {
+      const p = item.payload;
+      const events = Array.isArray(p.events) ? (p.events as unknown[]).slice(0, 50) : [];
+      for (const raw of events) {
+        const r = OptionsEventSchema.safeParse(raw);
+        const strat = r.success
+          ? this.d.strategies.find((s) => s.id === r.data.strategy && s.arena === "OPTIONS")
+          : undefined;
+        if (
+          !r.success ||
+          !strat ||
+          !allowed.has(r.data.structure) ||
+          strat.params?.structure !== r.data.structure
+        ) {
+          counts.rejected++;
+          continue;
+        }
+        const e = r.data;
+        if (!this.markSeen(`opt:${e.trade_id}:${e.kind}`, now)) continue;
+        this.journal.enqueue(
+          "options_shadow",
+          {
+            trade_id: e.trade_id,
+            kind: e.kind,
+            ts: e.ts,
+            strategy: e.strategy,
+            structure: e.structure,
+            underlying: e.underlying,
+            legs_json: JSON.stringify(e.legs),
+            cash: e.cash,
+            max_loss_cents: e.max_loss_cents,
+            max_profit_cents: e.max_profit_cents,
+            fees_cents: e.fees_cents,
+            pnl_cents: e.pnl_cents,
+            r: e.r,
+            reason: e.reason,
+            sizer_permits_live: e.sizer_permits_live ? 1 : 0,
+            detail_json: JSON.stringify(e.detail).slice(0, 4000),
+          },
+          now,
+        );
+        if (e.kind === "OPEN") counts.open++;
+        else counts.close++;
+      }
+      const card = ReportCardSchema.safeParse(p.card);
+      if (card.success && card.data.post && counts.open + counts.close > 0) {
+        await this.deps.notifier.post("governor", {
+          embeds: [
+            {
+              title: card.data.title,
+              color: COLORS.cyan,
+              fields: card.data.sections.map((s) => ({ name: s.name, value: s.value.slice(0, 1024) })),
+              footer: { text: "Virtual ledger · never sent to a broker" },
+              timestamp: new Date(b.produced_at).toISOString(),
+            },
+          ],
+        });
+        counts.cards++;
+      }
+    }
+    this.journal.append("SYSTEM", "OPTIONS_LAB", null, counts, now);
+    await this.flushJournal();
+    return { ok: true, message: `options-lab: ${JSON.stringify(counts)}` };
   }
 
   /** Batch regime for an arena if it is within the doctrine staleness limit, else null (fail closed to proxy/none). */

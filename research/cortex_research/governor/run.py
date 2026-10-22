@@ -228,6 +228,27 @@ def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict],
     ]
 
 
+def options_gate(events: list[dict]) -> list[dict]:
+    """Phase 5 exit (≥30 shadow trades scored) and RISK_DOCTRINE 'options live' (positive post-fee expectancy)."""
+    rs = [float(e["r"]) for e in events if e["kind"] == "CLOSE" and e.get("r") is not None]
+    exp = round(sum(rs) / len(rs), 3) if rs else None
+    return [
+        {"criterion": "Phase 5 exit: ≥30 shadow options trades", "status": "PASS" if len(rs) >= 30 else "FAIL", "value": len(rs)},
+        {"criterion": "Options live: shadow expectancy > 0 and sizer permits", "status": "MANUAL" if rs else "WAIT",
+         "value": f"E[R] {exp}; sizer permits {sum(1 for e in events if e['kind'] == 'OPEN' and e.get('sizer_permits_live'))} of {sum(1 for e in events if e['kind'] == 'OPEN')}"},
+    ]
+
+
+def options_summary(events: list[dict]) -> str:
+    opens = {e["trade_id"]: e for e in events if e["kind"] == "OPEN"}
+    closes = [e for e in events if e["kind"] == "CLOSE"]
+    by: dict[str, list[float]] = defaultdict(list)
+    for e in closes:
+        by[e["strategy"]].append(float(e["r"] or 0))
+    parts = [f"{s.replace('OPTIONS_', '')}: n={len(v)} E[R] {sum(v) / len(v):+.2f}" for s, v in sorted(by.items())]
+    return f"{len(opens) - len(closes)} open · {len(closes)} closed" + ("; " + "; ".join(parts) if parts else "")
+
+
 def iso_week(ms: int) -> str:
     y, w, _ = datetime.fromtimestamp(ms / 1000, timezone.utc).isocalendar()
     return f"{y}-W{w:02d}"
@@ -247,6 +268,7 @@ def main() -> int:
     graded = {(g["rejection_id"], g["horizon"]) for g in graded_rows}
     triage = export("triage_log", 200)
     llm = export("llm_calls", 200)
+    options = export("options_shadow", 200)
 
     trades = build_trades(journal, contracts)
     new_grades = grade_rejections(rejections, graded, contracts, now)
@@ -262,6 +284,9 @@ def main() -> int:
     by_strat: dict[str, list[float]] = defaultdict(list)
     for t in trades:
         by_strat[t["strategy_id"]].append(t["r"])
+    for e in options:  # shadow lab closes score like any other strategy (R = P&L / max loss)
+        if e["kind"] == "CLOSE" and e.get("r") is not None:
+            by_strat[e["strategy"]].append(float(e["r"]))
     stats = {s: M.strategy_stats(rs) for s, rs in by_strat.items()}
     adj = M.bh_fdr({s: (st["p_value"] if st["n"] >= 10 else None) for s, st in stats.items()})
     week = iso_week(now)
@@ -285,9 +310,11 @@ def main() -> int:
     for c in llm:
         llm_ok[f"{c['role']} {c['provider']}"][0 if c["outcome"] == "OK" else 1] += 1
     gate = gate_status(journal, trades, rejections, b_raw, len(pairs), now)
+    gate += options_gate(options)
 
     sections = [
         {"name": "Trades", "value": f"{len(trades)} closed · " + (", ".join(f"{s}: n={st['n']} E[R]={st['expectancy_r']} PF={st['profit_factor']}" for s, st in stats.items()) or "none yet")},
+        {"name": "Options shadow lab", "value": options_summary(options)},
         {"name": "Funnel", "value": f"Tier 1 items {sum(len(jload(x['candidate_ids'], [])) for x in t1)} · Tier 2 {len(t2)} · court sessions {sum(1 for r in journal if r['kind'] == 'COURT')} · contracts {len(contracts)}"},
         {"name": "LLM providers (ok/fail)", "value": "; ".join(f"{k} {v[0]}/{v[1]}" for k, v in sorted(llm_ok.items())) or "no calls yet"},
         {"name": "Shadow ledger (72h, new grades)", "value": "; ".join(f"{s}: n={len(v)} avg R {sum(v) / len(v):+.2f}" for s, v in ledger.items()) or f"{len(new_grades)} new grade(s); none at 72h yet"},
