@@ -1,0 +1,194 @@
+# CORTEX-54 doctrine — tunable parameters.
+# Bounded by config/constitution.json (validated at boot; any looser value fails the deploy).
+# Changes arrive as pull requests (operator or Governor). See docs/RISK_DOCTRINE.md for the math.
+version: 1
+
+accounts:
+  PAPER:
+    alpaca_base_url: https://paper-api.alpaca.markets
+    starting_equity_usd: 54
+    autonomy_stop: 2 # 0 shadow, 1 approve, 2 paper-auto, 3 live-auto, 4 colleague
+    apply_fee_model: true # Alpaca paper charges nothing; we do
+  LIVE:
+    alpaca_base_url: https://api.alpaca.markets
+    starting_equity_usd: 54
+    autonomy_stop: 1
+    apply_fee_model: false # real fees come from the broker
+    approval_ttl_minutes: 20
+
+rungs:
+  R1:
+    {
+      equity_min: 0,
+      equity_max: 100,
+      total_heat: 0.12,
+      per_trade_risk: 0.025,
+      max_position_notional: 0.35,
+      max_positions: 3,
+    }
+  R2:
+    {
+      equity_min: 100,
+      equity_max: 250,
+      total_heat: 0.15,
+      per_trade_risk: 0.025,
+      max_position_notional: 0.35,
+      max_positions: 3,
+    }
+  R3:
+    {
+      equity_min: 250,
+      equity_max: 2500,
+      total_heat: 0.18,
+      per_trade_risk: 0.020,
+      max_position_notional: 0.30,
+      max_positions: 4,
+    }
+  R4:
+    {
+      equity_min: 2500,
+      equity_max: 25000,
+      total_heat: 0.20,
+      per_trade_risk: 0.015,
+      max_position_notional: 0.25,
+      max_positions: 6,
+    }
+  R5:
+    {
+      equity_min: 25000,
+      equity_max: null,
+      total_heat: 0.20,
+      per_trade_risk: 0.010,
+      max_position_notional: 0.20,
+      max_positions: 10,
+    }
+
+breakers:
+  yellow_drawdown: 0.03
+  orange_drawdown: 0.06
+  red_drawdown: 0.10
+  red_daily_loss: 0.05
+  red_consecutive_stopouts_24h: 3
+  multipliers: { GREEN: 1.0, YELLOW: 0.5, ORANGE: 0.0, RED: 0.0 }
+
+sizing:
+  min_stop_atr_multiple: 1.2
+  bear_disagreement: { floor: 0.3, max_penalty: 0.7 } # D_bear = min(max_penalty, max(0, lethality - floor))
+  reputation_weight: { min: 0.5, max: 1.2, min_signals_before_adjusting: 20 }
+  edge_gate: { p_zero: 0.5, p_full: 0.75 } # g(p) ramps from 0 at p_zero to 1 at p_full
+  correlation_guard: { lookback_days: 60, max_corr: 0.7 }
+
+fees:
+  crypto_maker: 0.0015
+  crypto_taker: 0.0025
+  equity_commission: 0.0
+  equity_sell_regulatory_min_usd: 0.01
+  paper_slippage_bps: { EQUITIES: 5, CRYPTO: 10, OPTIONS: 25 }
+  hurdle_multiple: 3.0
+
+execution:
+  order_style: passive_limit # peg at best bid (buy) / best ask (sell), never cross unless IMMEDIATE
+  max_unfilled_pulses: 3
+  repeg_on_move_atr: 0.15
+  exit_collar_bps: 75 # marketable-limit exits capped this far through the touch
+  no_entry_last_minutes_of_session: 10
+  earnings_blackout_hours: 72
+
+cadence:
+  pulse_seconds_exposed: 60
+  pulse_seconds_flat: 300
+  pulse_seconds_thrift: 120
+  hud_min_edit_interval_seconds: 5
+
+staleness:
+  quote_seconds: 120
+  regime_batch_hours: { CRYPTO: 6, EQUITIES: 30 }
+  screener_batch_hours: 30
+  news_cursor_minutes: 15
+
+funnel:
+  tier1:
+    model: "@cf/cloudflare/clef-flash"
+    batch_max_items: 16
+    escalate_threshold: 0.70
+  tier2:
+    model: "@cf/cloudflare/clef"
+    pass_threshold: 0.72
+    max_per_day: 40
+  tier3:
+    max_sprints_per_day: 12
+    min_structural_score: 78
+  calibration:
+    min_outcomes_before_trusting: 50
+    shrink_to: 0.5
+
+budgets:
+  thrift_fraction: 0.7
+  hard_stop_fraction: 0.9 # must be <= constitution free_tier_hard_stop_fraction
+  workers_ai_neurons_per_day:
+    total_free: 10000
+    tier1: 3000
+    tier2: 4000
+    tier3_fallback: 1500
+    reserve: 1500
+  daily_limits:
+    worker_requests: 100000
+    do_requests: 100000
+    do_duration_gb_s: 13000
+    do_rows_written: 100000
+    do_rows_read: 5000000
+    d1_rows_written: 100000
+    d1_rows_read: 5000000
+  per_invocation:
+    subrequests: 50
+    cf_service_subrequests: 1000
+
+llm_routing:
+  families:
+    gemini: google
+    groq/openai/gpt-oss-120b: openai-oss
+    workers-ai/@cf/openai/gpt-oss-120b: openai-oss
+    nim/nvidia/nemotron-3-super-120b-a12b: nvidia
+    openrouter/google/gemma-4-31b-it:free: google
+    groq/qwen/qwen3.8-27b: qwen
+  bull_chain:
+    - { provider: gemini, model: gemini-2.5-flash }
+    - { provider: workers-ai, model: "@cf/openai/gpt-oss-120b" }
+    - { provider: groq, model: qwen/qwen3.8-27b }
+  bear_chain:
+    - { provider: groq, model: openai/gpt-oss-120b }
+    - { provider: nim, model: nvidia/nemotron-3-super-120b-a12b }
+    - { provider: groq, model: qwen/qwen3.8-27b }
+    - { provider: openrouter, model: "google/gemma-4-31b-it:free" }
+  require_cross_family: true
+  max_retries_per_provider: 1
+  timeout_ms: 25000
+
+regime_gates:
+  crypto_composite_min_for_longs: 40
+  equity_postures_allowing_entries: [NEW_ENTRY_ALLOWED]
+
+strategies:
+  - id: CRYPTO_BREAKOUT_BASELINE_V1
+    arena: CRYPTO
+    status: ACTIVE # Phase 1 plumbing strategy, deterministic, no LLM
+    universe: [BTC/USD, ETH/USD, SOL/USD]
+    params: { lookback_days: 20, atr_stop_multiple: 2.0, max_hold_hours: 72 }
+    accounts: [PAPER]
+  - id: EQUITY_MOMENTUM_BURST_V1
+    arena: EQUITIES
+    status: SHADOW
+    accounts: [PAPER]
+  - id: CRYPTO_VCP_BREAKOUT_V1
+    arena: CRYPTO
+    status: SHADOW
+    accounts: [PAPER]
+  - id: EQUITY_EARNINGS_DRIFT_V1
+    arena: EQUITIES
+    status: PROPOSAL
+    accounts: []
+
+watchlists:
+  crypto: [BTC/USD, ETH/USD, SOL/USD, LINK/USD, AVAX/USD, DOGE/USD]
+  crypto_proxies: [COIN, MSTR, IBIT]
+  equities_core: [SPY, QQQ, IWM]
