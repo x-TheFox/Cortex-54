@@ -264,6 +264,9 @@ export class FakeMarketData implements MarketDataApi {
   async stockQuotes(symbols: string[]): Promise<Record<string, Quote>> {
     return this.cryptoQuotes(symbols);
   }
+  async stockDailyBars(symbols: string[]): Promise<Record<string, Bar[]>> {
+    return this.cryptoDailyBars(symbols);
+  }
   async cryptoDailyBars(symbols: string[]): Promise<Record<string, Bar[]>> {
     return Object.fromEntries(symbols.flatMap((s) => (this.m.bars[s] ? [[s, this.m.bars[s]]] : [])));
   }

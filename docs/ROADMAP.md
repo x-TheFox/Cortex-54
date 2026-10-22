@@ -43,7 +43,9 @@ strategies)._
 ## Phase 3 — Cognitive funnel ⚠️⚠️
 _Status 2026-10-22: in progress. Done: Tier 1 clef-flash triage (one item per call, ADR-027) over news +
 GDELT + EDGAR candidates, `world-intel` batches hourly, #world-intel cards, triage_log in D1, neuron metering.
-Next: Tier 2 (Clef 27B structure on promoted items), calibration layer, LLM router + court, COURT contracts._
+Then: Tier 2 (Clef 27B) with Tier 0 evidence, LLM router (verified providers), court (bull → cross-family bear
+→ Clef synth), warm-up calibration, COURT contracts routed to PAPER through the normal validator (ADR-028).
+Remaining for the Phase 3 exit: ≥10 COURT contracts produced and executed/declined on PAPER without human input._
 - Clef-flash Tier 1 (batched) and Clef Tier 2 with typed questions; neuron metering.
 - Rejection shadow ledger from the first rejection.
 - Calibration layer (shrinkage until ≥50 outcomes).

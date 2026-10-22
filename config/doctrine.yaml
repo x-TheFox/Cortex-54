@@ -150,25 +150,27 @@ budgets:
     cf_service_subrequests: 1000
 
 llm_routing:
+  # Verified live 2026-10-22 (ADR-028). family = model lineage; bull and bear must differ (ADR-009).
   families:
     gemini: google
     groq/openai/gpt-oss-120b: openai-oss
-    workers-ai/@cf/openai/gpt-oss-120b: openai-oss
-    nim/nvidia/nemotron-3-super-120b-a12b: nvidia
-    openrouter/google/gemma-4-31b-it:free: google
     groq/qwen/qwen3.8-27b: qwen
+    nim/deepseek-ai/deepseek-v4.1-flash: deepseek
+    nim/nvidia/nemotron-3-ultra-550b-a55b: nvidia
+    openrouter/google/gemma-4-31b-it:free: google
   bull_chain:
-    - { provider: gemini, model: gemini-2.5-flash }
-    - { provider: workers-ai, model: "@cf/openai/gpt-oss-120b" }
+    - { provider: gemini, model: gemini-3.5-flash }
+    - { provider: gemini, model: gemini-3.8-flash }
     - { provider: groq, model: qwen/qwen3.8-27b }
+    - { provider: nim, model: deepseek-ai/deepseek-v4.1-flash }
   bear_chain:
     - { provider: groq, model: openai/gpt-oss-120b }
-    - { provider: nim, model: nvidia/nemotron-3-super-120b-a12b }
+    - { provider: nim, model: nvidia/nemotron-3-ultra-550b-a55b }
+    - { provider: nim, model: deepseek-ai/deepseek-v4.1-flash }
     - { provider: groq, model: qwen/qwen3.8-27b }
-    - { provider: openrouter, model: "google/gemma-4-31b-it:free" }
   require_cross_family: true
   max_retries_per_provider: 1
-  timeout_ms: 25000
+  timeout_ms: 60000
 
 regime_gates:
   crypto_composite_min_for_longs: 40
@@ -188,6 +190,16 @@ strategies:
       prior_win_prob: 0.6 # deterministic strategies have no Clef probability; this prior feeds the sizer
       conviction: 5
       regime_proxy_ema: 20 # Phase 1 regime proxy: BTC daily close above its EMA20 (until batch regime lands)
+    accounts: [PAPER]
+  - id: CRYPTO_CATALYST_COURT_V1
+    arena: CRYPTO
+    status: ACTIVE # Phase 3: catalyst → Tier 1 → Tier 2 → court → COURT contract (PAPER only)
+    universe: [BTC/USD, ETH/USD, SOL/USD, LINK/USD, AVAX/USD, DOGE/USD]
+    accounts: [PAPER]
+  - id: EQUITY_CATALYST_COURT_V1
+    arena: EQUITIES
+    status: ACTIVE # regular session only; equity posture must be NEW_ENTRY_ALLOWED
+    universe: [COIN, MSTR, IBIT, SPY, QQQ, IWM]
     accounts: [PAPER]
   - id: EQUITY_MOMENTUM_BURST_V1
     arena: EQUITIES

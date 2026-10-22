@@ -221,6 +221,28 @@ export class AlpacaMarketData implements MarketDataApi {
     return out;
   }
 
+  async stockDailyBars(symbols: string[], days: number, now: number): Promise<Record<string, Bar[]>> {
+    if (symbols.length === 0) return {};
+    // Calendar days ≈ 1.5× trading days; IEX feed (free plan).
+    const start = new Date(now - Math.ceil(days * 1.6 + 5) * 86_400_000).toISOString();
+    const url =
+      `${DATA_BASE}/v2/stocks/bars?timeframe=1Day&feed=iex&adjustment=split&limit=1000&sort=asc` +
+      `&start=${encodeURIComponent(start)}&symbols=${encodeURIComponent(symbols.join(","))}`;
+    const body = await call(
+      this.fetcher,
+      this.guard,
+      this.creds,
+      url,
+      z.object({ bars: z.record(z.string(), z.array(BarRow)).nullable() }),
+    );
+    return Object.fromEntries(
+      Object.entries(body.bars ?? {}).map(([s, rows]) => [
+        s,
+        rows.map((b) => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })),
+      ]),
+    );
+  }
+
   async cryptoDailyBars(symbols: string[], days: number, now: number): Promise<Record<string, Bar[]>> {
     if (symbols.length === 0) return {};
     const start = new Date(now - (days + 2) * 86_400_000).toISOString();

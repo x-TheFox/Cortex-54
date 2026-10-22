@@ -22,7 +22,8 @@
     "db:migrate:local": "wrangler d1 migrations apply cortex-journal --local",
     "db:migrate:remote": "wrangler d1 migrations apply cortex-journal --remote",
     "discord:register": "node scripts/register-commands.ts",
-    "discord:setup": "node scripts/discord-setup.ts"
+    "discord:setup": "node scripts/discord-setup.ts",
+    "court:smoke": "tsx scripts/court-smoke.ts"
   },
   "dependencies": {
     "zod": "^4.6.7"
@@ -31,6 +32,7 @@
     "@biomejs/biome": "^2.6.2",
     "@cloudflare/workers-types": "^5.20261022.1",
     "@types/node": "^24.0.0",
+    "tsx": "4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^4.1.12",
     "wrangler": "^4.152.0",

@@ -89,8 +89,8 @@ Full detail: `docs/ARCHITECTURE.md`. Budget math: `docs/FREE_TIER_BUDGET.md`.
 |---|---|---|---|---|
 | 0 Reflex | TypeScript | DO pulse | free | stops, breakers, staleness, spread/fee gates, dedupe, watchlist relevance, ALL arithmetic |
 | 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | one item per call (~1.2 neurons), ≤8 per pulse; promote P(material) ≥ 0.70 and priority ≥ Shadow |
-| 2 Structure | `@cf/cloudflare/clef` (27B) | DO | ~4,000 neurons/day | regime fit, setup class, bear-lethality; JSON state (charts optional later) |
-| 3 Court | free frontier LLMs via fallback chain | Workflow | free-tier RPD | bull brief + **cross-family** bear prosecution + Clef synth → contract |
+| 2 Structure | `@cf/cloudflare/clef` (27B) | DO | ~4,000 neurons/day | Tier 0 evidence (code) → long_favored, regime fit, bear-lethality, setup, quality; ≤1/pulse, ≤40/day |
+| 3 Court | free LLM chains + Clef 27B synth | DO pulse (ADR-028) | free-tier RPD | bull → **cross-family** bear → Clef synth → calibrated COURT contract; ≤1/pulse, ≤12/day |
 
 Clef probabilities are **not** win rates. They pass through our own calibration map
 (`config/calibration.json`, produced by the Governor from logged outcomes) before the sizer sees them.
@@ -145,9 +145,13 @@ item per call (ADR-027).** `clef-omni` is not in the official changelog — do n
   until the sizer itself permits them.**
 
 **Data & LLM free tiers (third-party sourced, volatile — the code must degrade gracefully)**
-- Groq ~30 RPM / 1K RPD / 200K TPD per model (gpt-oss-120b, gpt-oss-20b, qwen3.8-27b).
-- Gemini (AI Studio) free: limits only in console; free-tier prompts may be used for training.
-- NVIDIA NIM 40 RPM; OpenRouter `:free` 20 RPM / 50 RPD; Mistral ~$10/mo free credits.
+- Groq ~30 RPM / 1K RPD / 200K TPD per model (gpt-oss-120b, gpt-oss-20b, qwen3.8-27b). **Verified 2026-10-22:**
+  `openai/gpt-oss-120b` (with `reasoning_effort: low`) and `qwen/qwen3.8-27b` return JSON-mode output.
+- Gemini (AI Studio) free: **use the Interactions API** (`POST /v1beta/interactions`, `response_format` with a JSON
+  schema). `generateContent` 404s for current models and `gemini-2.5-flash` is closed to new users.
+  `gemini-3.5-flash` ≈ 7–25 s; `gemini-3.8-flash` is often 503 "high demand". Prompts may be used for training.
+- NVIDIA NIM: enabled for this key — `deepseek-ai/deepseek-v4.1-flash`, `nvidia/nemotron-3-ultra-550b-a55b`
+  (`nemotron-3-super` is *not* enabled). OpenRouter `:free` errored on every test (left out of chains).
 - CoinGecko Demo ~10k credits/month. SEC EDGAR 10 req/s with a contact User-Agent.
 - **Binance/Bybit block US IPs** (and GitHub runners are US). Use OKX / Hyperliquid / Coinbase / Kraken /
   Deribit public endpoints for funding, OI and IV. The tradermonty `crypto-regime-analyzer` uses Binance;
@@ -239,7 +243,9 @@ src/
   strategy/                indicators + CRYPTO_BREAKOUT_BASELINE_V1 (deterministic, RULE contracts)
   discord/                 signature verify, commands, interactions, notifier (REST)
   lib/                     sync sha256, uuidv7, client_order_id, money helpers
-  clef/ court/ data/ workflows/  (Phase 2–3)
+  clef/                    Clef client (real response format), Tier 1 triage, Tier 2 structure (pure)
+  court/                   Tier 0 evidence, LLM router + providers, versioned prompts, bull/bear/synth/contract (pure)
+  data/ workflows/         (later)
 workers/sentinel/         independent watchdog + kill-switch worker (own wrangler.jsonc, vendored verify.ts,
                           writes the KV kill flag the brain reads — ADR-015)
 research/                 Python (uv): cortex_research.run crypto|equity — runs pinned upstream skills, signs,
@@ -266,6 +272,7 @@ pnpm deploy:cortex        # wrangler deploy (CI does this on main once CLOUDFLAR
 pnpm deploy:sentinel      # deploy the independent watchdog/kill-switch worker
 pnpm discord:setup        # idempotent: CORTEX-54 category + 8 channels, sentinel webhook, guild slash commands
 gh workflow run research -f job=crypto    # or job=equity: run a research batch now
+pnpm court:smoke BTC/USD   # real bull/bear/Clef run on live evidence; never trades
 pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
 gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATTEN ALL (ADR-022); action=rearm to clear
 ```
@@ -338,5 +345,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-22: Phase 3 started (branch `phase-3-triage`): Tier 1 clef-flash triage live over the queue
   (news + GDELT + EDGAR), world-intel batches hourly, #world-intel cards on promotion. EDGAR needs a
   `SEC_USER_AGENT` secret (contact email) from the operator. Next: Tier 2 (Clef 27B structure) and the court.
+- 2026-10-22: PR #5 merged. GDELT DOC API is throttled on GitHub runners → world job now reads GDELT GKG bulk
+  files as an hourly world-risk pulse + wire press releases (ADR-028). Tier 2 (Clef 27B) and the court are built
+  (branch `phase-3-court`) and verified against real providers with `pnpm court:smoke` (no orders).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.
