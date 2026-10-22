@@ -3,7 +3,7 @@
  * Small, transactional, current-state only. History goes to D1 via the outbox.
  * Once deployed: bump HOT_SCHEMA_VERSION and append statements; never edit applied ones.
  */
-export const HOT_SCHEMA_VERSION = 1;
+export const HOT_SCHEMA_VERSION = 2;
 
 export const HOT_SCHEMA: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -66,4 +66,6 @@ export const HOT_SCHEMA: readonly string[] = [
      row_sha256 TEXT NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS d1_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, tbl TEXT NOT NULL,
      row_json TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+  // v2: intake dedupe across drops (news/world items are re-served by inclusive `start` cursors).
+  `CREATE TABLE IF NOT EXISTS seen_items (id TEXT PRIMARY KEY, at INTEGER NOT NULL)`,
 ];

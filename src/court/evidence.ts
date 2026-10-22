@@ -45,7 +45,11 @@ export interface Evidence {
 /** Map a candidate's symbols to a tradeable doctrine symbol (crypto "BTCUSD" → "BTC/USD"). First match wins. */
 export function resolveTradeable(symbols: string[], d: Doctrine): { symbol: string; arena: Arena } | null {
   const crypto = new Set(d.watchlists.crypto ?? []);
-  const equities = new Set([...(d.watchlists.crypto_proxies ?? []), ...(d.watchlists.equities_core ?? [])]);
+  const equities = new Set([
+    ...(d.watchlists.crypto_proxies ?? []),
+    ...(d.watchlists.equities_core ?? []),
+    ...(d.watchlists.equities_catalyst ?? []),
+  ]);
   for (const raw of symbols) {
     const s = raw.toUpperCase();
     const slash = s.includes("/") ? s : s.endsWith("USD") && s.length > 3 ? `${s.slice(0, -3)}/USD` : s;

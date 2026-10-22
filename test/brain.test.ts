@@ -572,9 +572,9 @@ describe("news intake (Phase 2)", () => {
 
   it("queues new headlines for watched symbols once, and moves the cursor", async () => {
     const t = setup();
-    t.market.news.push(item("1", 30), item("2", 10), item("3", 5, ["TSLA"]));
+    t.market.news.push(item("1", 30), item("2", 10), item("3", 5, ["PLTR"]));
     const r1 = await t.brain.pulse();
-    expect(r1.newsQueued).toBe(2); // TSLA isn't watched or held
+    expect(r1.newsQueued).toBe(2); // PLTR isn't watched or held
     t.advance(60_000);
     const r2 = await t.brain.pulse();
     expect(r2.newsQueued).toBe(0);
@@ -879,7 +879,26 @@ describe("court end-to-end (Phase 3)", () => {
     expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM llm_calls WHERE outcome = 'OK'").get()).toEqual({
       n: 2,
     });
-    expect(t.notifier.sent.some((m) => m.channel === "court")).toBe(true);
+    const card = t.notifier.sent.find(
+      (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ Court"),
+    );
+    const names = card?.msg.embeds?.[0]?.fields?.map((f) => f.name) ?? [];
+    expect(names.some((n) => n.startsWith("🐂 Bull · gemini/gemini-3.5-flash"))).toBe(true);
+    expect(names.some((n) => n.startsWith("🐻 Bear · groq/openai/gpt-oss-120b"))).toBe(true);
+    expect(names).toContain("⚖️ Clef 27B verdict");
+    expect(card?.msg.embeds?.[0]?.fields?.at(-1)?.value).toContain("PAPER: entry order placed");
+  });
+
+  it("/court runs a session on demand and posts the card even when declined", async () => {
+    const calls: string[] = [];
+    const llm = new LlmRouter({ gemini: provider(bullJson, calls) }, doctrine, () => T0); // no bear family
+    const t = setup({ clef: new ScriptedClef(answers), llm });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    expect(await t.brain.requestCourt("BTC/USD", "test")).toMatch(/ended without a contract/);
+    const card = t.notifier.sent.find((m) => m.channel === "court");
+    expect(card?.msg.embeds?.[0]?.fields?.at(-1)?.value).toContain("No cross-family bear");
+    expect(await t.brain.requestCourt("PLTR", "test")).toMatch(/isn't in the tradeable universe/);
   });
 
   it("no cross-family bear → the candidate is rejected, never traded single-family", async () => {
@@ -921,5 +940,28 @@ describe("court end-to-end (Phase 3)", () => {
     };
     expect(rj.stage).toBe("BULL");
     expect(rj.reason_codes).toContain("ATR");
+  });
+});
+
+describe("intake dedupe + courtroom visibility (regressions)", () => {
+  it("a dropped headline is not re-queued by the inclusive news cursor", async () => {
+    const clef = new FakeClef(() => 0.1); // drop everything
+    const t = setup({ clef });
+    t.market.news.push({
+      id: "9",
+      createdAt: T0 - 60_000,
+      headline: "Old news",
+      summary: "",
+      symbols: ["BTCUSD"],
+      source: "b",
+      url: null,
+    });
+    const r1 = await t.brain.pulse();
+    expect(r1.newsQueued).toBe(1);
+    for (let i = 0; i < 3; i++) {
+      t.advance(60_000);
+      expect((await t.brain.pulse()).newsQueued).toBe(0);
+    }
+    expect(clef.calls).toHaveLength(1);
   });
 });

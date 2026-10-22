@@ -254,7 +254,8 @@ export class FakeMarketData implements MarketDataApi {
   constructor(private readonly m: Market) {}
   async news(symbols: string[], sinceIso: string): Promise<NewsItem[]> {
     const since = Date.parse(sinceIso);
-    return this.m.news.filter((n) => n.createdAt > since && n.symbols.some((s) => symbols.includes(s)));
+    // Alpaca's `start` is inclusive (this hid a re-queue bug when the fake was exclusive).
+    return this.m.news.filter((n) => n.createdAt >= since && n.symbols.some((s) => symbols.includes(s)));
   }
   async cryptoQuotes(symbols: string[]): Promise<Record<string, Quote>> {
     return Object.fromEntries(

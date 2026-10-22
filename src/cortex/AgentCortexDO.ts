@@ -178,6 +178,11 @@ export class AgentCortexDO extends DurableObject<Env> {
     this.begin();
     return this.brain.ingestBatch(batch);
   }
+
+  async court(symbol: string, by: string): Promise<string> {
+    this.begin();
+    return this.brain.requestCourt(symbol, by);
+  }
 }
 
 /** Adapts Durable Object SqlStorage to the brain's SqlLike (and counts rows for the free-tier meter). */

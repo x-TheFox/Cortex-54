@@ -233,6 +233,8 @@ export interface StatusView {
 export class Brain {
   readonly journal: Journal;
   readonly budget: FreeTierBudget;
+  /** Most recent risk-engine rejection reasons per contract (for the courtroom card). */
+  private readonly lastRejections = new Map<string, string[]>();
   private readonly sql: SqlLike;
   private readonly d: Doctrine;
   private readonly c: Constitution;
@@ -456,6 +458,7 @@ export class Brain {
         content: `🔗 Journal anchor ${day}: seq ${head.seq} · \`${head.sha}\``,
       });
       this.sql.exec("DELETE FROM seen_activities WHERE at < ?", now - 7 * 86_400_000);
+      this.sql.exec("DELETE FROM seen_items WHERE at < ?", now - 3 * 86_400_000);
       this.budget.prune(now);
     }
   }
@@ -1263,9 +1266,11 @@ ${postmortem}`,
     let queued = 0;
     let last = since;
     for (const n of items) {
-      last = new Date(Math.max(Date.parse(last), n.createdAt)).toISOString();
+      // Alpaca's `start` is inclusive: step 1 s past the newest item, and remember ids so a dropped item
+      // never comes back (it used to be re-triaged every pulse).
+      last = new Date(Math.max(Date.parse(last), n.createdAt + 1000)).toISOString();
       const id = `news:${n.id}`;
-      if (one(this.sql, "SELECT candidate_id FROM triage_queue WHERE candidate_id = ?", id)) continue;
+      if (!this.markSeen(id, now)) continue;
       this.sql.exec(
         "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 1, ?, ?, ?)",
         id,
@@ -1285,6 +1290,13 @@ ${postmortem}`,
     );
     if (queued > 0) this.journal.append("SYSTEM", "NEWS_INTAKE", null, { queued, since }, now);
     return queued;
+  }
+
+  /** True the first time an intake id is seen (then remembered for 3 days). */
+  private markSeen(id: string, now: number): boolean {
+    if (one(this.sql, "SELECT id FROM seen_items WHERE id = ?", id)) return false;
+    this.sql.exec("INSERT INTO seen_items (id, at) VALUES (?, ?)", id, now);
+    return true;
   }
 
   /** Crypto long gate: fresh batch composite ≥ doctrine minimum; otherwise fall back to the BTC/EMA proxy. */
@@ -1503,6 +1515,42 @@ ${postmortem}`,
     return 1;
   }
 
+  /**
+   * Operator-requested court session (`/court SYMBOL`): skips Tiers 1–2 but not Tier 0 gates, the daily cap, the
+   * kill flag, the budget mode, or the validator/sizer. Runs immediately.
+   */
+  async requestCourt(symbolInput: string, by: string): Promise<string> {
+    const now = this.deps.now();
+    const target = resolveTradeable([symbolInput.trim()], this.d);
+    if (!target) return `${symbolInput} isn't in the tradeable universe (doctrine watchlists).`;
+    const kill = await this.readKill();
+    if (kill !== "CLEAR") return `Kill flag is ${kill}; no court sessions.`;
+    if (this.budget.snapshot(now).mode === "REDUCE_ONLY")
+      return "Budget is in REDUCE_ONLY; no court sessions.";
+    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day)
+      return "Daily court cap reached.";
+    const id = `operator:${target.symbol}:${now}`;
+    this.sql.exec(
+      "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 3, ?, ?, ?)",
+      id,
+      target.symbol,
+      JSON.stringify({
+        kind: "operator",
+        headline: `Operator-requested review of ${target.symbol} (no specific catalyst — judge technicals, regime and world context)`,
+        symbols: [target.symbol],
+        source: by,
+        createdAt: now,
+      }),
+      now - 365 * 86_400_000, // front of the court queue
+    );
+    this.journal.append("SYSTEM", "COURT_REQUEST", id, { symbol: target.symbol, by }, now);
+    const n = await this.runCourt();
+    await this.flushJournal();
+    return n > 0
+      ? `Court session for ${target.symbol} finished — see #bull-vs-bear-court.`
+      : `Court session for ${target.symbol} ended without a contract — see #bull-vs-bear-court or the journal.`;
+  }
+
   /** Completed COURT trades so far (calibration weight). */
   private resolvedCourtOutcomes(): number {
     return (
@@ -1567,6 +1615,18 @@ ${postmortem}`,
     const sprintId = uuidv7(now);
     const cand = { candidateId: row.candidate_id, symbol: e.symbol, arena: e.arena, source: "court" };
     const evidenceJson = JSON.stringify(evidenceForModels(e));
+    const session: CourtSession = {
+      symbol: e.symbol,
+      arena: e.arena,
+      catalyst: e.catalyst,
+      bid: e.quote.bid,
+      atr: e.technicals.atr14,
+    };
+    const close = async (verdict: string, ok: boolean) => {
+      session.verdict = verdict;
+      session.ok = ok;
+      await this.deps.notifier.post("court", courtSessionCard(session));
+    };
 
     const bull = await llm.run(
       this.d.llm_routing.bull_chain,
@@ -1582,11 +1642,14 @@ ${postmortem}`,
     );
     if (!bull) {
       this.rejectCandidate(cand, "BULL", ["no bull provider produced valid output"], {}, now);
+      await close("❌ No bull: every provider failed or broke the schema", false);
       return 0;
     }
+    session.bull = { ...bull.value, by: `${bull.provider}/${bull.model}` };
     const checked = checkBull(bull.value, e, this.d);
     if (!checked.ok) {
       this.rejectCandidate(cand, "BULL", checked.reasons, { ...bull.value }, now);
+      await close(`🚫 Rejected by code before the bear: ${checked.reasons.join("; ")}`, false);
       return 0;
     }
 
@@ -1604,8 +1667,10 @@ ${postmortem}`,
     );
     if (!bear) {
       this.rejectCandidate(cand, "BEAR", ["no cross-family bear available"], { ...checked.bull }, now);
+      await close("❌ No cross-family bear available — not traded single-family", false);
       return 0;
     }
+    session.bear = { ...bear.value, by: `${bear.provider}/${bear.model}` };
 
     const synthReq = buildSynth(e, checked.bull, bear.value);
     const est = estimateTokens(synthReq.state, synthReq.questions);
@@ -1617,6 +1682,7 @@ ${postmortem}`,
         { ...checked.bull },
         now,
       );
+      await close("⏸ Clef budget for today is spent — synthesis skipped", false);
       return 0;
     }
     const synthRes = await clef.run("clef", synthReq.state, synthReq.questions);
@@ -1624,9 +1690,11 @@ ${postmortem}`,
     const synth = interpretSynth(synthRes);
     if (!synth) {
       this.rejectCandidate(cand, "SYNTH", ["incomplete Clef synthesis"], { ...checked.bull }, now);
+      await close("❌ Clef synthesis incomplete", false);
       return 0;
     }
     const calibrated = calibrate(synth.winProb, this.resolvedCourtOutcomes(), this.d);
+    session.synth = { ...synth, calibrated };
     const viaAccount = (this.d.strategies.find((s) => s.arena === e.arena && s.status === "ACTIVE")
       ?.accounts[0] ?? "PAPER") as AccountId;
     const meta = await this.assetMeta(e.symbol, viaAccount).catch(() => null);
@@ -1652,6 +1720,7 @@ ${postmortem}`,
       : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
     if (violations.length > 0) {
       this.rejectCandidate(cand, "CONTRACT", violations.slice(0, 6), { ...checked.bull }, now);
+      await close(`🚫 Contract invalid: ${violations.slice(0, 3).join("; ")}`, false);
       return 0;
     }
     this.recordContract(contract, now);
@@ -1669,12 +1738,26 @@ ${postmortem}`,
       },
       now,
     );
-    void this.deps.notifier.post("court", contractCard(contract));
     const strategy = this.d.strategies.find((s) => s.id === contract.strategy_id);
     const quotes = await this.quotesFor([e.symbol]).catch(() => ({}) as Record<string, Quote>);
+    const outcomes: string[] = [];
+    let traded = false;
     for (const account of strategy?.accounts ?? []) {
-      if (this.deps.brokers[account]) await this.route(account, contract, quotes);
+      if (!this.deps.brokers[account]) continue;
+      this.lastRejections.delete(contract.contract_id);
+      const ok = await this.route(account, contract, quotes);
+      traded ||= ok;
+      const why = this.lastRejections.get(contract.contract_id);
+      outcomes.push(
+        ok
+          ? `✅ ${account}: entry order placed`
+          : why
+            ? `🛑 ${account}: declined by the risk engine — ${why.slice(0, 3).join("; ")}`
+            : `👻 ${account}: shadow only (autonomy dial)`,
+      );
     }
+    session.contractId = contract.contract_id;
+    await close(outcomes.join("\n") || "No account enabled for this strategy", traded);
     return 1;
   }
 
@@ -1845,7 +1928,7 @@ ${postmortem}`,
           if (!parsedC.success) continue;
           const w = parsedC.data;
           const id = `${w.kind}:${w.id}`;
-          if (one(this.sql, "SELECT candidate_id FROM triage_queue WHERE candidate_id = ?", id)) continue;
+          if (!this.markSeen(id, now)) continue;
           this.sql.exec(
             "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 1, ?, ?, ?)",
             id,
@@ -2124,6 +2207,7 @@ ${postmortem}`,
     reasons: string[],
     now: number,
   ): void {
+    this.lastRejections.set(contract.contract_id, reasons);
     this.journal.enqueue(
       "rejections",
       {
@@ -2709,6 +2793,86 @@ export function intelCard(
         footer: {
           text: `${it.kind} · ${it.source} · ${it.ageMinutes}m old · Tier 1 clef-flash → Tier 2 queue`,
         },
+      },
+    ],
+  };
+}
+
+export interface CourtSession {
+  symbol: string;
+  arena: string;
+  catalyst: { headline: string; source: string; url: string | null; kind: string };
+  bid: number;
+  atr: number;
+  bull?: {
+    thesis: string;
+    entry_low: number;
+    entry_high: number;
+    stop: number;
+    targets: number[];
+    conviction: number;
+    horizon_hours: number;
+    by: string;
+  };
+  bear?: { fatal_flaws: string[]; kill_criteria: string[]; lethality: number; by: string };
+  synth?: {
+    winProb: number;
+    calibrated: number;
+    bearLethality: number;
+    regimeFit: number;
+    suitability100: number;
+  };
+  contractId?: string;
+  verdict?: string;
+  ok?: boolean;
+}
+
+const bar = (p: number) =>
+  `${"█".repeat(Math.round(p * 10))}${"░".repeat(10 - Math.round(p * 10))} ${(p * 100).toFixed(0)}%`;
+
+/** #bull-vs-bear-court card: every court session, traded or not. */
+export function courtSessionCard(s: CourtSession): DiscordMessage {
+  const fields: { name: string; value: string; inline?: boolean }[] = [
+    {
+      name: "📰 Catalyst",
+      value: `${s.catalyst.headline.slice(0, 250)}${s.catalyst.url ? `\n${s.catalyst.url}` : ""}\n_${s.catalyst.kind} · ${s.catalyst.source}_`,
+    },
+  ];
+  if (s.bull) {
+    fields.push({
+      name: `🐂 Bull · ${s.bull.by}`,
+      value: `${s.bull.thesis.slice(0, 400)}\nEntry ${s.bull.entry_low}–${s.bull.entry_high} · stop ${s.bull.stop} · targets ${s.bull.targets.join(" / ")} · ${s.bull.horizon_hours}h · conviction ${s.bull.conviction}/10`,
+    });
+  }
+  if (s.bear) {
+    fields.push({
+      name: `🐻 Bear · ${s.bear.by} · lethality ${(s.bear.lethality * 100).toFixed(0)}%`,
+      value: `${s.bear.fatal_flaws
+        .slice(0, 3)
+        .map((f) => `• ${f.slice(0, 180)}`)
+        .join("\n")}\nKill: ${s.bear.kill_criteria.slice(0, 2).join("; ").slice(0, 300)}`,
+    });
+  }
+  if (s.synth) {
+    fields.push({
+      name: "⚖️ Clef 27B verdict",
+      value: [
+        `P(win) raw   \`${bar(s.synth.winProb)}\``,
+        `P(win) calib \`${bar(s.synth.calibrated)}\``,
+        `Bear right   \`${bar(s.synth.bearLethality)}\``,
+        `Regime fit   \`${bar(s.synth.regimeFit)}\``,
+        `Suitability  \`${bar(s.synth.suitability100 / 100)}\``,
+      ].join("\n"),
+    });
+  }
+  fields.push({ name: "Outcome", value: (s.verdict ?? "—").slice(0, 1000) });
+  return {
+    embeds: [
+      {
+        title: `⚖️ Court · ${s.symbol} (${s.arena}) · bid ${s.bid} · ATR ${s.atr.toPrecision(4)}`,
+        color: s.ok ? COLORS.green : s.synth ? COLORS.yellow : COLORS.red,
+        fields: fields.map((f) => ({ ...f, value: f.value.slice(0, 1024) })),
+        footer: { text: s.contractId ? `contract ${s.contractId}` : "no contract" },
       },
     ],
   };
