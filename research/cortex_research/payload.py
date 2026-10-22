@@ -116,7 +116,7 @@ def equity_posture(exposure: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def batch(job: str, produced_at_ms: int, run_url: str | None, items: list[dict], posture: dict) -> dict[str, Any]:
+def batch(job: str, produced_at_ms: int, run_url: str | None, items: list[dict], posture: dict | None) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "job": job,

@@ -41,6 +41,9 @@ strategies)._
 - **Exit:** daily posture card for equities + 4-hourly crypto regime card, accurate and on time 5 days running.
 
 ## Phase 3 — Cognitive funnel ⚠️⚠️
+_Status 2026-10-22: in progress. Done: Tier 1 clef-flash triage (one item per call, ADR-027) over news +
+GDELT + EDGAR candidates, `world-intel` batches hourly, #world-intel cards, triage_log in D1, neuron metering.
+Next: Tier 2 (Clef 27B structure on promoted items), calibration layer, LLM router + court, COURT contracts._
 - Clef-flash Tier 1 (batched) and Clef Tier 2 with typed questions; neuron metering.
 - Rejection shadow ledger from the first rejection.
 - Calibration layer (shrinkage until ≥50 outcomes).

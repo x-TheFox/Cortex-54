@@ -111,8 +111,10 @@ staleness:
 funnel:
   tier1:
     model: "@cf/cloudflare/clef-flash"
-    batch_max_items: 16
-    escalate_threshold: 0.70
+    batch_max_items: 1 # one item per Clef call: batching compresses scores (ADR-027)
+    escalate_threshold: 0.70 # P(material) needed to promote to Tier 2
+    min_escalate_score: 2.0 # probability-weighted 0 Reject … 3 Deep; 2 = Shadow
+    max_batches_per_pulse: 8 # ≈1.2 neurons per call → ≤ ~10 neurons per pulse
   tier2:
     model: "@cf/cloudflare/clef"
     pass_threshold: 0.72
@@ -134,6 +136,7 @@ budgets:
     tier2: 4000
     tier3_fallback: 1500
     reserve: 1500
+  neurons_per_mtok: { clef-flash: 3455, clef: 21818 } # Workers AI pricing, input tokens (output not billed)
   daily_limits:
     worker_requests: 100000
     do_requests: 100000

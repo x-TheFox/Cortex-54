@@ -29,7 +29,7 @@ puts the system in `REDUCE_ONLY` at 90% of any limit (constitution untouchable #
 
 | Use | Model | Rate (neurons / 1M input tok) | Allocation | ≈ Capacity |
 |---|---|---|---|---|
-| Tier 1 triage | clef-flash | 3,455 | 3,000 | ~870k tokens ≈ 900 batched items at ~1k tok, or ~50 batch calls of 16 items |
+| Tier 1 triage | clef-flash | 3,455 | 3,000 | one item per call ≈ 350 tokens ≈ 1.2 neurons → ~2,500 items/day (ADR-027) |
 | Tier 2 structure | clef | 21,818 | 4,000 | ~183k tokens ≈ 45 candidates at 4k tok |
 | Tier 3 fallback | gpt-oss-120b | 31,818 in / 68,182 out | 1,500 | ~9 calls at 3k in / 1k out |
 | Reserve | — | — | 1,500 | exits/postmortems never starve |

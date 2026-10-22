@@ -88,7 +88,7 @@ Full detail: `docs/ARCHITECTURE.md`. Budget math: `docs/FREE_TIER_BUDGET.md`.
 | Tier | Engine | Where | Budget | Job |
 |---|---|---|---|---|
 | 0 Reflex | TypeScript | DO pulse | free | stops, breakers, staleness, spread/fee gates, dedupe, watchlist relevance, ALL arithmetic |
-| 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | batch up to ~16 headlines/setups per call, typed questions, reject 85–95% |
+| 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | one item per call (~1.2 neurons), ≤8 per pulse; promote P(material) ≥ 0.70 and priority ≥ Shadow |
 | 2 Structure | `@cf/cloudflare/clef` (27B) | DO | ~4,000 neurons/day | regime fit, setup class, bear-lethality; JSON state (charts optional later) |
 | 3 Court | free frontier LLMs via fallback chain | Workflow | free-tier RPD | bull brief + **cross-family** bear prosecution + Clef synth → contract |
 
@@ -118,10 +118,14 @@ Until ≥50 resolved outcomes exist, the calibrated probability is shrunk hard t
 - **Not available on our plan:** Containers (paid only); RL fine-tuning for Clef (design-partner only).
   **Avoided:** R2 and Zero Trust (may require a payment method on file).
 
-**Clef** (launched 2026-10-01): `@cf/cloudflare/clef` (27B, vision, ≤4 images) and
-`@cf/cloudflare/clef-flash` (9B). 64K context, ≤64 questions/request, question types `noul` (yes/no),
-`choice`, `score`. Returns probabilities per option. Apache-2.0 weights. **`clef-omni` is not in the
-official changelog — do not depend on it.**
+**Clef** (launched 2026-10-01; API verified live 2026-10-22): `@cf/cloudflare/clef` (27B, vision, ≤4 images)
+and `@cf/cloudflare/clef-flash` (9B). **Context window 24,576 tokens** (questions + state; state is truncated to
+fit; *not* 64K as third parties claimed). ≤64 questions/request. Request
+`{model, state, questions:{id:{type, instructions, criteria?}}}`; response `answers[id]` =
+`{type:"noul", noul}` | `{type:"choice", choice, probabilities, confidence}` | `{type:"score", score (0..n-1),
+probabilities, legend, confidence}`, plus `usage.input_tokens`. clef-flash ≈ $0.038/M input tokens (= 3,455
+neurons/M); output free. **Batching several items into one state compresses and reorders scores — score one
+item per call (ADR-027).** `clef-omni` is not in the official changelog — do not depend on it.
 
 **Alpaca**
 - Crypto: market / limit / stop_limit, TIF gtc / ioc, all fractional. **No `post_only` flag.** Fee tier
@@ -330,5 +334,9 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   brain journaled KILL_CLEARED after re-arm). Phase 1 exit now only needs the 7-day unattended clock.
 - 2026-10-22: Phase 2 built and live (PR open): ingest, research.yml, regime gate, posture cards, news intake.
   Keys stored: FMP + FRED (GitHub secrets), INGEST_HMAC_SECRET (cortex + GitHub). GDELT queued for Phase 3.
-- Next: 7-day paper clock (Phase 1) and 5-day posture-card clock (Phase 2) run in parallel; then Phase 3.
+- 2026-10-22: PR #4 merged; research workflow verified on GitHub (crypto + equity ingest HTTP 200).
+- 2026-10-22: Phase 3 started (branch `phase-3-triage`): Tier 1 clef-flash triage live over the queue
+  (news + GDELT + EDGAR), world-intel batches hourly, #world-intel cards on promotion. EDGAR needs a
+  `SEC_USER_AGENT` secret (contact email) from the operator. Next: Tier 2 (Clef 27B structure) and the court.
+- Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

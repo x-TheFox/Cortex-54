@@ -170,3 +170,21 @@ is a reviewed PR.
 and `inputs_sha256` = hash of the upstream output give provenance per batch. A failed upstream skill lowers
 exposure-coach confidence instead of failing the job.
 
+## ADR-027 — Tier 1 scores one item per Clef call (2026-10-22)
+**Context:** The plan batched up to 16 headlines into one clef-flash state with per-item questions. Live test on
+the same GDELT articles:
+
+| Article | alone | in batch of 4 | in batch of 16 |
+|---|---|---|---|
+| CoreWeave slides on Bernstein downgrade | 0.31 | 0.14 | 0.19 |
+| US Treasury rule on China tech investment | 0.24 | 0.09 | 0.15 |
+| Diesel prices blamed on Ukraine war | 0.04 | 0.08 | 0.14 |
+| Lockheed F-35 deal | 0.08 | 0.10 | 0.13 |
+
+Batching compresses scores toward the mean and changes their order: the other items act as distractors.
+**Decision:** `funnel.tier1.batch_max_items = 1`, up to `max_batches_per_pulse = 8` calls per pulse (~1.2
+neurons each). Volume is controlled at the source instead (GDELT restricted to major financial outlets,
+watched symbols only for Alpaca news).
+**Consequences:** ≈ 300–1,500 items/day costs ≈ 400–1,800 neurons, inside the 3,000 tier-1 allocation; the
+meter stops tier 1 for the day if it isn't.
+

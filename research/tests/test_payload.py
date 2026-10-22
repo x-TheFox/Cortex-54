@@ -31,3 +31,38 @@ def test_batch_shape_and_deterministic_dump():
     b = P.batch("equity-posture", 2, None, [it], P.equity_posture({"recommendation": "CASH_PRIORITY"}))
     assert b["schema_version"] == 1 and b["items"][0]["skill_id"] == "market-breadth-analyzer"
     assert P.dumps(b) == P.dumps(json.loads(P.dumps(b)))
+
+
+def test_world_candidates():
+    from cortex_research import world as W
+
+    assert W.parse_seendate("20261022T191500Z") == 1792696500000
+    c = W.gdelt_candidate(
+        {"url": "https://ex.com/a", "title": "Fed\u0000 holds\n rates", "domain": "ex.com", "seendate": "20261022T191500Z"},
+        "federal reserve",
+        ["SPY"],
+    )
+    assert c and c["title"] == "Fed holds rates" and c["kind"] == "gdelt" and len(c["id"]) == 24
+    assert W.gdelt_candidate({"url": "ftp://x", "title": "t"}, "t", []) is None
+    sub = {
+        "filings": {
+            "recent": {
+                "form": ["8-K", "10-Q", "4"],
+                "acceptanceDateTime": ["2026-10-22T20:00:00.000Z", "2026-10-22T20:00:00.000Z", "2026-10-01T20:00:00.000Z"],
+                "accessionNumber": ["0001-26-000001", "0001-26-000002", "0001-26-000003"],
+                "primaryDocument": ["a.htm", "b.htm", "c.xml"],
+                "items": ["2.02", "", ""],
+            }
+        }
+    }
+    out = W.edgar_candidates("COIN", 1679788, sub, since_ms=1792627200000)  # 2026-10-21
+    assert [x["id"] for x in out] == ["0001-26-000001"]
+    assert out[0]["title"] == "COIN filed 8-K (items 2.02)"
+    assert out[0]["url"] == "https://www.sec.gov/Archives/edgar/data/1679788/000126000001/a.htm"
+
+
+def test_domain_clause():
+    from cortex_research import world as W
+
+    c = W.domain_clause(["reuters.com", "cnbc.com"])
+    assert c == "(domainis:reuters.com OR domainis:cnbc.com)"

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import type { ClefApi, ClefQuestion, ClefResult } from "../src/clef/ClefClient.ts";
 import type { DecisionContract } from "../src/contracts/decision-contract.ts";
 import type { Doctrine } from "../src/contracts/doctrine.ts";
 import { Brain } from "../src/cortex/Brain.ts";
@@ -35,7 +36,7 @@ function flat(n: number, price: number): Bar[] {
   }));
 }
 
-function setup(opts: { d?: Doctrine; live?: boolean; killed?: boolean } = {}) {
+function setup(opts: { d?: Doctrine; live?: boolean; killed?: boolean; clef?: ClefApi } = {}) {
   let now = T0;
   const clock = () => now;
   const market = new Market(clock);
@@ -61,6 +62,7 @@ function setup(opts: { d?: Doctrine; live?: boolean; killed?: boolean } = {}) {
     d1,
     readKillFlag: async () => kill.on,
     now: clock,
+    clef: opts.clef ?? null,
   });
   brain.init({ test: true });
   return {
@@ -589,5 +591,150 @@ describe("news intake (Phase 2)", () => {
     breakout(t);
     const r = await t.brain.pulse();
     expect(r.entries).toBe(1);
+  });
+});
+
+/** Fake Clef answering in the real response format; `material` decides per item headline. */
+class FakeClef implements ClefApi {
+  calls: { model: string; questions: Record<string, ClefQuestion> }[] = [];
+  fail: Error | null = null;
+  constructor(
+    private readonly material: (headline: string) => number,
+    private readonly escalate: (headline: string) => number = () => 2.6,
+  ) {}
+  async run(
+    model: "clef-flash" | "clef",
+    state: unknown,
+    questions: Record<string, ClefQuestion>,
+  ): Promise<ClefResult> {
+    this.calls.push({ model, questions });
+    if (this.fail) throw this.fail;
+    const items = (state as { items: { headline: string }[] }).items;
+    const answers: ClefResult["answers"] = {};
+    for (const id of Object.keys(questions)) {
+      const h = items[Number(id.slice(1, id.indexOf(".")))]?.headline ?? "";
+      if (id.endsWith(".material")) answers[id] = { type: "noul", noul: this.material(h) };
+      if (id.endsWith(".direction"))
+        answers[id] = { type: "choice", choice: "up", probabilities: { up: 0.8, down: 0.1, unclear: 0.1 } };
+      if (id.endsWith(".escalate")) answers[id] = { type: "score", score: this.escalate(h) };
+    }
+    return { model, answers, usage: { input_tokens: 1000, output_tokens: 0 } };
+  }
+}
+
+describe("Tier 1 triage (Phase 3)", () => {
+  const news = (id: string) => ({
+    id,
+    createdAt: T0 - 5 * 60_000,
+    headline: `Headline ${id}`,
+    summary: "s",
+    symbols: ["BTCUSD"],
+    source: "benzinga",
+    url: null,
+  });
+
+  it("promotes material, high-priority items to tier 2, drops the rest, logs and meters", async () => {
+    const clef = new FakeClef((h) => (h === "Headline 1" ? 0.9 : 0.3));
+    const t = setup({ clef });
+    t.market.news.push(news("1"), news("2"), news("3"));
+    const r = await t.brain.pulse();
+    expect(r.triaged).toBe(3);
+    expect(r.promoted).toBe(1);
+    expect(clef.calls).toHaveLength(3); // one item per call (ADR-027)
+    expect(clef.calls[0]?.model).toBe("clef-flash");
+    expect(Object.keys(clef.calls[0]?.questions ?? {})).toHaveLength(3);
+    const queue = t.sql.exec<{ candidate_id: string; tier: number }>(
+      "SELECT candidate_id, tier FROM triage_queue",
+    );
+    expect(queue).toEqual([{ candidate_id: "news:1", tier: 2 }]);
+    expect(t.notifier.sent.filter((m) => m.channel === "world_intel")).toHaveLength(1);
+    expect(t.d1.db.prepare("SELECT tier, model FROM triage_log").get()).toEqual({
+      tier: 1,
+      model: "clef-flash",
+    });
+    expect(t.brain.budget.used("neurons_tier1", T0)).toBeCloseTo((3 * 1000 * 3455) / 1e6, 6);
+  });
+
+  it("drops items whose answers are missing (fail closed)", async () => {
+    const clef = new FakeClef(() => 0.95);
+    clef.run = async (model, _s, questions) => ({
+      model,
+      answers: { [Object.keys(questions)[0] as string]: { type: "noul", noul: 0.99 } },
+      usage: { input_tokens: 10, output_tokens: 0 },
+    });
+    const t = setup({ clef });
+    t.market.news.push(news("1"));
+    const r = await t.brain.pulse();
+    expect(r.promoted).toBe(0);
+    expect(t.sql.exec("SELECT candidate_id FROM triage_queue")).toHaveLength(0);
+  });
+
+  it("skips the call when the tier-1 neuron allocation is spent", async () => {
+    const clef = new FakeClef(() => 0.9);
+    const t = setup({ clef });
+    t.brain.budget.add("neurons_tier1", 3000, T0);
+    t.market.news.push(news("1"));
+    const r = await t.brain.pulse();
+    expect(clef.calls).toHaveLength(0);
+    expect(r.triaged).toBe(0);
+    expect(t.sql.exec("SELECT candidate_id FROM triage_queue")).toHaveLength(1); // waits for tomorrow
+  });
+
+  it("a Workers AI quota error stops tier 1 for the day but never blocks trading", async () => {
+    const clef = new FakeClef(() => 0.9);
+    clef.fail = new Error("4006: you have used up your daily free allocation of 10,000 neurons");
+    const t = setup({ clef });
+    t.market.news.push(news("1"));
+    breakout(t);
+    const r = await t.brain.pulse();
+    expect(r.entries).toBe(1);
+    expect(t.brain.budget.canSpendNeurons("neurons_tier1", 1, T0)).toBe(false);
+  });
+});
+
+describe("world-intel ingest (GDELT / EDGAR)", () => {
+  const worldBatch = (candidates: unknown[]) => ({
+    schema_version: 1,
+    job: "world-intel",
+    produced_at: T0,
+    run_url: null,
+    items: [
+      {
+        skill_id: "gdelt-world-pulse",
+        version: "gdelt-v1",
+        as_of: T0,
+        inputs_sha256: "b".repeat(64),
+        payload: { candidates },
+      },
+    ],
+    posture: null,
+  });
+  const cand = (id: string, kind = "gdelt") => ({
+    id,
+    kind,
+    title: `Fed signals ${id}`,
+    url: "https://example.com/a",
+    symbols: ["SPY"],
+    source: "example.com",
+    published_at: T0 - 60_000,
+    topic: "federal reserve",
+  });
+
+  it("queues valid candidates once and ignores malformed ones", async () => {
+    const t = setup();
+    const r1 = await t.brain.ingestBatch(
+      worldBatch([cand("a"), cand("b", "edgar"), { id: "x", kind: "rumor" }]),
+    );
+    expect(r1).toEqual({ ok: true, message: "queued 2 world-intel candidate(s)" });
+    const r2 = await t.brain.ingestBatch(worldBatch([cand("a")]));
+    expect(r2.message).toBe("queued 0 world-intel candidate(s)");
+    expect(
+      t.sql.exec("SELECT candidate_id FROM triage_queue ORDER BY candidate_id").map((x) => x.candidate_id),
+    ).toEqual(["edgar:b", "gdelt:a"]);
+  });
+
+  it("requires posture for regime jobs and forbids it for world-intel", async () => {
+    const t = setup();
+    expect((await t.brain.ingestBatch({ ...worldBatch([cand("a")]), job: "crypto-regime" })).ok).toBe(false);
   });
 });

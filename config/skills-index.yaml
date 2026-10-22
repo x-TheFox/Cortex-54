@@ -262,7 +262,7 @@ skills:
       source: new,
       runtime: py-batch,
       phase: 3,
-      status: PROPOSAL,
+      status: SHADOW,
       notes: "GDELT DOC 2.0 API (free, keyless, ≤1 request / 5 s): tone + volume timelines and article lists for macro/geopolitical topics → world-intel triage",
     }
   - {
