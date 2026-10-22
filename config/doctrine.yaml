@@ -112,8 +112,10 @@ funnel:
   tier1:
     model: "@cf/cloudflare/clef-flash"
     batch_max_items: 1 # one item per Clef call: batching compresses scores (ADR-027)
-    escalate_threshold: 0.70 # P(material) needed to promote to Tier 2
-    min_escalate_score: 2.0 # probability-weighted 0 Reject … 3 Deep; 2 = Shadow
+    # Observed live: GDELT noise ≈ 0.15, borderline headlines ≈ 0.45, a real BTC crash headline 0.88. Tier 1 is
+    # only a noise filter; Clef 27B (Tier 2) and the court are the strict gates (ADR-029).
+    escalate_threshold: 0.55 # P(material) needed to promote to Tier 2
+    min_escalate_score: 1.5 # probability-weighted 0 Reject … 3 Deep (1 Watchlist, 2 Shadow)
     max_batches_per_pulse: 8 # ≈1.2 neurons per call → ≤ ~10 neurons per pulse
   tier2:
     model: "@cf/cloudflare/clef"
@@ -194,12 +196,28 @@ strategies:
   - id: CRYPTO_CATALYST_COURT_V1
     arena: CRYPTO
     status: ACTIVE # Phase 3: catalyst → Tier 1 → Tier 2 → court → COURT contract (PAPER only)
-    universe: [BTC/USD, ETH/USD, SOL/USD, LINK/USD, AVAX/USD, DOGE/USD]
+    universe:
+      [
+        BTC/USD,
+        ETH/USD,
+        SOL/USD,
+        XRP/USD,
+        LINK/USD,
+        AVAX/USD,
+        DOGE/USD,
+        LTC/USD,
+        BCH/USD,
+        DOT/USD,
+        UNI/USD,
+        AAVE/USD,
+        ADA/USD,
+      ]
     accounts: [PAPER]
   - id: EQUITY_CATALYST_COURT_V1
     arena: EQUITIES
     status: ACTIVE # regular session only; equity posture must be NEW_ENTRY_ALLOWED
-    universe: [COIN, MSTR, IBIT, SPY, QQQ, IWM]
+    universe:
+      [COIN, MSTR, IBIT, SPY, QQQ, IWM, AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA, AMD, AVGO, NFLX, JPM, XOM]
     accounts: [PAPER]
   - id: EQUITY_MOMENTUM_BURST_V1
     arena: EQUITIES
@@ -215,6 +233,24 @@ strategies:
     accounts: []
 
 watchlists:
-  crypto: [BTC/USD, ETH/USD, SOL/USD, LINK/USD, AVAX/USD, DOGE/USD]
+  # Liquid Alpaca USD pairs (no stablecoins, no thin meme tokens). News intake and the court use all of these.
+  crypto:
+    [
+      BTC/USD,
+      ETH/USD,
+      SOL/USD,
+      XRP/USD,
+      LINK/USD,
+      AVAX/USD,
+      DOGE/USD,
+      LTC/USD,
+      BCH/USD,
+      DOT/USD,
+      UNI/USD,
+      AAVE/USD,
+      ADA/USD,
+    ]
   crypto_proxies: [COIN, MSTR, IBIT]
   equities_core: [SPY, QQQ, IWM]
+  # Mega-caps: frequent news and SEC filings, fractionable, tight spreads.
+  equities_catalyst: [AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA, AMD, AVGO, NFLX, JPM, XOM]

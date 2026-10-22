@@ -204,3 +204,15 @@ models errored and are not in the chains. `timeout_ms` 60 s.
 **Code wins:** `checkBull` rejects briefs whose zone misses the bid or whose stop is < 1.2×ATR, and clips targets to
 entry + 3·ATR·√(h/24) before the bear or synth ever see them.
 
+## ADR-029 — Tier 1 is a noise filter; the courtroom is always visible (2026-10-22)
+**Context:** After the first live hours the court had never run: Tier 1 had screened 11 items and promoted none.
+Observed clef-flash P(material): GDELT noise ≈ 0.12–0.20, borderline headlines ≈ 0.26–0.46, a real BTC crash
+headline 0.88. Only ~1 watched-symbol headline per hour arrived, and one of them was re-queued every pulse because
+Alpaca's news `start` is inclusive and dropped items weren't remembered.
+**Decision:** (1) Tier 1 promotes at P(material) ≥ 0.55 and priority ≥ 1.5 (was 0.70 / 2.0): Tier 2 (Clef 27B)
+and the court remain the strict gates and are capped (40 / 12 per day). (2) Intake ids are remembered for 3 days
+(`seen_items`, hot schema v2) and the news cursor steps 1 s past the newest item. (3) The universe widens: 13
+liquid Alpaca crypto pairs and 12 mega-cap equities (`equities_catalyst`), which also feed EDGAR. (4) Every court
+session posts a card to #bull-vs-bear-court (bull, bear, Clef bars, outcome), including declines. (5) `/court
+SYMBOL` lets the operator convene a session on demand behind all the usual gates.
+

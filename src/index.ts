@@ -70,6 +70,20 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
       const pm = String(option(i, "postmortem") ?? "");
       return ephemeral(account ? await b.unlock(account, pm, by) : "Pick an account.");
     }
+    case "court": {
+      const symbol = String(option(i, "symbol") ?? "");
+      if (!symbol || !i.token || !env.DISCORD_APP_ID)
+        return ephemeral("Give a symbol, e.g. BTC/USD or NVDA.");
+      const appId = env.DISCORD_APP_ID;
+      const token = i.token;
+      ctx.waitUntil(
+        b.court(symbol, by).then(
+          (msg) => followUp(appId, token, msg),
+          (e) => followUp(appId, token, `Error: ${String(e)}`),
+        ),
+      );
+      return deferredEphemeral();
+    }
     case "flatten": {
       if (!account || !i.token || !env.DISCORD_APP_ID) return ephemeral("Pick an account.");
       const appId = env.DISCORD_APP_ID;

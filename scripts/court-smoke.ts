@@ -10,6 +10,7 @@ import type { ClefApi, ClefQuestion } from "../src/clef/ClefClient.ts";
 import { ClefResultSchema } from "../src/clef/ClefClient.ts";
 import { contractViolations, DecisionContractSchema } from "../src/contracts/decision-contract.ts";
 import { DoctrineSchema } from "../src/contracts/doctrine.ts";
+import { type CourtSession, courtSessionCard } from "../src/cortex/Brain.ts";
 import {
   BearSchema,
   BullSchema,
@@ -168,3 +169,25 @@ console.log(
     ? `valid · violations ${JSON.stringify(contractViolations(parsed.data))}`
     : parsed.error.issues,
 );
+
+// --post: show the card in #bull-vs-bear-court (labelled as a smoke test; nothing is traded).
+if (process.argv.includes("--post") && env.DISCORD_BOT_TOKEN && env.DISCORD_CHANNEL_COURT) {
+  const session: CourtSession = {
+    symbol,
+    arena: e.arena,
+    catalyst: e.catalyst,
+    bid: e.quote.bid,
+    atr: e.technicals.atr14,
+    bull: { ...checked.bull, by: `${bull.provider}/${bull.model}` },
+    bear: { ...bear.value, by: `${bear.provider}/${bear.model}` },
+    synth: { ...synth, calibrated: calibrate(synth.winProb, 0, d) },
+    verdict: `🧪 Smoke test from the dev machine — not routed to any account. Contract ${parsed.success ? "valid" : "INVALID"}.`,
+    ok: false,
+  };
+  const r = await fetch(`https://discord.com/api/v10/channels/${env.DISCORD_CHANNEL_COURT}/messages`, {
+    method: "POST",
+    headers: { authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, "content-type": "application/json" },
+    body: JSON.stringify({ ...courtSessionCard(session), allowed_mentions: { parse: [] } }),
+  });
+  console.log("posted to #bull-vs-bear-court:", r.status);
+}

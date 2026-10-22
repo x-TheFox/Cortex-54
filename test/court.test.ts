@@ -66,8 +66,8 @@ const bull = (over: Partial<Bull> = {}): Bull => ({
 describe("Tier 0 evidence", () => {
   it("resolves tradeable symbols from news/candidate symbols", () => {
     expect(resolveTradeable(["BTCUSD"], d)).toEqual({ symbol: "BTC/USD", arena: "CRYPTO" });
-    expect(resolveTradeable(["TSLA", "COIN"], d)).toEqual({ symbol: "COIN", arena: "EQUITIES" });
-    expect(resolveTradeable(["TSLA"], d)).toBeNull();
+    expect(resolveTradeable(["PLTR", "COIN"], d)).toEqual({ symbol: "COIN", arena: "EQUITIES" });
+    expect(resolveTradeable(["PLTR"], d)).toBeNull();
   });
 
   it("computes technicals and receipts in code", () => {

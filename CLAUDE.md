@@ -88,7 +88,7 @@ Full detail: `docs/ARCHITECTURE.md`. Budget math: `docs/FREE_TIER_BUDGET.md`.
 | Tier | Engine | Where | Budget | Job |
 |---|---|---|---|---|
 | 0 Reflex | TypeScript | DO pulse | free | stops, breakers, staleness, spread/fee gates, dedupe, watchlist relevance, ALL arithmetic |
-| 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | one item per call (~1.2 neurons), ≤8 per pulse; promote P(material) ≥ 0.70 and priority ≥ Shadow |
+| 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | one item per call (~1.2 neurons), ≤8 per pulse; promote P(material) ≥ 0.55 and priority ≥ 1.5 (ADR-029) |
 | 2 Structure | `@cf/cloudflare/clef` (27B) | DO | ~4,000 neurons/day | Tier 0 evidence (code) → long_favored, regime fit, bear-lethality, setup, quality; ≤1/pulse, ≤40/day |
 | 3 Court | free LLM chains + Clef 27B synth | DO pulse (ADR-028) | free-tier RPD | bull → **cross-family** bear → Clef synth → calibrated COURT contract; ≤1/pulse, ≤12/day |
 
@@ -272,7 +272,8 @@ pnpm deploy:cortex        # wrangler deploy (CI does this on main once CLOUDFLAR
 pnpm deploy:sentinel      # deploy the independent watchdog/kill-switch worker
 pnpm discord:setup        # idempotent: CORTEX-54 category + 8 channels, sentinel webhook, guild slash commands
 gh workflow run research -f job=crypto    # or job=equity: run a research batch now
-pnpm court:smoke BTC/USD   # real bull/bear/Clef run on live evidence; never trades
+pnpm court:smoke BTC/USD ["headline"] [--post]   # real bull/bear/Clef run on live evidence; never trades
+# Discord /court SYMBOL convenes a real session (PAPER, all gates apply); cards go to #bull-vs-bear-court
 pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
 gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATTEN ALL (ADR-022); action=rearm to clear
 ```
@@ -348,5 +349,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-22: PR #5 merged. GDELT DOC API is throttled on GitHub runners → world job now reads GDELT GKG bulk
   files as an hourly world-risk pulse + wire press releases (ADR-028). Tier 2 (Clef 27B) and the court are built
   (branch `phase-3-court`) and verified against real providers with `pnpm court:smoke` (no orders).
+- 2026-10-22: PR #6 merged. Court was silent (Tier 1 bar too high, ~1 headline/hour, news re-queue bug) →
+  ADR-029: Tier 1 bar 0.55/1.5, intake dedupe, wider universe, courtroom card for every session, `/court`.
+  SEC_USER_AGENT is set (EDGAR active).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

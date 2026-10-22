@@ -46,6 +46,18 @@ def theme_matches(theme: str, pattern: str) -> bool:
 WIRES = ("prnewswire.com", "globenewswire.com", "businesswire.com", "accessnewswire.com", "newsfilecorp.com")
 # organization / title keyword → tradeable symbol (watchlists in config/doctrine.yaml)
 COMPANY_SYMBOLS: dict[str, str] = {
+    "apple inc": "AAPL",
+    "microsoft": "MSFT",
+    "nvidia": "NVDA",
+    "amazon.com": "AMZN",
+    "meta platforms": "META",
+    "alphabet": "GOOGL",
+    "tesla": "TSLA",
+    "advanced micro devices": "AMD",
+    "broadcom": "AVGO",
+    "netflix": "NFLX",
+    "jpmorgan": "JPM",
+    "exxon": "XOM",
     "coinbase": "COIN",
     "microstrategy": "MSTR",
     "strategy inc": "MSTR",
@@ -167,7 +179,7 @@ def clean(s: str, n: int) -> str:
 def watch_tickers(doctrine_path: Path) -> list[str]:
     d = yaml.safe_load(doctrine_path.read_text())
     w = d.get("watchlists", {})
-    return sorted({t for k in ("crypto_proxies", "equities_core") for t in w.get(k, []) if "/" not in t})
+    return sorted({t for k in ("crypto_proxies", "equities_core", "equities_catalyst") for t in w.get(k, []) if "/" not in t})
 
 
 def fetch_edgar(tickers: list[str], since_ms: int) -> tuple[list[dict], list[str]]:
