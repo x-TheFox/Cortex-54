@@ -77,25 +77,31 @@ separately (verify Alpaca's crypto settlement behavior in Phase 1 and record it 
 
 | Stop | Name | Behavior |
 |---|---|---|
-| 0 | Shadow | contracts generated + journaled, nothing executes |
-| 1 | Approve | each contract posted to `#bull-vs-bear-court`; executes only on operator ✅ within TTL (default 20 min) |
-| 2 | Paper Auto | PAPER executes automatically within rails; LIVE stays at its own dial |
-| 3 | Live Auto | LIVE executes automatically within rails; daily digest; exceptions pinged |
-| 4 | Colleague | as 3, plus Governor may auto-apply *doctrine* PRs that only tighten limits |
+| 0 | Shadow / dormant | contracts generated + journaled (`SHADOW`), nothing executes |
+| 2 | Paper Auto | PAPER executes on its own within rails (valid for PAPER only) |
+| 3 | Live Auto | LIVE executes on its own within rails (valid for LIVE only; needs `RATIFY`) |
+| 4 | Colleague | as 2/3, plus the Governor may auto-apply *doctrine* PRs that only tighten limits |
 
-Initial: PAPER = Stop 2, LIVE = Stop 1.
+**There is no approve-each-trade mode** (operator decision 2026-10-22, ADR-024). Stop 1 does not exist; the
+`/dial` command rejects it and boot migrates any stored Stop 1. `#bull-vs-bear-court` shows contracts for
+information only. Valid stops: PAPER {0, 2, 4}, LIVE {0, 3, 4}.
+
+Initial: PAPER = Stop 2 (fully autonomous). LIVE = Stop 0 (dormant) until §7's LIVE gate is met.
 
 ## 7. Capital ladder graduation (two consecutive weekly reviews, measured with modeled fees)
 
 | From → To | Gate |
 |---|---|
-| LIVE Stop 1 → Stop 3 | PAPER: ≥25 closed trades, positive post-fee expectancy, profit factor > 1.2, zero rail violations, ≥14 days heartbeat ≥99.9%, calibrated Brier < 0.25; LIVE: ≥10 approved trades with paper↔live slippage < 15 bps median; operator ratifies |
+| LIVE Stop 0 → Stop 3 (real money switches on) | **(a) Total implementation:** ROADMAP Phases 0–6 complete and merged (full funnel, learning loop, cockpit). **(b) Fully autonomous PAPER run:** ≥30 consecutive days with no operator intervention in trading (no /pause, /flatten, /unlock, kill), ≥25 closed trades, positive post-fee expectancy, profit factor > 1.2, zero rail violations, heartbeat ≥99.9%, calibrated Brier < 0.25, every RED trip self-recovered and reviewed. **(c)** Live kill drill passed. **(d)** Operator ratifies with `/dial account:LIVE stop:3 confirm:RATIFY` |
 | R1 → R2 | equity ≥ $100 (or operator deposit) + above |
 | R2 → R3 | ≥1 YELLOW recovered cleanly, Sharpe (daily, 60 d) > 1.0, ≥2 strategies with positive expectancy |
 | R3 → R4 | Monte Carlo 5th-pct drawdown within RED band; p < 0.05 vs random entry timing (BH-FDR adjusted); cognitive cost $0 maintained |
 | Options live | sizer permits the smallest defined-risk spread (max loss ≤ per-trade risk) **and** shadow lab ≥30 options trades with positive post-fee expectancy |
 
-Demotion is automatic: a RED trip drops the account one rung and resets the dial to Stop 1.
+Demotion is automatic: the rung is always capped by current equity. A LIVE RED trip flattens and locks; unlocking
+LIVE (operator postmortem) resets its dial to Stop 0, so real money needs a fresh RATIFY. PAPER recovers from RED
+by itself after `breakers.paper_auto_unlock_hours` (≥ constitution minimum 12 h) once flat, with a machine
+postmortem (ADR-025).
 
 ## 8. Things the risk engine always does
 

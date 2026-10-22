@@ -133,3 +133,28 @@ process earlier the same day) and raised an alert per fill.
 **Decision:** With no cursor, record `ACTIVITY_BASELINE` (count skipped) and start from the current time.
 Unknown fills after that point still alert, and unknown open positions/orders still force REDUCE_ONLY.
 
+## ADR-024 — No approve-each-trade mode; LIVE dormant until everything is built and proven on paper (2026-10-22)
+**Context:** Operator: "I do not want approve each trade for real money either. Real money only comes after total
+implementation and testing on paper trading, which must also be completely autonomous." Supersedes the Stop 1
+approval stage in ADR-007 and the spec's autonomy-dial design.
+**Decision:** The approval path (pending approvals, Approve/Veto buttons, `decide()`) is removed. Dial stops:
+PAPER {0, 2, 4}, LIVE {0, 3, 4}; boot migrates any stored Stop 1. LIVE starts dormant (Stop 0, contracts journaled
+as SHADOW). Constitution `max_live_autonomy_stop_without_ratification` = 0, and U8 now states the LIVE gate:
+Phases 0–6 complete + ≥30-day fully autonomous PAPER run passing RISK_DOCTRINE §7 + live kill drill + one operator
+RATIFY. `#bull-vs-bear-court` gets information cards only.
+**Consequences:** No human-in-the-loop trade check exists anywhere, so the deterministic risk engine, breakers,
+sentinel and kill switch are the only brakes. LIVE unlock after RED resets it to Stop 0 (fresh RATIFY needed).
+
+## ADR-025 — PAPER self-heals (2026-10-22)
+**Context:** A fully autonomous PAPER run can't wait on the operator for routine recoveries.
+**Decision:** (1) Entry blocks raised by sync checks (orphan positions/orders, margin multiplier) carry an `auto:`
+reason and clear by themselves when the condition is gone. Operator pauses and the starting-equity guard stay
+sticky. (2) PAPER RED: flatten, lock, then unlock automatically after `paper_auto_unlock_hours` (24 h; constitution
+floor 12 h) once flat, with a machine postmortem. Every RED trip stays in the journal and counts against LIVE
+graduation. Constitution U5 rewritten accordingly; LIVE behavior unchanged (operator postmortem only).
+
+## ADR-021 (revised 2026-10-22) — Cron slots restored
+The operator deleted the worker that held the account's 5 cron slots. `cortex` runs `*/5 * * * *` (alarm self-heal;
+the DO still self-arms on start and on /health) and `sentinel` runs `* * * * *` (per-minute watchdog,
+`STALE_ALERT_MINUTES` 8). `watchdog.yml` stays as an independent backup every 30 min. 2 of 5 slots used.
+

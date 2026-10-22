@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { hudMessage } from "../src/cortex/Brain.ts";
-import { parseDecision } from "../src/discord/interactions.ts";
 import { parseChannels } from "../src/discord/notifier.ts";
 import { verifyDiscordRequest } from "../src/discord/verify.ts";
 
@@ -36,18 +35,6 @@ describe("Discord signature verification", () => {
 });
 
 describe("interaction parsing", () => {
-  it("parses approve/veto buttons strictly", () => {
-    const id = "01928f4e-7b2a-7c3d-8e4f-5a6b7c8d9e0f";
-    expect(parseDecision(`approve:LIVE:${id}`)).toEqual({
-      decision: "APPROVE",
-      account: "LIVE",
-      contractId: id,
-    });
-    expect(parseDecision(`veto:PAPER:${id}`)?.decision).toBe("VETO");
-    expect(parseDecision(`approve:LIVE:${id};drop`)).toBeNull();
-    expect(parseDecision(`approve:MARGIN:${id}`)).toBeNull();
-  });
-
   it("accepts only numeric channel ids", () => {
     expect(parseChannels('{"alarms":"123456789012345678","court":"abc"}')).toEqual({
       alarms: "123456789012345678",

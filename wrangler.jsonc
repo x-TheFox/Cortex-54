@@ -30,10 +30,9 @@
 
   // Workflows (Phase 3): ResearchSprintWorkflow binding is added when the class exists.
 
-  // No cron (ADR-021): the operator account's 5 free cron slots are used by another worker. The Durable Object
-  // arms its own alarm on start, and every /health call (sentinel tick) re-arms it. If a slot frees up,
-  // ["*/5 * * * *"] here adds a belt-and-braces self-heal.
-  "triggers": { "crons": [] },
+  // Belt-and-braces self-heal (ADR-021, revised): the DO also arms its own alarm on start and on every /health.
+  // Uses 1 of the account's 5 free cron slots; sentinel uses another.
+  "triggers": { "crons": ["*/5 * * * *"] },
 
   "vars": {
     "CORTEX_ENV": "production",

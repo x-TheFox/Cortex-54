@@ -36,19 +36,6 @@ export function accountOption(i: Interaction): AccountId | null {
   return v === "PAPER" || v === "LIVE" ? v : null;
 }
 
-/** custom_id format: approve:{ACCOUNT}:{contract_id} | veto:{ACCOUNT}:{contract_id} */
-export function parseDecision(
-  customId: string,
-): { decision: "APPROVE" | "VETO"; account: AccountId; contractId: string } | null {
-  const m = /^(approve|veto):(PAPER|LIVE):([0-9a-f-]{36})$/.exec(customId);
-  if (!m) return null;
-  return {
-    decision: m[1] === "approve" ? "APPROVE" : "VETO",
-    account: m[2] as AccountId,
-    contractId: m[3] as string,
-  };
-}
-
 export const ephemeral = (content: string) =>
   Response.json({ type: 4, data: { content: content.slice(0, 1900), flags: 64 } });
 

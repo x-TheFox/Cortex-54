@@ -91,7 +91,8 @@ entries are cancelled, not re-pegged (ADR-017).
 One brain, one contract, two executions:
 - Each account has its own equity, rung, breaker state, settlement ledger and autonomy dial.
 - Sizing is per account (both start at $54, so initially identical).
-- LIVE executes only if: dial ≥ Stop 3, or dial = Stop 1 and the operator pressed ✅ within the contract TTL.
+- LIVE executes only at dial Stop ≥3, which needs the operator's RATIFY after the LIVE gate (RISK_DOCTRINE §7).
+  Until then LIVE is dormant: contracts are journaled as SHADOW for it. There is no per-trade approval (ADR-024).
 - Divergence metrics (entry slippage bps, fill rate, fee bps, P&L gap) are journaled per contract.
 - Paper fills get our fee + slippage model applied in the ledger (Alpaca paper charges nothing), so paper
   P&L is the honest pessimistic estimate used for graduation.
@@ -100,7 +101,7 @@ One brain, one contract, two executions:
 
 **DO SQLite (hot, transactional, small):** `settings`, `accounts`, `positions`, `lots` (settlement),
 `orders`, `risk_reservations`, `breaker_state`, `regime_state`, `scar_rules` (loaded from config at deploy),
-`cursors`, `budget_counters`, `pending_approvals`, `hud_state`, `triage_queue`.
+`cursors`, `budget_counters`, `hud_state`, `triage_queue`.
 
 **D1 (append-only history, queryable from Actions):** see `migrations/0001_initial_schema.sql` —
 `journal` (hash-chained), `decision_contracts`, `orders_log`, `fills`, `rejections` (shadow ledger),

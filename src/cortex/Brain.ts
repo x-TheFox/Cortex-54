@@ -34,6 +34,8 @@ import {
 import { getKV, one, type SqlLike, setKV } from "./store.ts";
 
 export const ACCOUNTS: AccountId[] = ["PAPER", "LIVE"];
+/** Valid dial stops (ADR-024): 0 shadow; PAPER trades at 2; LIVE trades at 3; 4 = colleague mode. */
+export const DIAL_STOPS: Record<AccountId, number[]> = { PAPER: [0, 2, 4], LIVE: [0, 3, 4] };
 const OPEN_STATES = [
   "PLANNED",
   "new",
@@ -204,6 +206,11 @@ export class Brain {
         utcDay(now),
       );
     }
+    // ADR-024: the approve-each-trade mode (Stop 1) no longer exists. LIVE falls back to dormant (0), PAPER to auto (2).
+    this.sql.exec("UPDATE accounts SET autonomy_stop = 0 WHERE account = 'LIVE' AND autonomy_stop IN (1, 2)");
+    this.sql.exec(
+      "UPDATE accounts SET autonomy_stop = 2 WHERE account = 'PAPER' AND autonomy_stop IN (1, 3)",
+    );
     const lastBoot = getKV(this.sql, "boot_hash");
     const bootHash = JSON.stringify(bootInfo);
     if (lastBoot !== bootHash) {
@@ -298,7 +305,6 @@ export class Brain {
         }
       }
     }
-    this.expireApprovals();
 
     // 4. Persist, report, schedule.
     report.flushed = await this.flushJournal();
@@ -366,9 +372,11 @@ export class Brain {
     ]);
     if (acct.trading_blocked || acct.account_blocked)
       throw new Error(`account blocked at broker (${acct.status})`);
+    // Conditions that block entries are re-checked every sync; when they all clear, so does the mode (ADR-025).
+    const issues: string[] = [];
     if (acct.multiplier !== undefined && acct.multiplier !== null && Number(acct.multiplier) > 1) {
       // Constitution U3: cash only. A margin multiplier means the broker would let us borrow; we never do.
-      this.setMode(account, "REDUCE_ONLY", "broker reports a margin multiplier > 1; cash-only doctrine", now);
+      issues.push("broker reports a margin multiplier > 1; cash-only doctrine");
     }
 
     // Adopt our own orders the DO lost track of (crash between submit and record).
@@ -382,7 +390,7 @@ export class Brain {
       if (o.client_order_id.startsWith(`c54-${account[0]}-`))
         this.adoptOrder(account, o.client_order_id, o, now);
       else {
-        this.setMode(account, "REDUCE_ONLY", `unknown open order ${o.client_order_id} at broker`, now);
+        issues.push(`unknown open order ${o.client_order_id} at broker`);
         await this.alertOnce(
           `orphan-order:${o.id}`,
           `🧩 ${account}: unknown open order ${o.symbol} ${o.side} (${o.client_order_id}). Entries blocked.`,
@@ -475,10 +483,10 @@ export class Brain {
     const localSymbols = new Set(this.positions(account).map((p) => p.symbol));
     for (const [symbol, bp] of brokerPos) {
       if (localSymbols.has(symbol)) continue;
-      this.setMode(account, "REDUCE_ONLY", `orphan position ${symbol} at broker`, now);
+      issues.push(`orphan position ${symbol} at broker`);
       await this.alertOnce(
         `orphan-pos:${account}:${symbol}`,
-        `🧩 ${account}: broker holds ${bp.qty} ${symbol} that CORTEX didn't open. Entries blocked; use /flatten or close it in Alpaca, then /resume.`,
+        `🧩 ${account}: broker holds ${bp.qty} ${symbol} that CORTEX didn't open. Entries blocked until it's gone (close it in Alpaca or /flatten); CORTEX resumes by itself.`,
       );
     }
 
@@ -511,6 +519,12 @@ export class Brain {
       account,
     );
     this.sql.exec("DELETE FROM unsettled WHERE settles_at <= ?", now);
+
+    const after = this.account(account);
+    if (issues.length > 0) this.setMode(account, "REDUCE_ONLY", `auto: ${issues.join("; ")}`, now);
+    else if (after?.mode === "REDUCE_ONLY" && after.mode_reason?.startsWith("auto:")) {
+      this.setMode(account, "NORMAL", "auto: conditions cleared", now);
+    }
   }
 
   private adoptOrder(
@@ -1025,9 +1039,39 @@ export class Brain {
     }
     if (state.band === "RED" && row.locked === 0) {
       this.sql.exec("UPDATE accounts SET locked = 1 WHERE account = ?", account);
+      setKV(this.sql, `red_locked_at:${account}`, String(now), now);
       this.journal.append(account, "RED_LOCK", null, state, now);
       await this.flatten(account, "RED breaker", broker);
+      return;
     }
+    if (account === "PAPER" && row.locked === 1) await this.maybeAutoUnlockPaper(now);
+  }
+
+  /**
+   * PAPER runs fully autonomously (ADR-025): after a RED lock it unlocks itself once the cooldown has passed and the
+   * account is flat, writing a machine postmortem. Every RED trip stays in the journal and counts against the LIVE
+   * graduation gate. LIVE never auto-unlocks (constitution U5).
+   */
+  private async maybeAutoUnlockPaper(now: number): Promise<void> {
+    const lockedAt = Number(getKV(this.sql, "red_locked_at:PAPER") ?? now);
+    const coolMs = this.d.breakers.paper_auto_unlock_hours * 3_600_000;
+    if (now - lockedAt < coolMs) return;
+    if (this.positions("PAPER").length > 0 || this.openOrders("PAPER").length > 0) return;
+    const exits = this.sql.exec<{ reason: string; pnl_cents: number | null }>(
+      "SELECT reason, pnl_cents FROM exits WHERE account = 'PAPER' AND at >= ?",
+      lockedAt - 86_400_000,
+    );
+    const pnl = exits.reduce((s, e) => s + (e.pnl_cents ?? 0), 0);
+    const reasons = [...new Set(exits.map((e) => e.reason))].join(", ") || "none";
+    const postmortem =
+      `Automatic PAPER recovery after ${(coolMs / 3_600_000).toFixed(0)}h cooldown. ` +
+      `${exits.length} exit(s) in the 24h before the lock and since (reasons: ${reasons}), ` +
+      `net $${(pnl / 100).toFixed(2)}. Counted against the LIVE graduation gate.`;
+    const msg = this.unlock("PAPER", postmortem, "auto");
+    await this.deps.notifier.post("alarms", {
+      content: `🔓 ${msg}
+${postmortem}`,
+    });
   }
 
   // ------------------------------------------------------------------ entries
@@ -1087,6 +1131,7 @@ export class Brain {
       if (!contract) continue; // "no breakout" is the normal case; not a rejection worth journaling
       setKV(this.sql, dayKey, contract.contract_id, now);
       this.recordContract(contract, now);
+      void this.deps.notifier.post("court", contractCard(contract));
       contracts++;
       for (const account of accounts) {
         if (await this.route(account, contract, fresh)) entries++;
@@ -1138,7 +1183,10 @@ export class Brain {
     );
   }
 
-  /** Autonomy dial routing: 0 shadow, 1 approval, ≥2 auto (PAPER) / ≥3 auto (LIVE). */
+  /**
+   * Autonomy dial (ADR-024: there is no approve-each-trade mode). Below the account's trading stop the contract is
+   * journaled as SHADOW and nothing is sent. PAPER trades from Stop 2; LIVE trades from Stop 3, which needs RATIFY.
+   */
   private async route(
     account: AccountId,
     contract: DecisionContract,
@@ -1148,19 +1196,14 @@ export class Brain {
     const row = this.account(account);
     if (!row) return false;
     const autoAt = account === "PAPER" ? 2 : 3;
-    if (row.autonomy_stop === 0) {
-      this.journal.append(account, "SHADOW", contract.contract_id, { symbol: contract.symbol }, now);
-      return false;
-    }
     if (row.autonomy_stop < autoAt) {
-      const ttl = (this.d.accounts[account]?.approval_ttl_minutes ?? 20) * 60_000;
-      this.sql.exec(
-        "INSERT OR IGNORE INTO pending_approvals (contract_id, account, expires_at) VALUES (?, ?, ?)",
-        contract.contract_id,
+      this.journal.append(
         account,
-        now + ttl,
+        "SHADOW",
+        contract.contract_id,
+        { symbol: contract.symbol, stop: row.autonomy_stop },
+        now,
       );
-      await this.deps.notifier.post("court", approvalMessage(account, contract, now + ttl));
       return false;
     }
     return this.executeEntry(account, contract, quotes[contract.symbol] ?? null);
@@ -1580,14 +1623,21 @@ export class Brain {
 
   resume(account: AccountId, by: string): string {
     const row = this.account(account);
-    if (row?.locked === 1) return `${account} is RED-locked. Use /unlock with a written postmortem.`;
+    if (row?.locked === 1) {
+      return account === "PAPER"
+        ? `${account} is RED-locked; it unlocks itself after the cooldown once flat (or /unlock now).`
+        : `${account} is RED-locked. Use /unlock with a written postmortem.`;
+    }
     this.setMode(account, "NORMAL", `resumed by ${by}`, this.deps.now());
     return `${account} resumed.`;
   }
 
   setDial(account: AccountId, stop: number, by: string, ratified: boolean): string {
     const now = this.deps.now();
-    if (!Number.isInteger(stop) || stop < 0 || stop > 4) return "Dial must be 0–4.";
+    const allowed = DIAL_STOPS[account];
+    if (!allowed.includes(stop)) {
+      return `${account} dial must be one of ${allowed.join(", ")} (there is no approve-each-trade mode).`;
+    }
     const max = this.c.hard_limits.max_live_autonomy_stop_without_ratification;
     if (account === "LIVE" && stop > max && !ratified)
       return `LIVE above Stop ${max} needs confirm:RATIFY (constitution U8).`;
@@ -1604,13 +1654,15 @@ export class Brain {
     const eq = this.effectiveEquityCents(row);
     // A fresh start: high-water mark and day start reset to current equity so the ladder doesn't re-trip at once.
     this.sql.exec(
-      "UPDATE accounts SET locked = 0, breaker = 'GREEN', hwm_cents = ?, day_start_equity_cents = ?, autonomy_stop = MIN(autonomy_stop, 1), mode = 'NORMAL', mode_reason = NULL WHERE account = ?",
+      "UPDATE accounts SET locked = 0, breaker = 'GREEN', hwm_cents = ?, day_start_equity_cents = ?, autonomy_stop = CASE WHEN account = 'LIVE' THEN 0 ELSE autonomy_stop END, mode = 'NORMAL', mode_reason = NULL WHERE account = ?",
       eq,
       eq,
       account,
     );
     this.journal.append(account, "UNLOCK", null, { by, postmortem }, now);
-    return `${account} unlocked; dial reset to ≤ Stop 1. Postmortem journaled.`;
+    return account === "LIVE"
+      ? `${account} unlocked; dial reset to Stop 0 (needs RATIFY to trade again). Postmortem journaled.`
+      : `${account} unlocked. Postmortem journaled.`;
   }
 
   async flatten(account: AccountId, why: string, brokerOverride?: BrokerApi): Promise<string> {
@@ -1636,57 +1688,6 @@ export class Brain {
       ],
     });
     return `${account}: flatten started (${n} exit orders). Mode REDUCE_ONLY until /resume.`;
-  }
-
-  async decide(
-    contractId: string,
-    account: AccountId,
-    decision: "APPROVE" | "VETO",
-    by: string,
-  ): Promise<string> {
-    const now = this.deps.now();
-    const p = one<{ expires_at: number; decision: string | null }>(
-      this.sql,
-      "SELECT expires_at, decision FROM pending_approvals WHERE contract_id = ? AND account = ?",
-      contractId,
-      account,
-    );
-    if (!p) return "No pending approval for that contract.";
-    if (p.decision) return `Already decided: ${p.decision}.`;
-    if (now > p.expires_at) return "Approval window expired.";
-    this.sql.exec(
-      "UPDATE pending_approvals SET decision = ? WHERE contract_id = ? AND account = ?",
-      decision,
-      contractId,
-      account,
-    );
-    this.journal.append(account, decision, contractId, { by }, now);
-    const contract = this.contract(contractId);
-    if (!contract) return "Contract not found.";
-    if (decision === "VETO") {
-      this.reject(account, contract, "OPERATOR", ["vetoed by operator"], now);
-      return `Vetoed ${contract.symbol} on ${account}; logged to the shadow ledger.`;
-    }
-    const ok = await this.executeEntry(account, contract, null);
-    return ok
-      ? `Approved: ${account} entry order placed for ${contract.symbol}.`
-      : `Approved, but the validator rejected it at execution time (see journal).`;
-  }
-
-  private expireApprovals(): void {
-    const now = this.deps.now();
-    for (const p of this.sql.exec<{ contract_id: string; account: AccountId }>(
-      "SELECT contract_id, account FROM pending_approvals WHERE decision IS NULL AND expires_at < ?",
-      now,
-    )) {
-      this.sql.exec(
-        "UPDATE pending_approvals SET decision = 'EXPIRED' WHERE contract_id = ? AND account = ?",
-        p.contract_id,
-        p.account,
-      );
-      const k = this.contract(p.contract_id);
-      if (k) this.reject(p.account, k, "OPERATOR", ["approval expired"], now);
-    }
   }
 
   noteKill(killed: boolean): void {
@@ -1793,11 +1794,12 @@ export function hudMessage(s: StatusView): DiscordMessage {
   };
 }
 
-export function approvalMessage(account: AccountId, k: DecisionContract, expiresAt: number): DiscordMessage {
+/** Informational contract card for #court. No buttons: execution never waits on a human (ADR-024). */
+export function contractCard(k: DecisionContract): DiscordMessage {
   return {
     embeds: [
       {
-        title: `⚖️ ${account} approval · ${k.symbol} · ${k.strategy_id}`,
+        title: `⚖️ ${k.symbol} · ${k.strategy_id} · ${k.origin}`,
         color: COLORS.cyan,
         description: k.thesis_summary,
         fields: [
@@ -1806,16 +1808,7 @@ export function approvalMessage(account: AccountId, k: DecisionContract, expires
           { name: "Target", value: k.entry_plan.targets.join(" / "), inline: true },
           { name: "Bear case", value: k.bear_case_brief.slice(0, 1000), inline: false },
         ],
-        footer: { text: `contract ${k.contract_id} · expires <t:${Math.floor(expiresAt / 1000)}:R>` },
-      },
-    ],
-    components: [
-      {
-        type: 1,
-        components: [
-          { type: 2, style: 3, label: "Approve", custom_id: `approve:${account}:${k.contract_id}` },
-          { type: 2, style: 4, label: "Veto", custom_id: `veto:${account}:${k.contract_id}` },
-        ],
+        footer: { text: `contract ${k.contract_id}` },
       },
     ],
   };

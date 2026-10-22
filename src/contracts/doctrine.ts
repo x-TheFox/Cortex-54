@@ -25,7 +25,6 @@ export const DoctrineSchema = z.object({
       starting_equity_usd: z.number().positive(),
       autonomy_stop: z.number().int().min(0).max(4),
       apply_fee_model: z.boolean(),
-      approval_ttl_minutes: z.number().int().positive().optional(),
     }),
   ),
   rungs: z.object({ R1: Rung, R2: Rung, R3: Rung, R4: Rung, R5: Rung }),
@@ -35,6 +34,7 @@ export const DoctrineSchema = z.object({
     red_drawdown: Fraction,
     red_daily_loss: Fraction,
     red_consecutive_stopouts_24h: z.number().int().positive(),
+    paper_auto_unlock_hours: z.number().positive(),
     multipliers: z.object({ GREEN: Fraction, YELLOW: Fraction, ORANGE: Fraction, RED: z.literal(0) }),
   }),
   sizing: z.object({
@@ -169,6 +169,14 @@ export function doctrineViolations(d: Doctrine, c: Constitution): string[] {
     v.push("breaker multipliers must be non-increasing");
   }
 
+  if (b.paper_auto_unlock_hours < h.paper_red_auto_unlock_min_hours) {
+    v.push("breakers.paper_auto_unlock_hours < constitution minimum");
+  }
+  const paperStop = d.accounts.PAPER?.autonomy_stop;
+  if (paperStop !== undefined && ![0, 2, 4].includes(paperStop))
+    v.push("PAPER autonomy_stop must be 0, 2 or 4");
+  const liveStop = d.accounts.LIVE?.autonomy_stop;
+  if (liveStop !== undefined && ![0, 3, 4].includes(liveStop)) v.push("LIVE autonomy_stop must be 0, 3 or 4");
   if (d.sizing.min_stop_atr_multiple < h.min_stop_atr_multiple)
     v.push("sizing.min_stop_atr_multiple < constitution");
   if (d.sizing.edge_gate.p_full <= d.sizing.edge_gate.p_zero) v.push("edge_gate.p_full must exceed p_zero");

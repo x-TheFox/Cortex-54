@@ -280,7 +280,14 @@ describe("Brain pulse (simulated Alpaca)", () => {
     });
     await t.brain.pulse();
     expect(t.notifier.sent.filter((m) => m.channel === "alarms")).toHaveLength(0);
-    expect(t.sql.exec("SELECT id FROM d1_outbox WHERE row_json LIKE '%UNKNOWN_FILL%'")).toHaveLength(0);
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'UNKNOWN_FILL'").get()).toEqual({
+      n: 0,
+    });
+    expect(
+      t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'ACTIVITY_BASELINE'").get(),
+    ).toEqual({
+      n: 1,
+    });
   });
 
   it("budget at the hard stop blocks entries (fail closed)", async () => {
@@ -373,25 +380,95 @@ describe("risk reservations under interleaving (ADR-004)", () => {
   });
 });
 
-describe("approval flow (dial Stop 1)", () => {
-  it("posts to the court and only trades on operator approval", async () => {
+describe("autonomy policy (ADR-024/025)", () => {
+  const enableLive = (d: Doctrine) => {
+    const k = d.strategies.find((x) => x.id === "CRYPTO_BREAKOUT_BASELINE_V1");
+    if (k) k.accounts = ["PAPER", "LIVE"];
+  };
+
+  it("PAPER trades on its own; #court gets an information card with no buttons", async () => {
     const t = setup();
-    t.brain.setDial("PAPER", 1, "test", false);
     breakout(t);
     const r = await t.brain.pulse();
-    expect(r.entries).toBe(0);
+    expect(r.entries).toBe(1);
     const court = t.notifier.sent.find((m) => m.channel === "court");
-    const button = court?.msg.components?.[0]?.components[0];
-    expect(button?.custom_id).toMatch(/^approve:PAPER:/);
-    const contractId = button?.custom_id.split(":")[2] ?? "";
-    expect(await t.brain.decide(contractId, "PAPER", "APPROVE", "test")).toMatch(/entry order placed/);
-    expect([...t.paper.orders.values()].filter((o) => o.side === "buy").length).toBe(1);
-    expect(await t.brain.decide(contractId, "PAPER", "VETO", "test")).toMatch(/Already decided/);
+    expect(court?.msg.embeds?.[0]?.title).toContain("SOL/USD");
+    expect(court?.msg.components).toBeUndefined();
   });
 
-  it("LIVE above Stop 1 needs RATIFY", () => {
-    const t = setup({ live: true });
+  it("there is no approve-each-trade stop; Stop 0 is shadow only", async () => {
+    const t = setup();
+    expect(t.brain.setDial("PAPER", 1, "test", false)).toMatch(/no approve-each-trade mode/);
+    expect(t.brain.setDial("PAPER", 0, "test", false)).toMatch(/Stop 0/);
+    breakout(t);
+    const r = await t.brain.pulse();
+    expect(r.contracts).toBe(1);
+    expect(r.entries).toBe(0);
+    expect(t.paper.orders.size).toBe(0);
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'SHADOW'").get()).toEqual({
+      n: 1,
+    });
+  });
+
+  it("LIVE is dormant by default and trades only after RATIFY at Stop 3", async () => {
+    const t = setup({ live: true, d: doctrineWith(enableLive) });
+    breakout(t);
+    const r1 = await t.brain.pulse();
+    expect(r1.entries).toBe(1); // PAPER only
+    expect(t.live.orders.size).toBe(0);
+    expect(t.brain.setDial("LIVE", 1, "test", true)).toMatch(/no approve-each-trade mode/);
     expect(t.brain.setDial("LIVE", 3, "test", false)).toMatch(/RATIFY/);
     expect(t.brain.setDial("LIVE", 3, "test", true)).toMatch(/Stop 3/);
+  });
+
+  it("boot migrates a retired Stop 1 dial: LIVE → 0, PAPER → 2", () => {
+    const t = setup({ live: true });
+    t.sql.exec("UPDATE accounts SET autonomy_stop = 1");
+    t.brain.init({ test: "again" });
+    const stops = Object.fromEntries(
+      t.sql
+        .exec<{ account: string; autonomy_stop: number }>("SELECT account, autonomy_stop FROM accounts")
+        .map((r) => [r.account, r.autonomy_stop]),
+    );
+    expect(stops).toEqual({ PAPER: 2, LIVE: 0 });
+  });
+
+  it("PAPER recovers from RED by itself after the cooldown once flat; LIVE does not", async () => {
+    const t = setup({ live: true });
+    breakout(t);
+    await t.brain.pulse();
+    t.advance(60_000);
+    t.market.set("SOL/USD", 101.99, 102);
+    t.paper.tick();
+    await t.brain.pulse();
+    t.paper.cash -= 8; // big loss → RED → flatten
+    t.live.cash -= 8;
+    t.advance(60_000);
+    await t.brain.pulse();
+    t.advance(60_000);
+    await t.brain.pulse(); // exit fills are reconciled; flat now
+    const locked = (a: string) => t.brain.status().accounts.find((x) => x.account === a)?.locked;
+    expect(locked("PAPER")).toBe(true);
+    expect(locked("LIVE")).toBe(true);
+
+    t.advance(doctrine.breakers.paper_auto_unlock_hours * HOUR);
+    await t.brain.pulse();
+    expect(locked("PAPER")).toBe(false);
+    expect(t.brain.status().accounts.find((x) => x.account === "PAPER")?.mode).toBe("NORMAL");
+    expect(t.notifier.sent.some((m) => m.msg.content?.includes("Automatic PAPER recovery"))).toBe(true);
+    expect(locked("LIVE")).toBe(true); // constitution U5: only the operator unlocks LIVE
+  });
+
+  it("an orphan block clears itself once the orphan is gone", async () => {
+    const t = setup();
+    t.paper.positionsBySymbol.set("ETH/USD", { qty: 0.001, avg: 3000 });
+    await t.brain.pulse();
+    expect(t.brain.status().accounts.find((a) => a.account === "PAPER")?.mode).toBe("REDUCE_ONLY");
+    t.paper.positionsBySymbol.delete("ETH/USD"); // operator closed it in Alpaca: value returns as cash
+    t.paper.cash += 3;
+    t.advance(60_000);
+    await t.brain.pulse();
+    const a = t.brain.status().accounts.find((x) => x.account === "PAPER");
+    expect(a?.mode).toBe("NORMAL");
   });
 });

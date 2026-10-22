@@ -22,7 +22,7 @@ unattended on PAPER, kill drills, budget within plan._
 - ⚠️ Broker-side stops + synthetic stops + exit collars.
 - Constitution/doctrine loaded + zod-validated at boot; boot hash journaled.
 - D1 journal with hash chain; daily head posted to Discord.
-- Discord: interactions endpoint, `/status`, `/pause`, `/dial`, alerts channel, approval buttons (Stop 1).
+- Discord: interactions endpoint, `/status`, `/pause`, `/dial`, alerts channel (no approval buttons — ADR-024).
 - `sentinel`: watchdog, independent LIVE loss check, `/kill` flatten-all.
 - One dumb deterministic strategy (e.g. crypto 20-day breakout with ATR stop) at minimum size to exercise
   everything end to end, PAPER only.
@@ -42,8 +42,9 @@ unattended on PAPER, kill drills, budget within plan._
 - Calibration layer (shrinkage until ≥50 outcomes).
 - LLM router with families + fallbacks; prompts versioned; ResearchSprintWorkflow (bull/bear/synth).
 - ⚠️ Prompt-injection hardening and schema-only outputs.
-- DecisionContract end-to-end; PAPER at Stop 2, LIVE at Stop 1 (approve each).
-- **Exit:** ≥10 contracts produced; zero budget breaches; zero schema-invalid orders; approval flow works.
+- DecisionContract end-to-end; PAPER fully autonomous at Stop 2; LIVE dormant (Stop 0, contracts shadowed).
+- **Exit:** ≥10 contracts produced and executed on PAPER without human input; zero budget breaches; zero
+  schema-invalid orders.
 
 ## Phase 4 — Learning loop
 - signal-postmortem classification; Brier + reliability; source reputation; skill fitness.
@@ -62,9 +63,10 @@ unattended on PAPER, kill drills, budget within plan._
   Memory Vault first.
 - **Exit:** every control has parity between Discord and web.
 
-## Phase 7 — LIVE autonomy
-- LIVE Stop 1 → Stop 3 per `RISK_DOCTRINE.md` §7 gates, operator ratification.
-- Live incident drill (sentinel flatten with a real position).
+## Phase 7 — Real money (only after everything above)
+- Precondition: Phases 0–6 complete, then a ≥30-day fully autonomous PAPER run passing `RISK_DOCTRINE.md` §7.
+- Operator adds LIVE keys, funds $54, runs a live kill drill, then ratifies LIVE Stop 0 → Stop 3. There is no
+  approve-each-trade stage: LIVE goes from dormant straight to autonomous within the same rails as PAPER.
 
 ## Deferred / cut
 | Item | Status | Reason |
