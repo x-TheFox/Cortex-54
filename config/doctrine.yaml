@@ -93,6 +93,8 @@ execution:
   exit_collar_bps: 75 # marketable-limit exits capped this far through the touch
   no_entry_last_minutes_of_session: 10
   earnings_blackout_hours: 72
+  max_spread_bps: { CRYPTO: 30, EQUITIES: 25, OPTIONS: 500 }
+  reservation_ttl_seconds: 120
 
 cadence:
   pulse_seconds_exposed: 60
@@ -121,6 +123,7 @@ funnel:
   calibration:
     min_outcomes_before_trusting: 50
     shrink_to: 0.5
+    warmup_min_weight: 0.3 # floor on trust during warm-up so the system can collect outcomes at all
 
 budgets:
   thrift_fraction: 0.7
@@ -173,7 +176,15 @@ strategies:
     arena: CRYPTO
     status: ACTIVE # Phase 1 plumbing strategy, deterministic, no LLM
     universe: [BTC/USD, ETH/USD, SOL/USD]
-    params: { lookback_days: 20, atr_stop_multiple: 2.0, max_hold_hours: 72 }
+    params:
+      lookback_days: 20
+      atr_period: 14
+      atr_stop_multiple: 2.0
+      atr_target_multiple: 3.0
+      max_hold_hours: 72
+      prior_win_prob: 0.6 # deterministic strategies have no Clef probability; this prior feeds the sizer
+      conviction: 5
+      regime_proxy_ema: 20 # Phase 1 regime proxy: BTC daily close above its EMA20 (until batch regime lands)
     accounts: [PAPER]
   - id: EQUITY_MOMENTUM_BURST_V1
     arena: EQUITIES

@@ -75,3 +75,39 @@ router can't satisfy it within free quotas, the sprint is rejected and journaled
 **Context:** TS 7 (native) and Vitest 5 are current, but `@cloudflare/vitest-pool-workers@0.23` peers on
 Vitest ^4.1 and Wrangler tooling is validated on TS 5.x.
 **Decision:** Pin TS ^5.9.3 and Vitest ^4.1. Revisit when the pool supports Vitest 5.
+
+## ADR-015 — Kill flag lives in Workers KV, written only by sentinel (2026-10-22)
+**Context:** After sentinel flattens, the brain must not re-enter. Sentinel needs state that survives the
+brain being broken; the brain must not be able to clear it.
+**Decision:** Shared KV namespace `FLAGS`; sentinel writes/clears `killed` (`/kill`, `/rearm`, auto-kill on
+LIVE daily loss or brain death); the brain reads it every pulse (~1,440 reads/day, free tier 100k). A KV read
+error is treated as UNKNOWN → no entries.
+
+## ADR-016 — Deterministic strategies emit RULE contracts (2026-10-22)
+**Context:** U1 requires a contract for every order, but the Phase 1 baseline has no LLM.
+**Decision:** `origin: RULE | COURT`. RULE contracts carry no Clef probabilities; the sizer uses the
+strategy's doctrine `prior_win_prob`. COURT contracts must carry Clef probabilities and a cross-family
+bull/bear pair. D1 migration 0002 adds the column.
+
+## ADR-017 — Phase 1 cancels stale entries instead of re-pegging (2026-10-22)
+**Decision:** Passive entries are cancelled after `max_unfilled_pulses`; no chasing. Re-peg on ATR moves
+arrives with urgency-aware court contracts (Phase 3).
+
+## ADR-018 — Paper fee model assumes maker entries, taker exits (2026-10-22)
+**Decision:** Every paper fill is charged `fee + paper_slippage_bps` (rounded up to the cent) into
+`modeled_cost_cents`; effective paper equity = broker equity − modeled costs, and breakers/sizing/graduation
+use effective equity. Exits and stops are always priced as taker.
+
+## ADR-019 — Brain tested in Node with node:sqlite and an Alpaca simulator (2026-10-22)
+**Context:** `@cloudflare/vitest-pool-workers` can't easily inject a fake broker into a DO.
+**Decision:** All logic lives in `Brain`, which depends on narrow interfaces (`SqlLike`, `BrokerApi`,
+`MarketDataApi`, `Notifier`, `D1Like`). Tests run full pulses against `test/sim/FakeBroker.ts`, and outbox rows
+are inserted into SQLite with the real D1 migrations applied, so schema drift fails CI. The DO is a thin host,
+smoke-tested with `wrangler dev`.
+
+## ADR-020 — Order ids use distinct role letters E/S/X (2026-10-22)
+**Context:** The first draft derived the role letter from `role[0]`, so ENTRY and EXIT both produced `E` and an
+exit reused the entry's client_order_id. The simulator caught it: Alpaca rejected the duplicate and the brain
+adopted the old filled entry as the "exit".
+**Decision:** `E` entry, `S` stop, `X` exit, with a regression test.
+

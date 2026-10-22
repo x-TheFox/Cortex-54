@@ -4,5 +4,12 @@
     "types": ["node"],
     "lib": ["ES2023", "DOM"]
   },
-  "include": ["scripts", "test", "src/contracts", "vitest.config.ts"]
+  "include": [
+    "scripts",
+    "test",
+    "src/contracts",
+    "src/discord/commands.ts",
+    "workers/sentinel/src/commands.ts",
+    "vitest.config.ts"
+  ]
 }

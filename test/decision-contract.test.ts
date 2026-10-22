@@ -9,6 +9,7 @@ const valid: DecisionContract = {
   contract_id: "01928f4e-7b2a-7c3d-8e4f-5a6b7c8d9e0f",
   created_at: 1_793_000_000_000,
   schema_version: 1,
+  origin: "COURT",
   symbol: "SOL/USD",
   arena: "CRYPTO",
   strategy_id: "CRYPTO_VCP_BREAKOUT_V1",
@@ -33,6 +34,9 @@ const valid: DecisionContract = {
     calibrated_win_prob: 0.58,
     composite_suitability_score: 81,
   },
+  win_prob_used: 0.58,
+  bear_lethality: 0.35,
+  atr: 3.8,
   cost_and_fee_drag: {
     entry_fee_bps: 15,
     exit_fee_bps: 15,

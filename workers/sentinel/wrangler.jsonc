@@ -7,9 +7,15 @@
   "compatibility_date": "2026-10-01",
   "observability": { "enabled": true },
   "triggers": { "crons": ["* * * * *"] },
+  // Same KV namespace as cortex. Sentinel writes `killed`; the brain only reads it.
+  // Run `pnpm wrangler kv namespace create FLAGS` and paste the id here and in ../../wrangler.jsonc.
+  "kv_namespaces": [{ "binding": "FLAGS", "id": "00000000000000000000000000000000" }],
   "vars": {
     // Set to your deployed cortex URL, e.g. https://cortex.<subdomain>.workers.dev/health
     "CORTEX_HEALTH_URL": "",
-    "STALE_ALERT_MINUTES": "3"
+    "STALE_ALERT_MINUTES": "3",
+    // Constitution max_daily_loss_pct. The brain's own RED (5%) normally trips first.
+    "MAX_DAILY_LOSS_PCT": "0.06",
+    "FLATTEN_ON_BRAIN_DEATH_MINUTES": "60"
   }
 }

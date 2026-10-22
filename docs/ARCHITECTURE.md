@@ -78,8 +78,13 @@ flatten). Re-peg policy: crypto/equity limit pegged at best bid (buys) / best as
 re-evaluate each pulse; cancel after `doctrine.execution.max_unfilled_pulses`; never cross the spread
 unless `urgency = IMMEDIATE` and the fee hurdle still clears at taker rates.
 
-Idempotency: `client_order_id = c54-{P|L}-{contract8}-{leg}-{attempt}`. A retried submit with the same id is
-safe; Alpaca rejects duplicates.
+Idempotency: `client_order_id = c54-{P|L}-{contract8}-{E|S|X}-{attempt}` (entry/stop/exit). A retried submit
+with the same id is safe; Alpaca rejects duplicates and the brain adopts the existing order. Open broker orders
+with our prefix that the DO doesn't know (crash between submit and record) are adopted on the next sync;
+anything else unknown → REDUCE_ONLY + alert.
+
+Phase 1 implementation: `src/cortex/Brain.ts` (logic), `src/cortex/AgentCortexDO.ts` (host). Stale passive
+entries are cancelled, not re-pegged (ADR-017).
 
 ## 5. Paper ↔ Live twin
 
@@ -180,5 +185,8 @@ Cortex & Clef Studio, Memory Vault. Others later.
   > 15 min with LIVE positions open → place/verify broker-side stops directly (it has its own LIVE keys copy).
 - Independent LIVE daily-loss check from Alpaca `/v2/account` (`equity` vs `last_equity`). Breach of
   constitution daily loss → cancel all orders + close all positions + set a "KILLED" flag the brain reads.
-- `/kill` slash command (SENTINEL app) → same flatten path. Requires the operator ID.
+- `/kill` slash command (SENTINEL app) → same flatten path. Requires the operator ID. `/rearm` clears the flag,
+  `/sentinel` shows it.
+- Kill state is the KV key `killed` in the shared `FLAGS` namespace (ADR-015). Brain-death flatten fires after
+  `FLATTEN_ON_BRAIN_DEATH_MINUTES` (default 60) only if LIVE holds positions.
 - Kept tiny: no shared modules with `cortex` except a vendored, frozen copy of the HMAC/Ed25519 helpers.

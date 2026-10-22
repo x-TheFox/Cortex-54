@@ -12,6 +12,8 @@ override). ⚠️ marks the riskiest work.
 - **Exit:** CI green; `cortex` deploys from CI; `/health` returns the DO's boot hash; D1 migrated.
 
 ## Phase 1 — Safety spine, no AI ⚠️⚠️⚠️
+_Status 2026-10-22: code complete and simulator-tested (61 tests). Exit gate needs real accounts: 7 days
+unattended on PAPER, kill drills, budget within plan._
 - `AgentCortexDO`: hot schema, alarm pulse, cadence rules, `FreeTierBudget` meter + modes.
 - Alpaca client (paper + live), zod-validated; clock/calendar/assets cache.
 - Reconciliation (broker = truth), orphan handling, fill cursor via activities.

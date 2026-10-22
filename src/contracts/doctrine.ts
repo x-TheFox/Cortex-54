@@ -63,6 +63,8 @@ export const DoctrineSchema = z.object({
     exit_collar_bps: z.number().positive(),
     no_entry_last_minutes_of_session: z.number().int().nonnegative(),
     earnings_blackout_hours: z.number().int().nonnegative(),
+    max_spread_bps: z.record(Arena, z.number().positive()),
+    reservation_ttl_seconds: z.number().int().positive(),
   }),
   cadence: z.object({
     pulse_seconds_exposed: z.number().int().min(30),
@@ -91,7 +93,11 @@ export const DoctrineSchema = z.object({
       max_sprints_per_day: z.number().int().nonnegative(),
       min_structural_score: z.number().min(0).max(100),
     }),
-    calibration: z.object({ min_outcomes_before_trusting: z.number().int().positive(), shrink_to: Fraction }),
+    calibration: z.object({
+      min_outcomes_before_trusting: z.number().int().positive(),
+      shrink_to: Fraction,
+      warmup_min_weight: Fraction,
+    }),
   }),
   budgets: z.object({
     thrift_fraction: Fraction,
