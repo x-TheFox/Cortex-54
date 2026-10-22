@@ -6,7 +6,15 @@ import {
   type Quote,
 } from "../broker/types.ts";
 import { DO_MEMORY_GB, FreeTierBudget, SubrequestBudgetExceeded, utcDay } from "../budget/FreeTierBudget.ts";
-import { type Batch, BatchSchema } from "../contracts/batch.ts";
+import { CLEF_CONTEXT_TOKENS, type ClefApi, estimateTokens } from "../clef/ClefClient.ts";
+import {
+  buildTier1,
+  interpretTier1,
+  neuronsFor,
+  TIER1_PROMPT_VERSION,
+  type TriageItem,
+} from "../clef/triage.ts";
+import { type Batch, BatchSchema, WorldCandidateSchema } from "../contracts/batch.ts";
 import type { Constitution } from "../contracts/constitution.ts";
 import { type DecisionContract, DecisionContractSchema } from "../contracts/decision-contract.ts";
 import type { Doctrine } from "../contracts/doctrine.ts";
@@ -127,6 +135,8 @@ export interface BrainDeps {
   d1: D1Like | null;
   readKillFlag: () => Promise<boolean>;
   now: () => number;
+  /** Workers AI Clef (Tier 1/2). Null disables the funnel; trading is unaffected. */
+  clef?: ClefApi | null;
 }
 
 export interface PulseReport {
@@ -139,6 +149,8 @@ export interface PulseReport {
   exits: number;
   flushed: number;
   newsQueued: number;
+  triaged: number;
+  promoted: number;
   nextPulseSeconds: number;
 }
 
@@ -256,6 +268,8 @@ export class Brain {
       exits: 0,
       flushed: 0,
       newsQueued: 0,
+      triaged: 0,
+      promoted: 0,
       nextPulseSeconds: this.d.cadence.pulse_seconds_flat,
     };
     this.budget.add("do_requests", 1, started);
@@ -313,6 +327,20 @@ export class Brain {
     } catch (e) {
       if (!(e instanceof SubrequestBudgetExceeded)) {
         await this.alertOnce("news-intake", `⚠️ news intake failed: ${errText(e).slice(0, 200)}`);
+      }
+    }
+
+    // 2c. Tier 1 triage (Phase 3): one batched clef-flash call over the queue. Never blocks trading.
+    try {
+      for (let i = 0; i < this.d.funnel.tier1.max_batches_per_pulse; i++) {
+        const t = await this.triageTier1();
+        report.triaged += t.triaged;
+        report.promoted += t.promoted;
+        if (t.triaged === 0) break;
+      }
+    } catch (e) {
+      if (!(e instanceof SubrequestBudgetExceeded)) {
+        await this.alertOnce("triage-t1", `⚠️ Tier 1 triage failed: ${errText(e).slice(0, 200)}`);
       }
     }
 
@@ -1212,6 +1240,111 @@ ${postmortem}`,
     return queued;
   }
 
+  /**
+   * Tier 1 (CLAUDE.md §3): batch the oldest tier-1 queue items into one clef-flash call. Promote material,
+   * high-priority items to tier 2 (posted to #world-intel); drop the rest. Spend is metered from Clef's own
+   * token usage; when the daily tier-1 allocation is spent, triage waits for 00:00 UTC.
+   */
+  private async triageTier1(): Promise<{ triaged: number; promoted: number }> {
+    const clef = this.deps.clef;
+    if (!clef) return { triaged: 0, promoted: 0 };
+    const now = this.deps.now();
+    const t = this.d.funnel.tier1;
+    const rows = this.sql.exec<{
+      candidate_id: string;
+      symbol: string;
+      payload_json: string;
+      enqueued_at: number;
+    }>(
+      "SELECT candidate_id, symbol, payload_json, enqueued_at FROM triage_queue WHERE tier = 1 ORDER BY enqueued_at LIMIT ?",
+      t.batch_max_items,
+    );
+    if (rows.length === 0) return { triaged: 0, promoted: 0 };
+    let items: TriageItem[] = rows.map((r) => {
+      const p = JSON.parse(r.payload_json) as Record<string, unknown>;
+      const created = typeof p.createdAt === "number" ? p.createdAt : r.enqueued_at;
+      return {
+        candidateId: r.candidate_id,
+        kind: String(p.kind ?? "news"),
+        symbols: Array.isArray(p.symbols) ? (p.symbols as string[]).slice(0, 8) : [r.symbol],
+        headline: String(p.headline ?? p.title ?? "").slice(0, 300),
+        summary: String(p.summary ?? "").slice(0, 280),
+        source: String(p.source ?? "").slice(0, 40),
+        ageMinutes: Math.max(0, Math.round((now - created) / 60_000)),
+      };
+    });
+    const context = {
+      held: this.symbolsInPlay(),
+      watched: this.newsSymbols().slice(0, 20),
+      crypto_regime: this.freshRegime("CRYPTO", now)?.posture ?? "unknown",
+      equity_posture: this.freshRegime("EQUITIES", now)?.posture ?? "unknown",
+    };
+    let req = buildTier1(items, context);
+    while (estimateTokens(req.state, req.questions) > CLEF_CONTEXT_TOKENS * 0.85 && items.length > 1) {
+      items = items.slice(0, Math.ceil(items.length / 2));
+      req = buildTier1(items, context);
+    }
+    const est = estimateTokens(req.state, req.questions);
+    if (!this.budget.canSpendNeurons("neurons_tier1", neuronsFor("clef-flash", est, this.d), now)) {
+      return { triaged: 0, promoted: 0 };
+    }
+    const started = this.deps.now();
+    let result: Awaited<ReturnType<ClefApi["run"]>>;
+    try {
+      result = await clef.run("clef-flash", req.state, req.questions);
+    } catch (e) {
+      if (/neuron|quota|limit|exceeded|4006/i.test(errText(e))) {
+        // Workers AI says we're out: stop tier 1 for the rest of the UTC day.
+        this.budget.add("neurons_tier1", this.d.budgets.workers_ai_neurons_per_day.tier1, now);
+      }
+      throw e;
+    }
+    const latency = this.deps.now() - started;
+    const neurons = neuronsFor("clef-flash", result.usage.input_tokens ?? est, this.d);
+    this.budget.add("neurons_tier1", neurons, now);
+
+    const decisions = interpretTier1(items, result, this.d);
+    let promoted = 0;
+    for (const [i, dcs] of decisions.entries()) {
+      const it = items[i] as TriageItem;
+      if (!dcs.promote) {
+        this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", dcs.candidateId);
+        continue;
+      }
+      promoted++;
+      const row = rows.find((r) => r.candidate_id === dcs.candidateId);
+      const payload = { ...(JSON.parse(row?.payload_json ?? "{}") as Record<string, unknown>), tier1: dcs };
+      this.sql.exec(
+        "UPDATE triage_queue SET tier = 2, payload_json = ? WHERE candidate_id = ?",
+        JSON.stringify(payload),
+        dcs.candidateId,
+      );
+      if (promoted <= 5) void this.deps.notifier.post("world_intel", intelCard(it, dcs, payload));
+    }
+    this.journal.enqueue(
+      "triage_log",
+      {
+        ts: now,
+        tier: 1,
+        model: "clef-flash",
+        candidate_ids: JSON.stringify(items.map((x) => x.candidateId)),
+        state_sha256: sha256Hex(JSON.stringify(req.state)),
+        answers_json: JSON.stringify({ prompt: TIER1_PROMPT_VERSION, decisions }).slice(0, 60_000),
+        neurons_est: neurons,
+        latency_ms: latency,
+      },
+      now,
+    );
+    this.journal.append(
+      "SYSTEM",
+      "TRIAGE",
+      null,
+      { tier: 1, items: items.length, promoted, neurons: Math.round(neurons * 100) / 100 },
+      now,
+    );
+    return { triaged: items.length, promoted };
+  }
+
   /** Research batch from GitHub Actions (HMAC already verified by the router). Returns a short receipt. */
   async ingestBatch(raw: unknown): Promise<{ ok: boolean; message: string }> {
     const now = this.deps.now();
@@ -1243,6 +1376,39 @@ ${postmortem}`,
         },
         now,
       );
+    }
+    if (b.job === "world-intel" || b.posture === null) {
+      let queued = 0;
+      for (const item of b.items) {
+        const list = (item.payload as { candidates?: unknown }).candidates;
+        if (!Array.isArray(list)) continue;
+        for (const c of list.slice(0, 100)) {
+          const parsedC = WorldCandidateSchema.safeParse(c);
+          if (!parsedC.success) continue;
+          const w = parsedC.data;
+          const id = `${w.kind}:${w.id}`;
+          if (one(this.sql, "SELECT candidate_id FROM triage_queue WHERE candidate_id = ?", id)) continue;
+          this.sql.exec(
+            "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 1, ?, ?, ?)",
+            id,
+            w.symbols[0] ?? "",
+            JSON.stringify({
+              kind: w.kind,
+              headline: w.title,
+              summary: w.topic ? `topic: ${w.topic}` : "",
+              symbols: w.symbols,
+              source: w.source,
+              url: w.url,
+              createdAt: w.published_at,
+            }),
+            now,
+          );
+          queued++;
+        }
+      }
+      if (queued > 0) this.journal.append("SYSTEM", "WORLD_INTAKE", b.job, { queued }, now);
+      await this.flushJournal();
+      return { ok: true, message: `queued ${queued} world-intel candidate(s)` };
     }
     const prev = one<{ posture: string; score: number | null }>(
       this.sql,
@@ -2023,6 +2189,7 @@ const postureColor = (p: string) =>
 /** Posture card for #pulse-and-briefs (crypto every 4 h, equities pre-open/post-close). */
 export function postureCard(b: Batch, previous: string | null): DiscordMessage {
   const p = b.posture;
+  if (!p) return { content: `${b.job}: ${b.items.length} item(s)` };
   const changed = previous !== null && previous !== p.posture ? ` (was ${previous})` : "";
   return {
     embeds: [
@@ -2048,6 +2215,28 @@ export function postureCard(b: Batch, previous: string | null): DiscordMessage {
           text: `${b.job} · produced ${new Date(b.produced_at).toISOString()}${b.run_url ? " · GitHub Actions" : ""}`,
         },
         timestamp: new Date(b.produced_at).toISOString(),
+      },
+    ],
+  };
+}
+
+/** #world-intel card for a Tier 1 promotion. */
+export function intelCard(
+  it: TriageItem,
+  d: { material: number; direction: string; escalate: number },
+  payload: Record<string, unknown>,
+): DiscordMessage {
+  const arrow = d.direction === "up" ? "📈" : d.direction === "down" ? "📉" : "↔️";
+  const url = typeof payload.url === "string" && payload.url.startsWith("https://") ? payload.url : null;
+  return {
+    embeds: [
+      {
+        title: `${arrow} ${it.symbols.slice(0, 4).join(", ") || it.kind} · P(material) ${d.material.toFixed(2)} · priority ${d.escalate.toFixed(1)}/3`,
+        color: d.direction === "up" ? COLORS.green : d.direction === "down" ? COLORS.red : COLORS.cyan,
+        description: `${it.headline.slice(0, 300)}${url ? `\n${url}` : ""}`,
+        footer: {
+          text: `${it.kind} · ${it.source} · ${it.ageMinutes}m old · Tier 1 clef-flash → Tier 2 queue`,
+        },
       },
     ],
   };

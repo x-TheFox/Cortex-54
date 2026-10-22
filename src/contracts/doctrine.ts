@@ -81,8 +81,10 @@ export const DoctrineSchema = z.object({
   funnel: z.object({
     tier1: z.object({
       model: z.string(),
-      batch_max_items: z.number().int().min(1).max(32),
+      batch_max_items: z.number().int().min(1).max(21),
       escalate_threshold: Fraction,
+      min_escalate_score: z.number().min(0).max(3),
+      max_batches_per_pulse: z.number().int().min(0).max(16),
     }),
     tier2: z.object({
       model: z.string(),
@@ -109,6 +111,7 @@ export const DoctrineSchema = z.object({
       tier3_fallback: z.number().nonnegative(),
       reserve: z.number().nonnegative(),
     }),
+    neurons_per_mtok: z.record(z.string(), z.number().positive()),
     daily_limits: z.record(z.string(), z.number().positive()),
     per_invocation: z.object({
       subrequests: z.number().int().positive(),

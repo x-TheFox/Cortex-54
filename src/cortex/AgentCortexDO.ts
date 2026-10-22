@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { AlpacaClient, AlpacaMarketData } from "../broker/AlpacaClient.ts";
 import type { BrokerApi } from "../broker/types.ts";
 import { InvocationMeter } from "../budget/FreeTierBudget.ts";
+import { WorkersAiClef } from "../clef/ClefClient.ts";
 import { DiscordNotifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
 import type { Env } from "../env.ts";
 import { CONSTITUTION, CONSTITUTION_SHA256, DOCTRINE, DOCTRINE_SHA256 } from "../generated/config.ts";
@@ -70,6 +71,7 @@ export class AgentCortexDO extends DurableObject<Env> {
         : new NullNotifier(),
       d1: env.DB,
       readKillFlag: async () => (await env.FLAGS.get("killed")) !== null,
+      clef: new WorkersAiClef(env.AI),
       now: () => Date.now(),
     });
 

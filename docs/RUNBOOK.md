@@ -54,7 +54,8 @@ set -a; . ./.dev.vars; set +a      # DISCORD_BOT_TOKEN, DISCORD_APP_ID, DISCORD_
 pnpm discord:setup                 # category, channels, webhook → workers/sentinel/.dev.vars, guild commands
 ```
 GitHub: secrets `SENTINEL_TICK_SECRET`, `INGEST_HMAC_SECRET`, `FMP_API_KEY`, `FRED_API_KEY`; variables
-`SENTINEL_URL`, `CORTEX_URL`. Run a research batch now: `gh workflow run research -f job=crypto` (or `equity`).
+`SENTINEL_URL`, `CORTEX_URL`. Run a research batch now: `gh workflow run research -f job=crypto` (or `equity`, `world`).
+EDGAR needs secret `SEC_USER_AGENT` = `"<name> <contact email>"` (SEC policy); without it the world job skips EDGAR.
 Local dry run: `cd research && UPSTREAM_DIR=<checkout> uv run python -m cortex_research.run crypto --dry-run`.
 
 ## B. Daily operator glance (Discord)

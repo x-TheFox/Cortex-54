@@ -159,6 +159,16 @@ def equity_job(out: Path, version: str) -> dict:
     return P.batch("equity-posture", t, run_url(), items, P.equity_posture(exposure))
 
 
+def world_job(version: str) -> dict | None:
+    from .world import world_items
+
+    t = now_ms()
+    items, _failed = world_items("gdelt-doc-v2", t, Path(__file__).resolve().parents[2])
+    if not items:
+        return None
+    return P.batch("world-intel", t, run_url(), items, None)
+
+
 def sign_and_post(body: str) -> requests.Response:
     secret = os.environ["INGEST_HMAC_SECRET"]
     ts = str(int(time.time()))
@@ -174,16 +184,23 @@ def sign_and_post(body: str) -> requests.Response:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["crypto", "equity"])
+    ap.add_argument("job", choices=["crypto", "equity", "world"])
     ap.add_argument("--dry-run", action="store_true", help="print the payload instead of posting")
     a = ap.parse_args()
     version = os.environ.get("UPSTREAM_SHA", "unknown")
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp)
-        b = crypto_job(out, version) if a.job == "crypto" else equity_job(out, version)
+    if a.job == "world":
+        b = world_job(version)
+        if b is None:
+            print("world-intel: no candidates this run")
+            return 0
+    else:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            b = crypto_job(out, version) if a.job == "crypto" else equity_job(out, version)
     body = P.dumps(b)
-    print(f"{b['job']}: {b['posture']['arena']} {b['posture']['posture']} score {b['posture']['score']:.1f} "
-          f"({len(b['items'])} items, {len(body)} bytes)")
+    p = b["posture"]
+    head = f"{p['arena']} {p['posture']} score {p['score']:.1f}" if p else f"{sum(len(i['payload'].get('candidates', [])) for i in b['items'])} candidates"
+    print(f"{b['job']}: {head} ({len(b['items'])} items, {len(body)} bytes)")
     if a.dry_run:
         print(body[:2000])
         return 0

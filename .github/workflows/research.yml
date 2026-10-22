@@ -8,13 +8,14 @@ on:
     - cron: "7 */4 * * *" # crypto regime every 4 h
     - cron: "40 12 * * 1-5" # equity posture before the US open (08:40 EDT / 07:40 EST)
     - cron: "20 21 * * 1-5" # equity posture after the close
+    - cron: "17 * * * *" # world intel (GDELT + EDGAR) hourly
   workflow_dispatch:
     inputs:
       job:
         description: "Which job"
         required: true
         type: choice
-        options: [crypto, equity]
+        options: [crypto, equity, world]
 
 permissions:
   contents: read
@@ -39,8 +40,10 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "job=${{ inputs.job }}" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "7 */4 * * *" ]; then echo "job=crypto" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.event.schedule }}" = "17 * * * *" ]; then echo "job=world" >> "$GITHUB_OUTPUT";
           else echo "job=equity" >> "$GITHUB_OUTPUT"; fi
       - name: Checkout pinned upstream skills
+        if: steps.pick.outputs.job != 'world'
         run: |
           git clone --filter=blob:none "https://github.com/${UPSTREAM_REPO}" research/.vendor/upstream
           git -C research/.vendor/upstream checkout --quiet "${UPSTREAM_SHA}"
@@ -52,4 +55,5 @@ jobs:
           INGEST_HMAC_SECRET: ${{ secrets.INGEST_HMAC_SECRET }}
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
         run: uv run python -m cortex_research.run "${{ steps.pick.outputs.job }}"
