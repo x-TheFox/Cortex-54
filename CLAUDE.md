@@ -356,7 +356,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-22: PR #7 merged. Phase 4 Governor built (branch `phase-4-governor`, ADR-030): `governor.yml` daily
   (grades, postmortems, fitness, LIVE-gate tracker) and Sunday (report card to #governor, calibration proposal
   once ≥50 outcomes). Brain reads it via HMAC `/governor/export`; DAY_ROLL now carries pulses / max gap / equity.
-  First live run posted a report card. Actions can't open PRs in this repo (setting off) → the workflow pushes a
-  branch and prints a compare link instead.
+  First live run posted a report card. Operator enabled "Actions may create PRs"; the workflow still falls back
+  to a compare link if that is ever turned off. PRs opened by GITHUB_TOKEN don't trigger CI; CI runs on merge.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.
