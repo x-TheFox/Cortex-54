@@ -1,0 +1,37 @@
+// CORTEX-54 brain worker. Workers FREE plan only (ADR-001). See docs/FREE_TIER_BUDGET.md before adding bindings.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cortex",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+
+  "durable_objects": {
+    "bindings": [{ "name": "CORTEX", "class_name": "AgentCortexDO" }]
+  },
+  // Free plan supports SQLite-backed Durable Objects only.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentCortexDO"] }],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cortex-journal",
+      // Run `pnpm wrangler d1 create cortex-journal` and paste the id here.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Workers AI: 10,000 neurons/day free, hard fail beyond. Every call goes through FreeTierBudget.
+  "ai": { "binding": "AI" },
+
+  // Workflows (Phase 3): ResearchSprintWorkflow binding is added when the class exists.
+
+  // 5 cron triggers per account on Free; sentinel uses one more.
+  "triggers": { "crons": ["*/5 * * * *"] },
+
+  "vars": {
+    "CORTEX_ENV": "production",
+    "CORTEX_DO_NAME": "CORTEX-54-PRIMARY"
+  }
+}

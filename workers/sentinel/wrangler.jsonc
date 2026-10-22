@@ -1,0 +1,15 @@
+// SENTINEL — independent watchdog + kill-switch (docs/ARCHITECTURE.md §12, ADR-012).
+// Separate deploy, separate Discord app, its own copies of secrets. Shares no runtime code with `cortex`.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "cortex-sentinel",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    // Set to your deployed cortex URL, e.g. https://cortex.<subdomain>.workers.dev/health
+    "CORTEX_HEALTH_URL": "",
+    "STALE_ALERT_MINUTES": "3"
+  }
+}

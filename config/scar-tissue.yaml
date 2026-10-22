@@ -1,0 +1,13 @@
+# Reflective memory ("scar tissue"). Added only via pull request, never mid-trade or mid-loss-streak.
+# A rule needs >= 3 matching episodic postmortems cited by contract_id.
+# kind: hard_filter (compiled into Tier 0) | context (injected into Tier 2/3 state)
+version: 1
+rules: []
+# Example shape:
+# - id: SCAR-001
+#   kind: hard_filter
+#   arena: CRYPTO
+#   rule: "No long crypto breakout entries when 8h annualized funding > 35%."
+#   expression: { field: crypto.funding_8h_annualized, op: ">", value: 0.35, action: reject }
+#   evidence: [<contract_id>, <contract_id>, <contract_id>]
+#   added: 2026-11-01

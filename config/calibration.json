@@ -1,0 +1,6 @@
+{
+  "$comment": "Isotonic calibration maps per tier/question, produced by the weekly Governor PR. Until min_outcomes is reached the sizer shrinks raw probabilities toward 0.5 (see doctrine.funnel.calibration).",
+  "version": 1,
+  "generated_at": null,
+  "maps": {}
+}

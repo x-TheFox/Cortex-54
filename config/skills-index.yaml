@@ -1,0 +1,414 @@
+# Canonical skill registry. Rules in docs/SKILLS_PORTING.md.
+# runtime: ts-hot | py-batch | llm-prompt | deferred | cut
+# status:  PROPOSAL | SHADOW | ACTIVE | DEMOTED   (only ACTIVE skills influence sizing)
+version: 1
+sources:
+  tradermonty: { repo: tradermonty/claude-trading-skills, license: MIT }
+  staskh: { repo: staskh/trading_skills, license: MIT }
+  new: { repo: x-TheFox/Cortex-54, license: TBD }
+
+families:
+  CTX: Market context and regime
+  RES: Research and screening
+  STR: Structure and quant
+  RSK: Risk and capital
+  EXE: Execution and bookkeeping
+  GOV: Meta-governance
+
+skills:
+  # ---------- RSK (ts-hot, Phase 1) ----------
+  - {
+      id: position-sizer,
+      family: RSK,
+      source: tradermonty,
+      runtime: ts-hot,
+      phase: 1,
+      status: ACTIVE,
+      consumer: pre-trade-validator,
+    }
+  - {
+      id: pre-trade-validator,
+      family: RSK,
+      source: tradermonty,
+      upstream: pre-trade-discipline-gate,
+      runtime: ts-hot,
+      phase: 1,
+      status: ACTIVE,
+      consumer: every-order,
+    }
+  - {
+      id: drawdown-circuit-breaker,
+      family: RSK,
+      source: tradermonty,
+      runtime: ts-hot,
+      phase: 1,
+      status: ACTIVE,
+      consumer: pulse,
+    }
+  - {
+      id: portfolio-heat-monitor,
+      family: RSK,
+      source: new,
+      runtime: ts-hot,
+      phase: 1,
+      status: ACTIVE,
+      consumer: pre-trade-validator,
+    }
+  - {
+      id: correlation-guard,
+      family: RSK,
+      source: new,
+      runtime: ts-hot,
+      phase: 2,
+      status: SHADOW,
+      consumer: pre-trade-validator,
+    }
+  - {
+      id: settlement-ledger,
+      family: RSK,
+      source: new,
+      runtime: ts-hot,
+      phase: 1,
+      status: ACTIVE,
+      consumer: position-sizer,
+    }
+
+  # ---------- EXE (ts-hot, Phase 1) ----------
+  - { id: alpaca-client, family: EXE, source: new, runtime: ts-hot, phase: 1, status: ACTIVE }
+  - {
+      id: smart-order-router,
+      family: EXE,
+      source: new,
+      runtime: ts-hot,
+      phase: 1,
+      status: ACTIVE,
+      notes: "passive limit pegging; no post_only on Alpaca crypto",
+    }
+  - { id: fill-reconciler, family: EXE, source: new, runtime: ts-hot, phase: 1, status: ACTIVE }
+  - { id: fee-and-slippage-auditor, family: EXE, source: new, runtime: ts-hot, phase: 1, status: ACTIVE }
+  - {
+      id: shadow-twin-tracker,
+      family: EXE,
+      source: new,
+      runtime: ts-hot,
+      phase: 1,
+      status: ACTIVE,
+      notes: "paper<->live divergence per contract",
+    }
+  - {
+      id: trader-memory-core,
+      family: EXE,
+      source: tradermonty,
+      runtime: ts-hot,
+      phase: 1,
+      status: ACTIVE,
+      notes: "becomes the D1 journal writer",
+    }
+
+  # ---------- STR ----------
+  - {
+      id: technical-indicators,
+      family: STR,
+      source: staskh,
+      upstream: technicals,
+      runtime: ts-hot,
+      phase: 2,
+      status: ACTIVE,
+      notes: "ATR, EMA, RSI, VWAP dist, vol z, Yang-Zhang RV; parity fixtures",
+    }
+  - {
+      id: black-scholes-greeks-desk,
+      family: STR,
+      source: staskh,
+      upstream: [black_scholes, greeks],
+      runtime: ts-hot,
+      phase: 5,
+      status: SHADOW,
+    }
+  - {
+      id: spread-structurer,
+      family: STR,
+      source: staskh,
+      upstream: spreads,
+      runtime: ts-hot,
+      phase: 5,
+      status: SHADOW,
+    }
+  - {
+      id: scanner-pmcc-rubric,
+      family: STR,
+      source: staskh,
+      upstream: scanner_pmcc,
+      runtime: ts-hot,
+      phase: 5,
+      status: SHADOW,
+    }
+  - {
+      id: zero-dte-credit-spread-gate,
+      family: STR,
+      source: staskh,
+      upstream: ib_0dte,
+      runtime: deferred,
+      phase: 5,
+      status: PROPOSAL,
+      notes: "math only; IBKR I/O dropped",
+    }
+  - { id: implied-move-extractor, family: STR, source: new, runtime: ts-hot, phase: 5, status: SHADOW }
+  - {
+      id: piotroski-fscore,
+      family: STR,
+      source: staskh,
+      upstream: piotroski,
+      runtime: py-batch,
+      phase: 2,
+      status: SHADOW,
+    }
+  - {
+      id: breakout-trade-planner,
+      family: STR,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 2,
+      status: SHADOW,
+    }
+  - {
+      id: options-strategy-advisor,
+      family: STR,
+      source: tradermonty,
+      runtime: deferred,
+      phase: 5,
+      status: PROPOSAL,
+    }
+
+  # ---------- CTX ----------
+  - {
+      id: exposure-coach,
+      family: CTX,
+      source: tradermonty,
+      runtime: ts-hot,
+      phase: 2,
+      status: ACTIVE,
+      notes: "combine step in TS; component inputs from batch",
+    }
+  - {
+      id: crypto-regime-analyzer,
+      family: CTX,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 2,
+      status: ACTIVE,
+      data_swaps: { "fapi.binance.com funding": "OKX public / Hyperliquid info API" },
+    }
+  - {
+      id: market-breadth-analyzer,
+      family: CTX,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 2,
+      status: ACTIVE,
+    }
+  - { id: uptrend-analyzer, family: CTX, source: tradermonty, runtime: py-batch, phase: 2, status: ACTIVE }
+  - {
+      id: ibd-distribution-day-monitor,
+      family: CTX,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 2,
+      status: ACTIVE,
+    }
+  - { id: ftd-detector, family: CTX, source: tradermonty, runtime: py-batch, phase: 2, status: ACTIVE }
+  - { id: market-top-detector, family: CTX, source: tradermonty, runtime: py-batch, phase: 2, status: SHADOW }
+  - {
+      id: macro-regime-detector,
+      family: CTX,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 2,
+      status: SHADOW,
+      data_swaps: { any_paid: FRED },
+    }
+  - {
+      id: event-horizon-radar,
+      family: CTX,
+      source: new,
+      upstream: [earnings-calendar, economic-calendar-fetcher],
+      runtime: py-batch,
+      phase: 2,
+      status: ACTIVE,
+    }
+  - {
+      id: us-market-bubble-detector,
+      family: CTX,
+      source: tradermonty,
+      runtime: deferred,
+      phase: 4,
+      status: PROPOSAL,
+    }
+  - { id: sector-analyst, family: CTX, source: tradermonty, runtime: deferred, phase: 4, status: PROPOSAL }
+
+  # ---------- RES ----------
+  - {
+      id: news-catalyst-sniper,
+      family: RES,
+      source: new,
+      runtime: ts-hot,
+      phase: 3,
+      status: SHADOW,
+      notes: "Alpaca news cursor -> Tier 0 -> clef-flash batch",
+    }
+  - {
+      id: insider-form4-watcher,
+      family: RES,
+      source: staskh,
+      upstream: insider_trading,
+      runtime: py-batch,
+      phase: 2,
+      status: SHADOW,
+      data_swaps: { any: SEC EDGAR },
+    }
+  - { id: vcp-screener, family: RES, source: tradermonty, runtime: py-batch, phase: 2, status: SHADOW }
+  - {
+      id: stockbee-momentum-burst-screener,
+      family: RES,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 2,
+      status: SHADOW,
+    }
+  - {
+      id: stockbee-exhaustion-hammer-screener,
+      family: RES,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 2,
+      status: SHADOW,
+    }
+  - {
+      id: stockbee-episodic-pivot-analyzer,
+      family: RES,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 3,
+      status: PROPOSAL,
+    }
+  - { id: pead-screener, family: RES, source: tradermonty, runtime: py-batch, phase: 3, status: PROPOSAL }
+  - {
+      id: canslim-screener,
+      family: RES,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 3,
+      status: PROPOSAL,
+      notes: "fundamentals data limited on free tiers",
+    }
+  - {
+      id: us-undervalued-growth-screener,
+      family: RES,
+      source: tradermonty,
+      runtime: deferred,
+      phase: 4,
+      status: PROPOSAL,
+    }
+  - {
+      id: cot-contrarian-detector,
+      family: RES,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 2,
+      status: SHADOW,
+    }
+  - {
+      id: news-reaction-failure-analyzer,
+      family: RES,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 3,
+      status: SHADOW,
+    }
+  - {
+      id: crypto-funding-liquidation-scanner,
+      family: RES,
+      source: new,
+      runtime: py-batch,
+      phase: 2,
+      status: SHADOW,
+      notes: "OKX/Hyperliquid public",
+    }
+  - {
+      id: whale-flow-detector,
+      family: RES,
+      source: staskh,
+      upstream: whale-hunting,
+      runtime: deferred,
+      phase: 5,
+      status: PROPOSAL,
+      notes: "options indicative feed only",
+    }
+  - {
+      id: polymarket-macro-divergence,
+      family: RES,
+      source: new,
+      runtime: deferred,
+      phase: 7,
+      status: PROPOSAL,
+    }
+  - { id: theme-detector, family: RES, source: tradermonty, runtime: deferred, phase: 4, status: PROPOSAL }
+
+  # ---------- Court prompts ----------
+  - { id: bull-advocate, family: STR, source: new, runtime: llm-prompt, phase: 3, status: ACTIVE }
+  - { id: bear-prosecutor, family: RSK, source: new, runtime: llm-prompt, phase: 3, status: ACTIVE }
+
+  # ---------- GOV (py-batch weekly) ----------
+  - { id: signal-postmortem, family: GOV, source: tradermonty, runtime: py-batch, phase: 4, status: ACTIVE }
+  - { id: clef-brier-calibrator, family: GOV, source: new, runtime: py-batch, phase: 4, status: ACTIVE }
+  - { id: skill-fitness-leaderboard, family: GOV, source: new, runtime: py-batch, phase: 4, status: ACTIVE }
+  - {
+      id: monte-carlo-significance-tester,
+      family: GOV,
+      source: new,
+      upstream: backtest-expert,
+      runtime: py-batch,
+      phase: 4,
+      status: ACTIVE,
+    }
+  - { id: bh-fdr-gate, family: GOV, source: new, runtime: py-batch, phase: 4, status: ACTIVE }
+  - { id: rejection-ledger-grader, family: GOV, source: new, runtime: py-batch, phase: 4, status: ACTIVE }
+  - { id: drift-detector, family: GOV, source: new, runtime: py-batch, phase: 4, status: SHADOW }
+  - {
+      id: trade-performance-coach,
+      family: GOV,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 4,
+      status: SHADOW,
+    }
+  - {
+      id: weekly-performance-digest,
+      family: GOV,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 4,
+      status: ACTIVE,
+    }
+
+cut:
+  - { id: kanchi-dividend-sop, reason: long-horizon income strategy }
+  - { id: kanchi-dividend-review-monitor, reason: long-horizon income strategy }
+  - { id: kanchi-dividend-us-tax-accounting, reason: "revisit as TaxGuard at R3+" }
+  - { id: value-dividend-screener, reason: long-horizon income strategy }
+  - { id: dividend-growth-pullback-screener, reason: long-horizon income strategy }
+  - { id: parabolic-short-trade-planner, reason: no shorting }
+  - { id: pair-trade-screener, reason: no shorting }
+  - { id: mt5-robot-tester, reason: wrong venue }
+  - { id: futures-position-sizer, reason: wrong venue }
+  - { id: fxmacrodata-calendar, reason: wrong venue }
+  - { id: finviz-screener, reason: "ToS; replaced by own screeners on Alpaca bars" }
+  - { id: ib-account, reason: IBKR plumbing }
+  - { id: ib-portfolio, reason: IBKR plumbing }
+  - { id: ib-trades-history, reason: IBKR plumbing }
+  - { id: ib-create-consolidated-report, reason: IBKR plumbing }
+  - { id: markdown-to-pdf, reason: human reporting }
+  - { id: skill-designer, reason: human-workflow tooling }
+  - { id: skill-idea-miner, reason: human-workflow tooling }
+  - { id: trading-skills-navigator, reason: human-workflow tooling }
+  - { id: hkuds-net-family, reason: "no license; external dependency; publishing theses has negative value" }

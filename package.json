@@ -1,0 +1,43 @@
+{
+  "name": "cortex-54",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "CORTEX-54: free-tier autonomous trading harness on Cloudflare Workers with Discord C2",
+  "packageManager": "pnpm@10.18.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "config:build": "node scripts/build-config.ts",
+    "typecheck": "pnpm config:build && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "pnpm config:build && vitest run",
+    "test:watch": "vitest",
+    "dev": "pnpm config:build && wrangler dev",
+    "deploy": "pnpm config:build && wrangler deploy",
+    "sentinel:dev": "wrangler dev -c workers/sentinel/wrangler.jsonc",
+    "sentinel:deploy": "wrangler deploy -c workers/sentinel/wrangler.jsonc",
+    "db:migrate:local": "wrangler d1 migrations apply cortex-journal --local",
+    "db:migrate:remote": "wrangler d1 migrations apply cortex-journal --remote"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.2",
+    "@cloudflare/workers-types": "^5.20261022.1",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.152.0",
+    "yaml": "^2.9.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "$comment": "CORTEX-54 constitution. Operator-only. Changed exclusively by git commit + deploy. Doctrine may tighten, never loosen, these values. Validated at boot by src/contracts/constitution.ts; its SHA-256 is journaled on every boot.",
+  "version": 1,
+  "untouchables": [
+    {
+      "id": "U1",
+      "name": "no-contract-no-order",
+      "rule": "Every order must trace to a schema-valid DecisionContract persisted before submission."
+    },
+    {
+      "id": "U2",
+      "name": "models-never-size",
+      "rule": "Model outputs may set conviction and probabilities only. Quantity, notional and price come solely from the deterministic sizer and validator."
+    },
+    {
+      "id": "U3",
+      "name": "hard-caps-cash-only",
+      "rule": "Per-trade risk, total heat, position notional, daily loss and drawdown caps below are absolute. Cash only: no margin, no shorting, no naked options, no leveraged or inverse products."
+    },
+    {
+      "id": "U4",
+      "name": "every-position-has-an-exit",
+      "rule": "Every position carries a stop: broker-side where Alpaca accepts one, synthetic otherwise, checked every pulse."
+    },
+    {
+      "id": "U5",
+      "name": "kill-switch-sacred",
+      "rule": "The kill-switch and RED breaker cannot be overridden by any model, Governor or automation. Unlock requires an operator-written postmortem."
+    },
+    {
+      "id": "U6",
+      "name": "fail-closed",
+      "rule": "Stale data, unknown broker state, reconciliation mismatch, or any free-tier budget at or above the hard-stop fraction forces REDUCE_ONLY. Never fail open."
+    },
+    {
+      "id": "U7",
+      "name": "append-only-journal",
+      "rule": "Journal tables are append-only and hash-chained. No UPDATE or DELETE. The daily chain head is anchored externally (Discord)."
+    },
+    {
+      "id": "U8",
+      "name": "self-modification-is-a-pr",
+      "rule": "The Governor may only propose changes as pull requests. LIVE capital-ladder and autonomy-dial promotions require operator ratification."
+    }
+  ],
+  "hard_limits": {
+    "max_per_trade_risk_pct": 0.025,
+    "max_total_heat_pct": 0.2,
+    "max_position_notional_pct": 0.35,
+    "max_concurrent_positions": 10,
+    "max_daily_loss_pct": 0.06,
+    "red_breaker_max_drawdown_pct": 0.12,
+    "min_stop_atr_multiple": 1.0,
+    "max_orders_per_day_per_account": 30,
+    "max_live_autonomy_stop_without_ratification": 1,
+    "free_tier_hard_stop_fraction": 0.9,
+    "max_quote_staleness_seconds": 180,
+    "max_reconcile_age_seconds": 600
+  },
+  "allowed": {
+    "account_types": ["cash"],
+    "live_arenas": ["CRYPTO", "EQUITIES"],
+    "paper_arenas": ["CRYPTO", "EQUITIES", "OPTIONS"],
+    "order_sides": ["buy", "sell_to_close"],
+    "options_structures_paper": [
+      "long_call",
+      "long_put",
+      "vertical_debit",
+      "vertical_credit",
+      "calendar",
+      "diagonal",
+      "iron_condor"
+    ],
+    "options_structures_live": []
+  },
+  "forbidden": [
+    "margin",
+    "short_selling",
+    "naked_options",
+    "leveraged_etf",
+    "inverse_etf",
+    "otc_securities",
+    "averaging_down_without_new_contract"
+  ]
+}
