@@ -7,6 +7,7 @@ import {
 } from "../broker/types.ts";
 import { DO_MEMORY_GB, FreeTierBudget, SubrequestBudgetExceeded, utcDay } from "../budget/FreeTierBudget.ts";
 import { CLEF_CONTEXT_TOKENS, type ClefApi, estimateTokens } from "../clef/ClefClient.ts";
+import { buildTier2, interpretTier2, TIER2_PROMPT_VERSION } from "../clef/tier2.ts";
 import {
   buildTier1,
   interpretTier1,
@@ -16,8 +17,31 @@ import {
 } from "../clef/triage.ts";
 import { type Batch, BatchSchema, WorldCandidateSchema } from "../contracts/batch.ts";
 import type { Constitution } from "../contracts/constitution.ts";
-import { type DecisionContract, DecisionContractSchema } from "../contracts/decision-contract.ts";
+import {
+  contractViolations,
+  type DecisionContract,
+  DecisionContractSchema,
+} from "../contracts/decision-contract.ts";
 import type { Doctrine } from "../contracts/doctrine.ts";
+import {
+  BearSchema,
+  BullSchema,
+  buildCourtContract,
+  buildSynth,
+  calibrate,
+  checkBull,
+  interpretSynth,
+} from "../court/court.ts";
+import { buildEvidence, type Evidence, evidenceForModels, resolveTradeable } from "../court/evidence.ts";
+import type { HopAttempt, LlmRouter } from "../court/llm.ts";
+import {
+  BEAR_PROMPT_VERSION,
+  BEAR_SCHEMA,
+  BEAR_SYSTEM,
+  BULL_PROMPT_VERSION,
+  BULL_SCHEMA,
+  BULL_SYSTEM,
+} from "../court/prompts.ts";
 import { COLORS, type DiscordMessage, type Notifier } from "../discord/notifier.ts";
 import { type D1Like, Journal } from "../journal/Journal.ts";
 import {
@@ -137,6 +161,8 @@ export interface BrainDeps {
   now: () => number;
   /** Workers AI Clef (Tier 1/2). Null disables the funnel; trading is unaffected. */
   clef?: ClefApi | null;
+  /** Free-tier LLM chains for the court (Tier 3). Null disables the court. */
+  llm?: LlmRouter | null;
 }
 
 export interface PulseReport {
@@ -151,6 +177,8 @@ export interface PulseReport {
   newsQueued: number;
   triaged: number;
   promoted: number;
+  tier2: number;
+  courtContracts: number;
   nextPulseSeconds: number;
 }
 
@@ -270,6 +298,8 @@ export class Brain {
       newsQueued: 0,
       triaged: 0,
       promoted: 0,
+      tier2: 0,
+      courtContracts: 0,
       nextPulseSeconds: this.d.cadence.pulse_seconds_flat,
     };
     this.budget.add("do_requests", 1, started);
@@ -341,6 +371,26 @@ export class Brain {
     } catch (e) {
       if (!(e instanceof SubrequestBudgetExceeded)) {
         await this.alertOnce("triage-t1", `⚠️ Tier 1 triage failed: ${errText(e).slice(0, 200)}`);
+      }
+    }
+
+    // 2d. Tier 2 (Clef 27B) on one promoted candidate per pulse. Never blocks trading.
+    try {
+      report.tier2 = await this.triageTier2();
+    } catch (e) {
+      if (!(e instanceof SubrequestBudgetExceeded)) {
+        await this.alertOnce("triage-t2", `⚠️ Tier 2 failed: ${errText(e).slice(0, 200)}`);
+      }
+    }
+
+    // 2e. Court (Tier 3): one sprint per pulse, only when new entries are possible at all.
+    if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
+      try {
+        report.courtContracts = await this.runCourt();
+      } catch (e) {
+        if (!(e instanceof SubrequestBudgetExceeded)) {
+          await this.alertOnce("court", `⚠️ court failed: ${errText(e).slice(0, 200)}`);
+        }
       }
     }
 
@@ -1155,10 +1205,7 @@ ${postmortem}`,
       now,
     );
     // Regime gate (Tier 0): the batch crypto composite wins when fresh; the BTC/EMA proxy is the fallback.
-    const batch = this.freshRegime("CRYPTO", now);
-    const regime = batch
-      ? { riskOn: batch.score !== null && batch.score >= this.d.regime_gates.crypto_composite_min_for_longs }
-      : proxy;
+    const regime = { riskOn: this.cryptoLongsAllowed(now, proxy?.riskOn ?? false) };
     const missing = universe.filter((s) => !quotes[s]);
     const fresh =
       missing.length > 0 ? { ...quotes, ...(await this.deps.market.cryptoQuotes(missing)) } : quotes;
@@ -1238,6 +1285,397 @@ ${postmortem}`,
     );
     if (queued > 0) this.journal.append("SYSTEM", "NEWS_INTAKE", null, { queued, since }, now);
     return queued;
+  }
+
+  /** Crypto long gate: fresh batch composite ≥ doctrine minimum; otherwise fall back to the BTC/EMA proxy. */
+  private cryptoLongsAllowed(now: number, proxyRiskOn: boolean): boolean {
+    const batch = this.freshRegime("CRYPTO", now);
+    return batch
+      ? batch.score !== null && batch.score >= this.d.regime_gates.crypto_composite_min_for_longs
+      : proxyRiskOn;
+  }
+
+  private bumpDaily(key: string, now: number): number {
+    const k = `count:${key}:${utcDay(now)}`;
+    const n = Number(getKV(this.sql, k) ?? 0) + 1;
+    setKV(this.sql, k, String(n), now);
+    return n;
+  }
+
+  private daily(key: string, now: number): number {
+    return Number(getKV(this.sql, `count:${key}:${utcDay(now)}`) ?? 0);
+  }
+
+  /** Rejection of a candidate that never became a contract (shadow ledger, graded later). */
+  private rejectCandidate(
+    c: { candidateId: string; symbol: string; arena: string; source: string },
+    stage: string,
+    reasons: string[],
+    hypothetical: Record<string, unknown>,
+    now: number,
+  ): void {
+    this.journal.enqueue(
+      "rejections",
+      {
+        ts: now,
+        candidate_id: c.candidateId,
+        contract_id: null,
+        symbol: c.symbol,
+        arena: c.arena,
+        stage,
+        reason_codes: JSON.stringify(reasons.slice(0, 8)),
+        hypothetical: JSON.stringify(hypothetical),
+        source: c.source,
+      },
+      now,
+    );
+    this.journal.append(
+      "SYSTEM",
+      "CANDIDATE_REJECT",
+      c.candidateId,
+      { stage, symbol: c.symbol, reasons: reasons.slice(0, 3) },
+      now,
+    );
+  }
+
+  /** Context shared by Tier 2 and the court. */
+  private regimeContext(now: number): Record<string, unknown> {
+    const c = this.freshRegime("CRYPTO", now);
+    const e = this.freshRegime("EQUITIES", now);
+    return {
+      crypto: c ? { posture: c.posture, score: c.score } : "stale/unknown",
+      equities: e ? { posture: e.posture, score: e.score, ceiling: e.ceiling } : "stale/unknown",
+    };
+  }
+
+  private worldContext(now: number): Record<string, unknown> | null {
+    const w = one<{ payload_json: string; as_of: number }>(
+      this.sql,
+      "SELECT payload_json, as_of FROM regime_state WHERE arena = 'WORLD'",
+    );
+    if (!w || now - w.as_of > 6 * 3_600_000) return null;
+    const p = JSON.parse(w.payload_json) as { groups?: unknown; tone?: unknown };
+    return { groups: p.groups ?? null, tone: p.tone ?? null };
+  }
+
+  /** Tier 0: resolve a queue row into tradeable evidence, or a reason it can't be. */
+  private async evidenceFor(
+    row: { candidate_id: string; payload_json: string; enqueued_at: number },
+    now: number,
+  ): Promise<
+    { ok: true; evidence: Evidence } | { ok: false; reason: string; symbol: string; arena: string }
+  > {
+    const p = JSON.parse(row.payload_json) as Record<string, unknown>;
+    const t1 = (p.tier1 ?? null) as { material: number; direction: string; escalate: number } | null;
+    const symbols = Array.isArray(p.symbols) ? (p.symbols as string[]) : [];
+    const target = resolveTradeable(symbols, this.d);
+    if (!target) return { ok: false, reason: "no tradeable symbol", symbol: symbols[0] ?? "", arena: "?" };
+    const { symbol, arena } = target;
+    if (t1?.direction === "down") return { ok: false, reason: "bearish catalyst (long-only)", symbol, arena };
+    if (this.symbolsInPlay().includes(symbol)) return { ok: false, reason: "already held", symbol, arena };
+    if (arena === "CRYPTO" && !this.cryptoLongsAllowed(now, false)) {
+      return { ok: false, reason: "crypto regime gate closed", symbol, arena };
+    }
+    if (arena === "EQUITIES") {
+      const eq = this.freshRegime("EQUITIES", now);
+      if (!eq || !this.d.regime_gates.equity_postures_allowing_entries.includes(eq.posture)) {
+        return { ok: false, reason: `equity posture ${eq?.posture ?? "stale"}`, symbol, arena };
+      }
+    }
+    const m = this.deps.market;
+    if (!m) return { ok: false, reason: "no market data", symbol, arena };
+    const [bars, quotes] = await Promise.all([
+      arena === "CRYPTO" ? m.cryptoDailyBars([symbol], 70, now) : m.stockDailyBars([symbol], 70, now),
+      this.quotesFor([symbol]),
+    ]);
+    const q = quotes[symbol];
+    const b = bars[symbol];
+    if (!q || !b) return { ok: false, reason: "no quote or bars", symbol, arena };
+    const created = typeof p.createdAt === "number" ? p.createdAt : row.enqueued_at;
+    const evidence = buildEvidence({
+      symbol,
+      arena,
+      bars: b,
+      bid: q.bid,
+      ask: q.ask,
+      now,
+      regime: this.regimeContext(now),
+      world: this.worldContext(now),
+      catalyst: {
+        candidateId: row.candidate_id,
+        kind: String(p.kind ?? "news"),
+        headline: String(p.headline ?? "").slice(0, 300),
+        source: String(p.source ?? "").slice(0, 40),
+        url: typeof p.url === "string" && p.url.startsWith("https://") ? p.url : null,
+        ageMinutes: Math.max(0, Math.round((now - created) / 60_000)),
+        tier1: t1,
+      },
+      held: this.symbolsInPlay(),
+    });
+    return evidence ? { ok: true, evidence } : { ok: false, reason: "not enough bar history", symbol, arena };
+  }
+
+  /** Tier 2 (Clef 27B): one promoted candidate per pulse; pass → tier 3 (court queue). */
+  private async triageTier2(): Promise<number> {
+    const clef = this.deps.clef;
+    if (!clef) return 0;
+    const now = this.deps.now();
+    const t2 = this.d.funnel.tier2;
+    if (this.daily("tier2", now) >= t2.max_per_day) return 0;
+    const row = one<{ candidate_id: string; payload_json: string; enqueued_at: number }>(
+      this.sql,
+      "SELECT candidate_id, payload_json, enqueued_at FROM triage_queue WHERE tier = 2 ORDER BY enqueued_at LIMIT 1",
+    );
+    if (!row) return 0;
+    const ev = await this.evidenceFor(row, now);
+    if (!ev.ok) {
+      this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", row.candidate_id);
+      this.rejectCandidate(
+        { candidateId: row.candidate_id, symbol: ev.symbol, arena: ev.arena, source: "tier0" },
+        "TIER0",
+        [ev.reason],
+        {},
+        now,
+      );
+      return 0;
+    }
+    const recent = Number(getKV(this.sql, `court_seen:${ev.evidence.symbol}`) ?? 0);
+    if (now - recent < 6 * 3_600_000) {
+      this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", row.candidate_id);
+      return 0;
+    }
+    const req = buildTier2(ev.evidence);
+    const est = estimateTokens(req.state, req.questions);
+    if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) return 0;
+    this.bumpDaily("tier2", now);
+    const started = this.deps.now();
+    const result = await clef.run("clef", req.state, req.questions);
+    const neurons = neuronsFor("clef", result.usage.input_tokens ?? est, this.d);
+    this.budget.add("neurons_tier2", neurons, now);
+    const dcs = interpretTier2(result, this.d);
+    this.journal.enqueue(
+      "triage_log",
+      {
+        ts: now,
+        tier: 2,
+        model: "clef",
+        candidate_ids: JSON.stringify([row.candidate_id]),
+        state_sha256: sha256Hex(JSON.stringify(req.state)),
+        answers_json: JSON.stringify({ prompt: TIER2_PROMPT_VERSION, symbol: ev.evidence.symbol, ...dcs }),
+        neurons_est: neurons,
+        latency_ms: this.deps.now() - started,
+      },
+      now,
+    );
+    if (!dcs.pass) {
+      this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", row.candidate_id);
+      this.rejectCandidate(
+        {
+          candidateId: row.candidate_id,
+          symbol: ev.evidence.symbol,
+          arena: ev.evidence.arena,
+          source: "tier2",
+        },
+        "TIER2",
+        dcs.reasons,
+        { bid: ev.evidence.quote.bid, atr: ev.evidence.technicals.atr14 },
+        now,
+      );
+      return 1;
+    }
+    const payload = {
+      ...(JSON.parse(row.payload_json) as Record<string, unknown>),
+      tier2: dcs,
+      symbol: ev.evidence.symbol,
+    };
+    this.sql.exec(
+      "UPDATE triage_queue SET tier = 3, payload_json = ? WHERE candidate_id = ?",
+      JSON.stringify(payload),
+      row.candidate_id,
+    );
+    this.journal.append(
+      "SYSTEM",
+      "TIER2_PASS",
+      row.candidate_id,
+      { symbol: ev.evidence.symbol, quality: dcs.quality100, long: dcs.longFavored },
+      now,
+    );
+    return 1;
+  }
+
+  /** Completed COURT trades so far (calibration weight). */
+  private resolvedCourtOutcomes(): number {
+    return (
+      one<{ n: number }>(
+        this.sql,
+        "SELECT COUNT(*) AS n FROM exits e JOIN contracts c ON c.contract_id = e.contract_id WHERE json_extract(c.json, '$.origin') = 'COURT'",
+      )?.n ?? 0
+    );
+  }
+
+  private logLlm(sprintId: string, role: string, promptVersion: string, a: HopAttempt, now: number): void {
+    this.journal.enqueue(
+      "llm_calls",
+      {
+        ts: now,
+        sprint_id: sprintId,
+        role,
+        provider: a.provider,
+        model: a.model,
+        family: a.family,
+        prompt_version: promptVersion,
+        input_tokens: a.inputTokens,
+        output_tokens: a.outputTokens,
+        latency_ms: a.latencyMs,
+        outcome: a.outcome,
+        output_sha256: a.error ? sha256Hex(a.error) : null,
+      },
+      now,
+    );
+  }
+
+  /**
+   * Tier 3 court: bull (chain A) → bear (chain B, different family) → Clef 27B synthesis → calibrated COURT
+   * contract → the same validator/sizer as everything else. One sprint per pulse, capped per day.
+   */
+  private async runCourt(): Promise<number> {
+    const llm = this.deps.llm;
+    const clef = this.deps.clef;
+    if (!llm || !clef) return 0;
+    const now = this.deps.now();
+    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day) return 0;
+    const row = one<{ candidate_id: string; payload_json: string; enqueued_at: number }>(
+      this.sql,
+      "SELECT candidate_id, payload_json, enqueued_at FROM triage_queue WHERE tier = 3 ORDER BY enqueued_at LIMIT 1",
+    );
+    if (!row) return 0;
+    this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", row.candidate_id); // one shot per candidate
+    const ev = await this.evidenceFor(row, now);
+    if (!ev.ok) {
+      this.rejectCandidate(
+        { candidateId: row.candidate_id, symbol: ev.symbol, arena: ev.arena, source: "court" },
+        "TIER0",
+        [ev.reason],
+        {},
+        now,
+      );
+      return 0;
+    }
+    const e = ev.evidence;
+    this.bumpDaily("court", now);
+    setKV(this.sql, `court_seen:${e.symbol}`, String(now), now);
+    const sprintId = uuidv7(now);
+    const cand = { candidateId: row.candidate_id, symbol: e.symbol, arena: e.arena, source: "court" };
+    const evidenceJson = JSON.stringify(evidenceForModels(e));
+
+    const bull = await llm.run(
+      this.d.llm_routing.bull_chain,
+      {
+        system: BULL_SYSTEM,
+        user: `Evidence JSON (ids for receipts: ${e.receipts.map((r) => r.evidence_id).join(", ")}):\n${evidenceJson}`,
+        maxOutputTokens: 1500,
+        schema: BULL_SCHEMA as unknown as Record<string, unknown>,
+      },
+      (j) => BullSchema.parse(j),
+      [],
+      (a) => this.logLlm(sprintId, "BULL", BULL_PROMPT_VERSION, a, this.deps.now()),
+    );
+    if (!bull) {
+      this.rejectCandidate(cand, "BULL", ["no bull provider produced valid output"], {}, now);
+      return 0;
+    }
+    const checked = checkBull(bull.value, e, this.d);
+    if (!checked.ok) {
+      this.rejectCandidate(cand, "BULL", checked.reasons, { ...bull.value }, now);
+      return 0;
+    }
+
+    const bear = await llm.run(
+      this.d.llm_routing.bear_chain,
+      {
+        system: BEAR_SYSTEM,
+        user: `Evidence JSON:\n${evidenceJson}\n\nBull brief JSON:\n${JSON.stringify(checked.bull)}`,
+        maxOutputTokens: 1500,
+        schema: BEAR_SCHEMA as unknown as Record<string, unknown>,
+      },
+      (j) => BearSchema.parse(j),
+      this.d.llm_routing.require_cross_family ? [bull.family] : [],
+      (a) => this.logLlm(sprintId, "BEAR", BEAR_PROMPT_VERSION, a, this.deps.now()),
+    );
+    if (!bear) {
+      this.rejectCandidate(cand, "BEAR", ["no cross-family bear available"], { ...checked.bull }, now);
+      return 0;
+    }
+
+    const synthReq = buildSynth(e, checked.bull, bear.value);
+    const est = estimateTokens(synthReq.state, synthReq.questions);
+    if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) {
+      this.rejectCandidate(
+        cand,
+        "BUDGET",
+        ["tier-2 neurons exhausted for synthesis"],
+        { ...checked.bull },
+        now,
+      );
+      return 0;
+    }
+    const synthRes = await clef.run("clef", synthReq.state, synthReq.questions);
+    this.budget.add("neurons_tier2", neuronsFor("clef", synthRes.usage.input_tokens ?? est, this.d), now);
+    const synth = interpretSynth(synthRes);
+    if (!synth) {
+      this.rejectCandidate(cand, "SYNTH", ["incomplete Clef synthesis"], { ...checked.bull }, now);
+      return 0;
+    }
+    const calibrated = calibrate(synth.winProb, this.resolvedCourtOutcomes(), this.d);
+    const viaAccount = (this.d.strategies.find((s) => s.arena === e.arena && s.status === "ACTIVE")
+      ?.accounts[0] ?? "PAPER") as AccountId;
+    const meta = await this.assetMeta(e.symbol, viaAccount).catch(() => null);
+    const tick = meta?.price_increment ? Number(meta.price_increment) : defaultTick(e.quote.bid, e.arena);
+    const contract = buildCourtContract({
+      contractId: uuidv7(now),
+      now,
+      evidence: e,
+      bull: checked.bull,
+      bear: bear.value,
+      synth,
+      calibratedWin: calibrated,
+      tick,
+      models: {
+        bull: { provider: bull.provider, model: bull.model, family: bull.family },
+        bear: { provider: bear.provider, model: bear.model, family: bear.family },
+      },
+      d: this.d,
+    });
+    const parsed = DecisionContractSchema.safeParse(contract);
+    const violations = parsed.success
+      ? contractViolations(parsed.data)
+      : parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+    if (violations.length > 0) {
+      this.rejectCandidate(cand, "CONTRACT", violations.slice(0, 6), { ...checked.bull }, now);
+      return 0;
+    }
+    this.recordContract(contract, now);
+    this.journal.append(
+      "SYSTEM",
+      "COURT",
+      contract.contract_id,
+      {
+        sprint: sprintId,
+        symbol: e.symbol,
+        win_raw: synth.winProb,
+        win_cal: calibrated,
+        bear: bear.value.lethality,
+        notes: checked.notes,
+      },
+      now,
+    );
+    void this.deps.notifier.post("court", contractCard(contract));
+    const strategy = this.d.strategies.find((s) => s.id === contract.strategy_id);
+    const quotes = await this.quotesFor([e.symbol]).catch(() => ({}) as Record<string, Quote>);
+    for (const account of strategy?.accounts ?? []) {
+      if (this.deps.brokers[account]) await this.route(account, contract, quotes);
+    }
+    return 1;
   }
 
   /**
@@ -1378,6 +1816,26 @@ ${postmortem}`,
       );
     }
     if (b.job === "world-intel" || b.posture === null) {
+      const pulse = b.items.find((x) => x.skill_id === "gdelt-world-pulse")?.payload as
+        | {
+            groups?: Record<string, { share?: number; tone?: number | null }>;
+            tone?: number | null;
+            articles?: number;
+          }
+        | undefined;
+      if (pulse?.groups) {
+        this.sql.exec(
+          "INSERT INTO regime_state (arena, posture, score, ceiling, payload_json, as_of) VALUES ('WORLD', 'INFO', ?, NULL, ?, ?) ON CONFLICT(arena) DO UPDATE SET posture = excluded.posture, score = excluded.score, payload_json = excluded.payload_json, as_of = excluded.as_of",
+          Math.round((pulse.groups.conflict?.share ?? 0) * 1000) / 10,
+          JSON.stringify({
+            source: "world-intel",
+            groups: pulse.groups,
+            tone: pulse.tone ?? null,
+            articles: pulse.articles ?? null,
+          }),
+          b.produced_at,
+        );
+      }
       let queued = 0;
       for (const item of b.items) {
         const list = (item.payload as { candidates?: unknown }).candidates;
@@ -1569,6 +2027,20 @@ ${postmortem}`,
     const broker = this.deps.brokers[account];
     if (!broker) return false;
     const now = this.deps.now();
+    if (contract.arena === "EQUITIES") {
+      const clock = await broker.clock();
+      const minsToClose = (Date.parse(clock.next_close) - now) / 60_000;
+      if (!clock.is_open || minsToClose < this.d.execution.no_entry_last_minutes_of_session) {
+        this.reject(
+          account,
+          contract,
+          "VALIDATOR",
+          [clock.is_open ? "too close to the session close" : "market closed"],
+          now,
+        );
+        return false;
+      }
+    }
     const q = quote ?? (await this.quotesFor([contract.symbol]))[contract.symbol] ?? null;
     const meta = await this.assetMeta(contract.symbol, account);
     if (!q || !meta) {

@@ -262,8 +262,8 @@ skills:
       source: new,
       runtime: py-batch,
       phase: 3,
-      status: SHADOW,
-      notes: "GDELT DOC 2.0 API (free, keyless, ≤1 request / 5 s): tone + volume timelines and article lists for macro/geopolitical topics → world-intel triage",
+      status: ACTIVE,
+      notes: "GDELT GKG 2.1 bulk files (15-min, no rate limit): hourly world-risk pulse (theme shares + tone) as Tier 2/court context, plus wire press releases naming watched companies (ADR-028)",
     }
   - {
       id: news-catalyst-sniper,

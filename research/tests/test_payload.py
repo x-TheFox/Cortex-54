@@ -36,14 +36,6 @@ def test_batch_shape_and_deterministic_dump():
 def test_world_candidates():
     from cortex_research import world as W
 
-    assert W.parse_seendate("20261022T191500Z") == 1792696500000
-    c = W.gdelt_candidate(
-        {"url": "https://ex.com/a", "title": "Fed\u0000 holds\n rates", "domain": "ex.com", "seendate": "20261022T191500Z"},
-        "federal reserve",
-        ["SPY"],
-    )
-    assert c and c["title"] == "Fed holds rates" and c["kind"] == "gdelt" and len(c["id"]) == 24
-    assert W.gdelt_candidate({"url": "ftp://x", "title": "t"}, "t", []) is None
     sub = {
         "filings": {
             "recent": {
@@ -61,8 +53,45 @@ def test_world_candidates():
     assert out[0]["url"] == "https://www.sec.gov/Archives/edgar/data/1679788/000126000001/a.htm"
 
 
-def test_domain_clause():
+def _gkg_row(domain, themes, tone, orgs="", title="", url="https://x.com/a", date="20261022214500"):
+    r = [""] * 27
+    r[1], r[3], r[4], r[7], r[13], r[15] = date, domain, url, themes, orgs, f"{tone},1,2,3"
+    r[26] = f"<PAGE_TITLE>{title}</PAGE_TITLE>" if title else ""
+    return r
+
+
+def test_world_pulse_and_press_releases():
     from cortex_research import world as W
 
-    c = W.domain_clause(["reuters.com", "cnbc.com"])
-    assert c == "(domainis:reuters.com OR domainis:cnbc.com)"
+    rows = [
+        _gkg_row("a.com", "ARMEDCONFLICT,10;MILITARY,20", -6.0),
+        _gkg_row("b.com", "EPU_POLICY_GOVERNMENT,5;EPU_ECONOMY_HISTORIC,9;TAX_MILITARY_TITLE,2", -2.0),
+        _gkg_row("c.com", "ECON_STOCKMARKET,1;ECON_INTEREST_RATES,3", 1.0),
+        _gkg_row("prnewswire.com", "ECON_STOCKMARKET,1", 2.0, orgs="coinbase,1", title="Coinbase announces Q3 results",
+                 url="https://www.prnewswire.com/x"),
+        _gkg_row("prnewswire.com", "", 0.0, title="Local bakery opens"),
+    ]
+    p = W.world_pulse(rows)
+    assert p["articles"] == 5
+    assert p["groups"]["conflict"] == {"articles": 1, "share": 0.2, "tone": -6.0}
+    assert p["groups"]["policy_uncertainty"]["articles"] == 1
+    assert p["groups"]["markets"]["articles"] == 2 and p["groups"]["monetary"]["articles"] == 1
+    prs = W.press_release_candidates(rows)
+    assert [(c["symbols"], c["title"]) for c in prs] == [(["COIN"], "Coinbase announces Q3 results")]
+    assert prs[0]["published_at"] == 1792705500000
+
+
+def test_gkg_urls_step_back_from_latest_export():
+    from cortex_research import world as W
+
+    last = "72984 abc http://data.gdeltproject.org/gdeltv2/20261022223000.export.CSV.zip\n"
+    urls = W.gkg_urls(last, n=4, max_back=3)
+    assert urls[0].endswith("/20261022223000.gkg.csv.zip") and urls[2].endswith("/20261022220000.gkg.csv.zip")
+
+
+def test_theme_matching_is_exact_or_subtheme():
+    from cortex_research.world import theme_matches
+
+    assert theme_matches("MILITARY", "MILITARY") and theme_matches("EPU_POLICY_GOVERNMENT", "EPU_POLICY")
+    assert not theme_matches("TAX_MILITARY_TITLE", "MILITARY") and not theme_matches("EPU_ECONOMY_HISTORIC", "EPU_POLICY")
+    assert theme_matches("ECON_CRYPTOCURRENCY", "*CRYPTO")

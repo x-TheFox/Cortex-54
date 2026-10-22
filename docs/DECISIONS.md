@@ -188,3 +188,19 @@ watched symbols only for Alpaca news).
 **Consequences:** ≈ 300–1,500 items/day costs ≈ 400–1,800 neurons, inside the 3,000 tier-1 allocation; the
 meter stops tier 1 for the day if it isn't.
 
+## ADR-028 — Court runs in the DO pulse; GDELT as a world pulse; verified provider set (2026-10-22)
+**Court placement:** The plan put Tier 3 in a Cloudflare Workflow. All steps are I/O-bound and one sprint takes
+~10–60 s, so it runs at the end of a pulse (≤1 sprint per pulse, ≤12/day), after exits and stops. That keeps one
+state machine, keeps it testable in Node, and costs ~10 GB-s per sprint. Workflows stay available if sprints grow.
+**GDELT:** the DOC 2.0 API returned 429 for every topic from GitHub's shared runners, and the GKG corpus is mostly
+local outlets with almost no major financial press. The world job now reads the bulk 15-minute GKG files (no rate
+limit) and sends (a) an hourly world-risk pulse — share of articles and tone for conflict, policy uncertainty,
+monetary, markets, crypto — stored as regime `WORLD` and fed to Tier 2/court as context, and (b) wire press
+releases naming watched companies as triage candidates.
+**Providers (live-tested):** Gemini via the Interactions API (`gemini-3.5-flash`, then `gemini-3.8-flash`); Groq
+`gpt-oss-120b` / `qwen3.8-27b`; NIM `deepseek-v4.1-flash` / `nemotron-3-ultra-550b`. Bull chain: google → qwen →
+deepseek. Bear chain: openai-oss → nvidia → deepseek → qwen, always excluding the bull's family. OpenRouter free
+models errored and are not in the chains. `timeout_ms` 60 s.
+**Code wins:** `checkBull` rejects briefs whose zone misses the bid or whose stop is < 1.2×ATR, and clips targets to
+entry + 3·ATR·√(h/24) before the bear or synth ever see them.
+

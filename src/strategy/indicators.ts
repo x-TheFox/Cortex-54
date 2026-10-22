@@ -35,3 +35,24 @@ export function priorHigh(bars: Bar[], lookback: number): number | null {
   if (bars.length < lookback + 1) return null;
   return Math.max(...bars.slice(-lookback - 1, -1).map((b) => b.h));
 }
+
+/** Wilder RSI over closes; null without enough data. */
+export function rsi(closes: number[], period = 14): number | null {
+  if (closes.length < period + 1) return null;
+  let gain = 0;
+  let loss = 0;
+  for (let i = 1; i <= period; i++) {
+    const d = (closes[i] as number) - (closes[i - 1] as number);
+    if (d >= 0) gain += d;
+    else loss -= d;
+  }
+  gain /= period;
+  loss /= period;
+  for (let i = period + 1; i < closes.length; i++) {
+    const d = (closes[i] as number) - (closes[i - 1] as number);
+    gain = (gain * (period - 1) + Math.max(d, 0)) / period;
+    loss = (loss * (period - 1) + Math.max(-d, 0)) / period;
+  }
+  if (loss === 0) return 100;
+  return 100 - 100 / (1 + gain / loss);
+}

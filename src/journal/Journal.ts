@@ -25,6 +25,7 @@ const TABLES = {
   rejections: { ignoreDupes: false },
   batch_results: { ignoreDupes: false },
   triage_log: { ignoreDupes: false },
+  llm_calls: { ignoreDupes: false },
 } as const;
 export type OutboxTable = keyof typeof TABLES;
 

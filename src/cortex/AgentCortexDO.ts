@@ -3,6 +3,7 @@ import { AlpacaClient, AlpacaMarketData } from "../broker/AlpacaClient.ts";
 import type { BrokerApi } from "../broker/types.ts";
 import { InvocationMeter } from "../budget/FreeTierBudget.ts";
 import { WorkersAiClef } from "../clef/ClefClient.ts";
+import { GeminiProvider, type LlmProvider, LlmRouter, OpenAICompatProvider } from "../court/llm.ts";
 import { DiscordNotifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
 import type { Env } from "../env.ts";
 import { CONSTITUTION, CONSTITUTION_SHA256, DOCTRINE, DOCTRINE_SHA256 } from "../generated/config.ts";
@@ -72,6 +73,7 @@ export class AgentCortexDO extends DurableObject<Env> {
       d1: env.DB,
       readKillFlag: async () => (await env.FLAGS.get("killed")) !== null,
       clef: new WorkersAiClef(env.AI),
+      llm: new LlmRouter(llmProviders(env), DOCTRINE),
       now: () => Date.now(),
     });
 
@@ -191,4 +193,32 @@ function fromDurable(sql: SqlStorage): SqlLike {
       return rows;
     },
   };
+}
+
+/** Court providers from secrets; a missing key just removes that hop (verified endpoints — ADR-028). */
+function llmProviders(env: Env): Partial<Record<string, LlmProvider>> {
+  const p: Partial<Record<string, LlmProvider>> = {};
+  if (env.GEMINI_API_KEY) p.gemini = new GeminiProvider(env.GEMINI_API_KEY);
+  if (env.GROQ_API_KEY) {
+    p.groq = new OpenAICompatProvider("groq", "https://api.groq.com/openai/v1", env.GROQ_API_KEY, {
+      jsonMode: true,
+      reasoningEffort: "low",
+    });
+  }
+  if (env.NVIDIA_API_KEY) {
+    p.nim = new OpenAICompatProvider("nim", "https://integrate.api.nvidia.com/v1", env.NVIDIA_API_KEY, {
+      jsonMode: false,
+    });
+  }
+  if (env.OPENROUTER_API_KEY) {
+    p.openrouter = new OpenAICompatProvider(
+      "openrouter",
+      "https://openrouter.ai/api/v1",
+      env.OPENROUTER_API_KEY,
+      {
+        jsonMode: true,
+      },
+    );
+  }
+  return p;
 }

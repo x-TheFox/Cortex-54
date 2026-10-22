@@ -161,4 +161,5 @@ export interface MarketDataApi {
   cryptoQuotes(symbols: string[]): Promise<Record<string, Quote>>;
   stockQuotes(symbols: string[]): Promise<Record<string, Quote>>;
   cryptoDailyBars(symbols: string[], days: number, now: number): Promise<Record<string, Bar[]>>;
+  stockDailyBars(symbols: string[], days: number, now: number): Promise<Record<string, Bar[]>>;
 }

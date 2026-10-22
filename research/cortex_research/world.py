@@ -1,58 +1,160 @@
-"""World-intel job: GDELT articles + SEC EDGAR filings → `world-intel` batch → Tier 1 triage queue.
+"""World-intel job: GDELT GKG world pulse + wire press releases + SEC EDGAR filings → `world-intel` batch → Tier 1 triage queue.
 
-GDELT DOC 2.0 (free, keyless): at most one request every 5 s, so calls are spaced 6 s and a 429 backs off once.
+GDELT GKG 2.1 bulk files (free, no rate limit), 15-minute cadence, published with up to ~45 min lag.
 EDGAR (free): SEC requires a User-Agent with a contact email (SEC_USER_AGENT secret). Without it, EDGAR is skipped.
 """
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import os
+import re
 import sys
 import time
-from datetime import datetime, timezone
+import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
 import yaml
 
-GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
-GDELT_SPACING_S = 6.0
+GDELT_BULK = "https://data.gdeltproject.org/gdeltv2"
+GKG_FILES_PER_RUN = 4  # ≈ 1 hour of 15-minute files
 
-# (topic, GDELT query, symbols the topic maps to)
-TOPICS: list[tuple[str, str, list[str]]] = [
-    ("federal reserve", '("federal reserve" OR "interest rates" OR FOMC)', ["SPY", "QQQ"]),
-    ("inflation", "(inflation OR CPI OR PCE)", ["SPY", "QQQ"]),
-    ("trade and tariffs", "(tariffs OR \"trade war\")", ["SPY"]),
-    ("geopolitics", "(war OR missile OR sanctions OR invasion)", ["SPY"]),
-    ("bitcoin", "bitcoin", ["BTCUSD"]),
-    ("ethereum", "ethereum", ["ETHUSD"]),
-    ("solana", "solana", ["SOLUSD"]),
-    ("crypto regulation", "((SEC OR CFTC) AND crypto)", ["BTCUSD", "COIN"]),
-]
-
-# Major financial / crypto outlets. Unfiltered keyword hits were mostly noise (food banks, local law firms,
-# share consolidations); restricting the source is cheaper than triaging it (ADR-027).
-DOMAINS = [
-    "reuters.com",
-    "apnews.com",
-    "cnbc.com",
-    "marketwatch.com",
-    "bloomberg.com",
-    "wsj.com",
-    "ft.com",
-    "barrons.com",
-    "finance.yahoo.com",
-    "coindesk.com",
-    "theblock.co",
-    "decrypt.co",
-    "cointelegraph.com",
-]
+# The DOC 2.0 API is rate-limited per IP and GitHub's shared runners are throttled on every call, and the GKG
+# corpus is mostly local outlets, so GDELT is used as an aggregate *world risk pulse* from the bulk 15-minute GKG
+# files (no rate limit), plus press releases that name watched companies (ADR-028).
+# Pattern rules: "X" matches theme X and its sub-themes X_*; "*X" matches any theme containing X.
+THEME_GROUPS: dict[str, tuple[str, ...]] = {
+    "conflict": ("ARMEDCONFLICT", "MILITARY", "TERROR", "WB_2433_CONFLICT_AND_VIOLENCE", "PROTEST", "KILL"),
+    "policy_uncertainty": ("EPU_POLICY", "EPU_UNCERTAINTY"),
+    "monetary": ("ECON_INTEREST_RATES", "ECON_CENTRALBANK", "ECON_INFLATION", "TAX_ECON_PRICE", "ECON_DEBT"),
+    "markets": ("ECON_STOCKMARKET", "ECON_WORLDCURRENCIES", "ECON_BANKRUPTCY", "WB_1104_MACROECONOMIC_VULNERABILITY_AND_DEBT"),
+    "crypto": ("*CRYPTO", "*BITCOIN", "*BLOCKCHAIN"),
+}
 
 
-def domain_clause(domains: list[str] = DOMAINS) -> str:
-    return "(" + " OR ".join(f"domainis:{d}" for d in domains) + ")"
+def theme_matches(theme: str, pattern: str) -> bool:
+    if pattern.startswith("*"):
+        return pattern[1:] in theme
+    return theme == pattern or theme.startswith(pattern + "_")
+
+
+WIRES = ("prnewswire.com", "globenewswire.com", "businesswire.com", "accessnewswire.com", "newsfilecorp.com")
+# organization / title keyword → tradeable symbol (watchlists in config/doctrine.yaml)
+COMPANY_SYMBOLS: dict[str, str] = {
+    "coinbase": "COIN",
+    "microstrategy": "MSTR",
+    "strategy inc": "MSTR",
+    "ishares bitcoin": "IBIT",
+}
+
+
+def gkg_urls(lastupdate_text: str, n: int = GKG_FILES_PER_RUN, max_back: int = 10) -> list[str]:
+    """Candidate GKG URLs, newest first, stepping back 15 min from the latest export timestamp."""
+    m = re.search(r"/(\d{14})\.export\.CSV\.zip", lastupdate_text)
+    if not m:
+        return []
+    t = datetime.strptime(m.group(1), "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    return [
+        f"{GDELT_BULK}/{(t - timedelta(minutes=15 * k)).strftime('%Y%m%d%H%M%S')}.gkg.csv.zip"
+        for k in range(max_back)
+    ][: max(n, max_back)]
+
+
+def parse_gkg(raw_csv: bytes) -> list[list[str]]:
+    csv.field_size_limit(10**9)
+    text = raw_csv.decode("latin-1")
+    return [r for r in csv.reader(io.StringIO(text), delimiter="\t") if len(r) >= 16]
+
+
+def _themes(r: list[str]) -> set[str]:
+    return {t.split(",")[0] for t in r[7].split(";") if t}
+
+
+def _tone(r: list[str]) -> float | None:
+    try:
+        return float(r[15].split(",")[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def world_pulse(rows: list[list[str]]) -> dict[str, Any]:
+    """Share of articles and mean tone per theme group (pure)."""
+    total = len(rows)
+    groups: dict[str, Any] = {}
+    for g, prefixes in THEME_GROUPS.items():
+        hit = [r for r in rows if any(theme_matches(t, p) for t in _themes(r) for p in prefixes)]
+        tones = [x for r in hit if (x := _tone(r)) is not None]
+        groups[g] = {
+            "articles": len(hit),
+            "share": round(len(hit) / total, 4) if total else 0.0,
+            "tone": round(sum(tones) / len(tones), 3) if tones else None,
+        }
+    all_tones = [x for r in rows if (x := _tone(r)) is not None]
+    return {
+        "articles": total,
+        "tone": round(sum(all_tones) / len(all_tones), 3) if all_tones else None,
+        "groups": groups,
+        "headline": "World pulse: "
+        + ", ".join(f"{g} {v['share'] * 100:.1f}% (tone {v['tone']})" for g, v in groups.items()),
+    }
+
+
+def press_release_candidates(rows: list[list[str]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        if r[3] not in WIRES:
+            continue
+        title_m = re.search(r"<PAGE_TITLE>(.*?)</PAGE_TITLE>", r[26] if len(r) > 26 else "")
+        title = clean(title_m.group(1) if title_m else "", 380)
+        hay = (title + " " + r[13]).lower()
+        symbols = sorted({sym for k, sym in COMPANY_SYMBOLS.items() if k in hay})
+        if not symbols or not title:
+            continue
+        url = r[4] if r[4].startswith("https://") else None
+        out.append(
+            {
+                "id": hashlib.sha1(r[4].encode()).hexdigest()[:24],
+                "kind": "gdelt",
+                "title": title,
+                "url": url,
+                "symbols": symbols,
+                "source": r[3],
+                "published_at": int(datetime.strptime(r[1], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).timestamp() * 1000),
+                "topic": "press release",
+            }
+        )
+    return out
+
+
+def fetch_gdelt() -> tuple[list[list[str]], list[str]]:
+    failed: list[str] = []
+    try:
+        last = requests.get(f"{GDELT_BULK}/lastupdate.txt", timeout=30).text
+    except Exception as e:  # noqa: BLE001
+        return [], [f"lastupdate: {str(e)[:80]}"]
+    rows: list[list[str]] = []
+    got = 0
+    for url in gkg_urls(last):
+        if got >= GKG_FILES_PER_RUN:
+            break
+        try:
+            r = requests.get(url, timeout=120)
+            if r.status_code == 404:
+                continue  # GKG files publish with a lag; step back
+            r.raise_for_status()
+            with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+                rows += parse_gkg(z.read(z.namelist()[0]))
+            got += 1
+        except Exception as e:  # noqa: BLE001
+            failed.append(f"{url.rsplit('/', 1)[-1]}: {str(e)[:60]}")
+    if got == 0:
+        failed.append("no GKG files available")
+    return rows, failed
 
 
 EDGAR_FORMS = {"8-K", "4", "6-K", "SC 13D", "SC 13G", "SC 13D/A", "SC 13G/A"}
@@ -60,61 +162,6 @@ EDGAR_FORMS = {"8-K", "4", "6-K", "SC 13D", "SC 13G", "SC 13D/A", "SC 13G/A"}
 
 def clean(s: str, n: int) -> str:
     return " ".join("".join(ch if ch.isprintable() else " " for ch in s).split())[:n]
-
-
-def parse_seendate(s: str) -> int:
-    """GDELT seendate '20261022T191500Z' → epoch ms."""
-    return int(datetime.strptime(s, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc).timestamp() * 1000)
-
-
-def gdelt_candidate(article: dict[str, Any], topic: str, symbols: list[str]) -> dict[str, Any] | None:
-    url = article.get("url") or ""
-    title = clean(article.get("title") or "", 380)
-    if not title or not url.startswith("http"):
-        return None
-    return {
-        "id": hashlib.sha1(url.encode()).hexdigest()[:24],
-        "kind": "gdelt",
-        "title": title,
-        "url": url if url.startswith("https://") else None,
-        "symbols": symbols,
-        "source": clean(article.get("domain") or "", 70),
-        "published_at": parse_seendate(article["seendate"]) if article.get("seendate") else int(time.time() * 1000),
-        "topic": topic,
-    }
-
-
-def fetch_gdelt(timespan: str = "75min", per_topic: int = 8) -> tuple[list[dict], list[str]]:
-    out: list[dict] = []
-    failed: list[str] = []
-    for n, (topic, query, symbols) in enumerate(TOPICS):
-        if n:
-            time.sleep(GDELT_SPACING_S)
-        params = {
-            "query": f"{query} {domain_clause()} sourcelang:english",
-            "mode": "artlist",
-            "format": "json",
-            "maxrecords": per_topic,
-            "timespan": timespan,
-            "sort": "datedesc",
-        }
-        for attempt in range(2):
-            try:
-                r = requests.get(GDELT_URL, params=params, timeout=30)
-                if r.status_code == 429 and attempt == 0:
-                    time.sleep(30)
-                    continue
-                r.raise_for_status()
-                arts = (r.json() or {}).get("articles") or []
-                out += [c for a in arts if (c := gdelt_candidate(a, topic, symbols))]
-                break
-            except Exception as e:  # noqa: BLE001 - one topic failing never fails the job
-                if attempt == 1 or not str(e).startswith("429"):
-                    failed.append(f"{topic}: {str(e)[:80]}")
-                    break
-    seen: set[str] = set()
-    unique = [c for c in out if not (c["id"] in seen or seen.add(c["id"]))]
-    return unique, failed
 
 
 def watch_tickers(doctrine_path: Path) -> list[str]:
@@ -186,11 +233,15 @@ def edgar_candidates(ticker: str, cik: int, sub: dict, since_ms: int) -> list[di
 def world_items(version_gdelt: str, now_ms: int, repo_root: Path) -> tuple[list[dict], list[str]]:
     from . import payload as P
 
-    gd, gfail = fetch_gdelt()
+    rows, gfail = fetch_gdelt()
     ed, efail = fetch_edgar(watch_tickers(repo_root / "config" / "doctrine.yaml"), now_ms - 26 * 3_600_000)
     items = []
-    if gd:
-        items.append(P.item("gdelt-world-pulse", version_gdelt, now_ms, P.dumps(gd).encode(), {"candidates": gd, "failed": gfail}))
+    if rows:
+        pulse = world_pulse(rows)
+        prs = press_release_candidates(rows)
+        items.append(
+            P.item("gdelt-world-pulse", version_gdelt, now_ms, P.dumps(pulse).encode(), {**pulse, "candidates": prs, "failed": gfail})
+        )
     if ed:
         items.append(P.item("insider-form4-watcher", "edgar-v1", now_ms, P.dumps(ed).encode(), {"candidates": ed, "failed": efail}))
     for f in gfail + efail:

@@ -30,7 +30,7 @@ is exhausted the dependent decision is skipped (fail closed).
 | Insider Form 4 | SEC EDGAR full-text / submissions JSON | daily | insider-form4-watcher |
 | COT | CFTC Socrata (publicreporting.cftc.gov) | Friday after release | cot-contrarian-detector |
 | Polymarket odds | Gamma API | daily (Phase 7+) | macro divergence (read-only) |
-| World events / tone | **GDELT** DOC 2.0 API (free, keyless; ≤1 req / 5 s; verified 2026-10-22) | hourly (Phase 3) | gdelt-world-pulse → world-intel triage |
+| World risk pulse | **GDELT GKG 2.1 bulk files** (free, no rate limit, ~45 min lag; DOC API is throttled on GitHub runners) | hourly | gdelt-world-pulse → regime `WORLD` + wire press releases → triage |
 
 ## Blocked / avoided
 

@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { ClefApi, ClefQuestion, ClefResult } from "../src/clef/ClefClient.ts";
+import type { ClefAnswer, ClefApi, ClefQuestion, ClefResult } from "../src/clef/ClefClient.ts";
 import type { DecisionContract } from "../src/contracts/decision-contract.ts";
 import type { Doctrine } from "../src/contracts/doctrine.ts";
 import { Brain } from "../src/cortex/Brain.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
+import { type LlmProvider, LlmRouter } from "../src/court/llm.ts";
 import { NullNotifier } from "../src/discord/notifier.ts";
 import { verifyChain } from "../src/journal/Journal.ts";
 import type { AccountId } from "../src/lib/ids.ts";
@@ -36,7 +37,9 @@ function flat(n: number, price: number): Bar[] {
   }));
 }
 
-function setup(opts: { d?: Doctrine; live?: boolean; killed?: boolean; clef?: ClefApi } = {}) {
+function setup(
+  opts: { d?: Doctrine; live?: boolean; killed?: boolean; clef?: ClefApi; llm?: LlmRouter } = {},
+) {
   let now = T0;
   const clock = () => now;
   const market = new Market(clock);
@@ -63,6 +66,7 @@ function setup(opts: { d?: Doctrine; live?: boolean; killed?: boolean; clef?: Cl
     readKillFlag: async () => kill.on,
     now: clock,
     clef: opts.clef ?? null,
+    llm: opts.llm ?? null,
   });
   brain.init({ test: true });
   return {
@@ -643,10 +647,13 @@ describe("Tier 1 triage (Phase 3)", () => {
     expect(clef.calls).toHaveLength(3); // one item per call (ADR-027)
     expect(clef.calls[0]?.model).toBe("clef-flash");
     expect(Object.keys(clef.calls[0]?.questions ?? {})).toHaveLength(3);
-    const queue = t.sql.exec<{ candidate_id: string; tier: number }>(
-      "SELECT candidate_id, tier FROM triage_queue",
-    );
-    expect(queue).toEqual([{ candidate_id: "news:1", tier: 2 }]);
+    // The promoted item went straight on to Tier 2 in the same pulse, where the Tier 0 crypto gate (no fresh
+    // regime batch, proxy not consulted for candidates) rejected it before any Clef 27B call.
+    expect(t.sql.exec("SELECT candidate_id FROM triage_queue")).toHaveLength(0);
+    expect(
+      t.d1.db.prepare("SELECT stage, reason_codes FROM rejections WHERE candidate_id = 'news:1'").get(),
+    ).toEqual({ stage: "TIER0", reason_codes: '["crypto regime gate closed"]' });
+    expect(clef.calls.every((c) => c.model === "clef-flash")).toBe(true);
     expect(t.notifier.sent.filter((m) => m.channel === "world_intel")).toHaveLength(1);
     expect(t.d1.db.prepare("SELECT tier, model FROM triage_log").get()).toEqual({
       tier: 1,
@@ -736,5 +743,183 @@ describe("world-intel ingest (GDELT / EDGAR)", () => {
   it("requires posture for regime jobs and forbids it for world-intel", async () => {
     const t = setup();
     expect((await t.brain.ingestBatch({ ...worldBatch([cand("a")]), job: "crypto-regime" })).ok).toBe(false);
+  });
+});
+
+/** Clef that answers by question id (item prefixes like "i0." stripped), in the real response format. */
+class ScriptedClef implements ClefApi {
+  calls: string[] = [];
+  constructor(private readonly a: Record<string, ClefAnswer>) {}
+  async run(
+    model: "clef-flash" | "clef",
+    _state: unknown,
+    questions: Record<string, ClefQuestion>,
+  ): Promise<ClefResult> {
+    this.calls.push(model);
+    const answers: ClefResult["answers"] = {};
+    for (const id of Object.keys(questions)) {
+      const a = this.a[id.replace(/^i\d+\./, "")];
+      if (a) answers[id] = a;
+    }
+    return { model, answers, usage: { input_tokens: 800, output_tokens: 0 } };
+  }
+}
+
+describe("court end-to-end (Phase 3)", () => {
+  const answers: Record<string, ClefAnswer> = {
+    material: { type: "noul", noul: 0.9 },
+    direction: { type: "choice", choice: "up", probabilities: { up: 0.9, down: 0.05, unclear: 0.05 } },
+    escalate: { type: "score", score: 2.7 },
+    long_favored: { type: "noul", noul: 0.82 },
+    regime_alignment: { type: "noul", noul: 0.8 },
+    bear_lethality: { type: "noul", noul: 0.3 },
+    setup_class: {
+      type: "choice",
+      choice: "momentum_continuation",
+      probabilities: { momentum_continuation: 0.8 },
+    },
+    structural_quality: { type: "score", score: 3.4 },
+    win_prob: { type: "noul", noul: 0.7 },
+    regime_fit: { type: "noul", noul: 0.7 },
+    suitability: { type: "score", score: 3 },
+  };
+  const bullJson = JSON.stringify({
+    no_trade: false,
+    thesis: "Record ETF inflows extend BTC's uptrend; invalid below 126.",
+    setup: "momentum_continuation",
+    entry_low: 129.5,
+    entry_high: 130.5,
+    stop: 126,
+    targets: [136],
+    horizon_hours: 48,
+    conviction: 7,
+    receipts: ["close", "atr14", "catalyst"],
+  });
+  const bearJson = JSON.stringify({
+    fatal_flaws: ["Price is stretched above EMA20"],
+    kill_criteria: ["Daily close below 126"],
+    lethality: 0.3,
+    brief: "Momentum is extended versus ATR and inflow headlines often mark short-term tops.",
+  });
+  const provider = (text: string, calls: string[]): LlmProvider => ({
+    async complete(model) {
+      calls.push(model);
+      return { text, inputTokens: 100, outputTokens: 50 };
+    },
+  });
+  const cryptoBatch = {
+    schema_version: 1,
+    job: "crypto-regime",
+    produced_at: T0,
+    run_url: null,
+    items: [
+      {
+        skill_id: "crypto-regime-analyzer",
+        version: "x",
+        as_of: T0,
+        inputs_sha256: "c".repeat(64),
+        payload: {},
+      },
+    ],
+    posture: {
+      arena: "CRYPTO",
+      posture: "NEW_ENTRY_ALLOWED",
+      score: 66,
+      ceiling: null,
+      confidence: null,
+      summary: "ok",
+    },
+  };
+  const btcNews = {
+    id: "77",
+    createdAt: T0 - 5 * 60_000,
+    headline: "Bitcoin ETF inflows hit a record",
+    summary: "s",
+    symbols: ["BTCUSD"],
+    source: "benzinga",
+    url: null,
+  };
+
+  it("headline → Tier 1 → Tier 2 → bull/bear/synth → COURT contract → paper order", async () => {
+    const calls: string[] = [];
+    let now = T0;
+    const llm = new LlmRouter(
+      { gemini: provider(bullJson, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => now,
+    );
+    const clef = new ScriptedClef(answers);
+    const t = setup({ clef, llm });
+    now = T0;
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    const r = await t.brain.pulse();
+    expect(r.promoted).toBe(1);
+    expect(r.tier2).toBe(1);
+    expect(r.courtContracts).toBe(1);
+    expect(calls).toEqual(["gemini-3.5-flash", "openai/gpt-oss-120b"]); // bull google, bear openai-oss
+    expect(clef.calls).toEqual(["clef-flash", "clef", "clef"]); // tier1, tier2, synth
+    const k = t.d1.db
+      .prepare("SELECT origin, strategy_id, models_used FROM decision_contracts WHERE origin = 'COURT'")
+      .get() as {
+      origin: string;
+      strategy_id: string;
+      models_used: string;
+    };
+    expect(k.strategy_id).toBe("CRYPTO_CATALYST_COURT_V1");
+    expect(JSON.parse(k.models_used).map((m: { family: string }) => m.family)).toEqual([
+      "google",
+      "openai-oss",
+      "cloudflare-clef",
+    ]);
+    const buy = [...t.paper.orders.values()].find((o) => o.side === "buy" && o.symbol === "BTC/USD");
+    expect(buy?.limit_price).toBe("130.000");
+    expect(Number(buy?.qty) * (130 - 126)).toBeLessThanOrEqual(54 * 0.025);
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM llm_calls WHERE outcome = 'OK'").get()).toEqual({
+      n: 2,
+    });
+    expect(t.notifier.sent.some((m) => m.channel === "court")).toBe(true);
+  });
+
+  it("no cross-family bear → the candidate is rejected, never traded single-family", async () => {
+    const calls: string[] = [];
+    const llm = new LlmRouter({ gemini: provider(bullJson, calls) }, doctrine, () => T0);
+    const t = setup({ clef: new ScriptedClef(answers), llm });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    const r = await t.brain.pulse();
+    expect(r.courtContracts).toBe(0);
+    expect(
+      t.d1.db.prepare("SELECT stage, reason_codes FROM rejections WHERE candidate_id = 'news:77'").get(),
+    ).toEqual({
+      stage: "BEAR",
+      reason_codes: '["no cross-family bear available"]',
+    });
+  });
+
+  it("a bull brief whose numbers don't fit the evidence is rejected by code", async () => {
+    const calls: string[] = [];
+    const badBull = bullJson.replace('"stop":126', '"stop":129.4'); // closer than 1.2×ATR
+    const llm = new LlmRouter(
+      { gemini: provider(badBull, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => T0,
+    );
+    const t = setup({ clef: new ScriptedClef(answers), llm });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    await t.brain.pulse();
+    expect(calls).toEqual(["gemini-3.5-flash"]); // bear never called
+    const rj = t.d1.db
+      .prepare("SELECT stage, reason_codes FROM rejections WHERE candidate_id = 'news:77'")
+      .get() as {
+      stage: string;
+      reason_codes: string;
+    };
+    expect(rj.stage).toBe("BULL");
+    expect(rj.reason_codes).toContain("ATR");
   });
 });

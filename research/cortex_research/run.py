@@ -163,7 +163,7 @@ def world_job(version: str) -> dict | None:
     from .world import world_items
 
     t = now_ms()
-    items, _failed = world_items("gdelt-doc-v2", t, Path(__file__).resolve().parents[2])
+    items, _failed = world_items("gdelt-gkg-v2.1", t, Path(__file__).resolve().parents[2])
     if not items:
         return None
     return P.batch("world-intel", t, run_url(), items, None)
