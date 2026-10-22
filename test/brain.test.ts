@@ -198,6 +198,15 @@ describe("Brain pulse (simulated Alpaca)", () => {
     const r = await t.brain.pulse();
     expect(r.kill).toBe("KILLED");
     expect([...t.paper.orders.values()].every((o) => o.status === "canceled")).toBe(true);
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'KILL_SEEN'").get()).toEqual({
+      n: 1,
+    });
+    t.kill.on = false;
+    t.advance(60_000);
+    await t.brain.pulse();
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'KILL_CLEARED'").get()).toEqual({
+      n: 1,
+    });
   });
 
   it("unknown kill state (KV error) blocks entries", async () => {
@@ -470,5 +479,115 @@ describe("autonomy policy (ADR-024/025)", () => {
     await t.brain.pulse();
     const a = t.brain.status().accounts.find((x) => x.account === "PAPER");
     expect(a?.mode).toBe("NORMAL");
+  });
+});
+
+describe("research batch ingest (Phase 2)", () => {
+  const batch = (
+    over: {
+      score?: number;
+      posture?: "NEW_ENTRY_ALLOWED" | "REDUCE_ONLY" | "CASH_PRIORITY";
+      producedAt?: number;
+    } = {},
+  ) => ({
+    schema_version: 1,
+    job: "crypto-regime",
+    produced_at: over.producedAt ?? T0,
+    run_url: "https://github.com/x-TheFox/Cortex-54/actions/runs/1",
+    items: [
+      {
+        skill_id: "crypto-regime-analyzer",
+        version: "cb0f3aadffed6d1089db4b224162c964368baa46",
+        as_of: T0,
+        inputs_sha256: "a".repeat(64),
+        payload: { headline: "NEUTRAL 66.8", composite: { score: over.score ?? 66.8 } },
+      },
+    ],
+    posture: {
+      arena: "CRYPTO",
+      posture: over.posture ?? "NEW_ENTRY_ALLOWED",
+      score: over.score ?? 66.8,
+      ceiling: null,
+      confidence: null,
+      summary: "Mixed conditions.",
+    },
+  });
+
+  it("stores the batch in D1, updates regime state, and posts a posture card", async () => {
+    const t = setup();
+    const r = await t.brain.ingestBatch(batch());
+    expect(r.ok).toBe(true);
+    expect(t.d1.db.prepare("SELECT job, skill_id FROM batch_results").get()).toEqual({
+      job: "crypto-regime",
+      skill_id: "crypto-regime-analyzer",
+    });
+    expect(t.brain.status().regimes.find((x) => x.arena === "CRYPTO")?.score).toBeCloseTo(66.8);
+    const card = t.notifier.sent.find(
+      (m) => m.channel === "briefs" && m.msg.embeds?.[0]?.title?.includes("Crypto regime"),
+    );
+    expect(card).toBeDefined();
+  });
+
+  it("rejects payloads that fail the schema", async () => {
+    const t = setup();
+    expect((await t.brain.ingestBatch({ ...batch(), job: "rm -rf" })).ok).toBe(false);
+    expect((await t.brain.ingestBatch({ ...batch(), items: [] })).ok).toBe(false);
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM batch_results").get()).toEqual({ n: 0 });
+  });
+
+  it("a fresh batch below the composite minimum blocks crypto longs even if the BTC proxy is risk-on", async () => {
+    const t = setup();
+    await t.brain.ingestBatch(batch({ score: 30, posture: "REDUCE_ONLY" }));
+    breakout(t);
+    const r = await t.brain.pulse();
+    expect(r.contracts).toBe(0);
+  });
+
+  it("a stale batch falls back to the proxy and raises one staleness alarm", async () => {
+    const t = setup();
+    await t.brain.ingestBatch(batch({ score: 30, posture: "REDUCE_ONLY", producedAt: T0 - 7 * HOUR }));
+    breakout(t);
+    const r = await t.brain.pulse();
+    expect(r.contracts).toBe(1); // proxy says risk-on; stale batch is ignored
+    expect(t.notifier.sent.filter((m) => m.msg.content?.includes("regime batch is"))).toHaveLength(1);
+  });
+});
+
+describe("news intake (Phase 2)", () => {
+  const item = (id: string, minutesAgo: number, symbols = ["BTCUSD"]) => ({
+    id,
+    createdAt: T0 - minutesAgo * 60_000,
+    headline: `Headline ${id}`,
+    summary: "s",
+    symbols,
+    source: "benzinga",
+    url: null,
+  });
+
+  it("queues new headlines for watched symbols once, and moves the cursor", async () => {
+    const t = setup();
+    t.market.news.push(item("1", 30), item("2", 10), item("3", 5, ["TSLA"]));
+    const r1 = await t.brain.pulse();
+    expect(r1.newsQueued).toBe(2); // TSLA isn't watched or held
+    t.advance(60_000);
+    const r2 = await t.brain.pulse();
+    expect(r2.newsQueued).toBe(0);
+    t.market.news.push({ ...item("4", 0), createdAt: T0 + 30_000 });
+    t.advance(60_000);
+    expect((await t.brain.pulse()).newsQueued).toBe(1);
+    expect(
+      t.sql.exec("SELECT candidate_id FROM triage_queue ORDER BY candidate_id").map((r) => r.candidate_id),
+    ).toEqual(["news:1", "news:2", "news:4"]);
+  });
+
+  it("a news failure never blocks trading", async () => {
+    const t = setup();
+    (t.brain as unknown as { deps: { market: { news: () => Promise<never> } } }).deps.market.news =
+      async () => {
+        throw new Error("news down");
+      };
+    breakout(t);
+    const r = await t.brain.pulse();
+    expect(r.entries).toBe(1);
   });
 });

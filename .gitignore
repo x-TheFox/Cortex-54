@@ -14,3 +14,5 @@ src/generated/
 __pycache__/
 .venv/
 research/.cache/
+research/.venv/
+research/.vendor/

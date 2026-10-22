@@ -148,6 +148,9 @@ official changelog — do not depend on it.**
 - **Binance/Bybit block US IPs** (and GitHub runners are US). Use OKX / Hyperliquid / Coinbase / Kraken /
   Deribit public endpoints for funding, OI and IV. The tradermonty `crypto-regime-analyzer` uses Binance;
   our port swaps the funding source.
+- Verified 2026-10-22: Alpaca news (Benzinga) is on the free plan; OKX public funding works from US; GDELT DOC
+  2.0 API is free/keyless (≤1 req / 5 s); upstream tradermonty breadth/uptrend run keyless; FTD/macro/market-top
+  run on the FMP free key; exposure-coach combines them.
 - GitHub Actions: public repo → free standard runners. Cron is UTC, can be delayed 15–30 min or skipped, and
   **scheduled workflows auto-disable after 60 days of repo inactivity.** The brain alarms on stale batch data.
 
@@ -235,7 +238,8 @@ src/
   clef/ court/ data/ workflows/  (Phase 2–3)
 workers/sentinel/         independent watchdog + kill-switch worker (own wrangler.jsonc, vendored verify.ts,
                           writes the KV kill flag the brain reads — ADR-015)
-research/                 Python batch jobs for GitHub Actions (screeners, governor)
+research/                 Python (uv): cortex_research.run crypto|equity — runs pinned upstream skills, signs,
+                          POSTs /ingest/batch (research.yml); pytest in CI. ADR-026
 test/                     vitest in Node: pure risk tests + full pulses against test/sim (FakeBroker + node:sqlite
                           with the real D1 migrations) — ADR-019
 .github/workflows/        ci.yml (+ research.yml, governor.yml added in later phases)
@@ -257,6 +261,7 @@ pnpm db:migrate:remote    # apply migrations to the real D1 (operator only)
 pnpm deploy:cortex        # wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists). NOT `pnpm deploy` (pnpm builtin)
 pnpm deploy:sentinel      # deploy the independent watchdog/kill-switch worker
 pnpm discord:setup        # idempotent: CORTEX-54 category + 8 channels, sentinel webhook, guild slash commands
+gh workflow run research -f job=crypto    # or job=equity: run a research batch now
 pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
 gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATTEN ALL (ADR-022); action=rearm to clear
 ```
@@ -321,5 +326,9 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-22: PR #2 merged (watchdog + kill-switch workflows active). Operator policy: no approve-each-trade on
   either account; real money only after total implementation + fully autonomous paper testing (ADR-024/025).
   Free LLM keys (Gemini, Groq, NIM, OpenRouter) verified and stored as `cortex` secrets for Phase 3.
-- Next: Phase 1 exit gate (7 days unattended on PAPER, kill drill via kill-switch.yml), then Phase 2.
+- 2026-10-22: PR #3 merged. Paper kill drill PASSED (kill-switch.yml → sentinel flatten 207, KV flag, #alarms post;
+  brain journaled KILL_CLEARED after re-arm). Phase 1 exit now only needs the 7-day unattended clock.
+- 2026-10-22: Phase 2 built and live (PR open): ingest, research.yml, regime gate, posture cards, news intake.
+  Keys stored: FMP + FRED (GitHub secrets), INGEST_HMAC_SECRET (cortex + GitHub). GDELT queued for Phase 3.
+- Next: 7-day paper clock (Phase 1) and 5-day posture-card clock (Phase 2) run in parallel; then Phase 3.
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

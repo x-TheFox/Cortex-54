@@ -53,7 +53,9 @@
 set -a; . ./.dev.vars; set +a      # DISCORD_BOT_TOKEN, DISCORD_APP_ID, DISCORD_GUILD_ID, Alpaca paper keys
 pnpm discord:setup                 # category, channels, webhook → workers/sentinel/.dev.vars, guild commands
 ```
-GitHub: secret `SENTINEL_TICK_SECRET`, variable `SENTINEL_URL` (watchdog.yml + kill-switch.yml).
+GitHub: secrets `SENTINEL_TICK_SECRET`, `INGEST_HMAC_SECRET`, `FMP_API_KEY`, `FRED_API_KEY`; variables
+`SENTINEL_URL`, `CORTEX_URL`. Run a research batch now: `gh workflow run research -f job=crypto` (or `equity`).
+Local dry run: `cd research && UPSTREAM_DIR=<checkout> uv run python -m cortex_research.run crypto --dry-run`.
 
 ## B. Daily operator glance (Discord)
 - `command-center`: rung, dial, breaker band, budget mode, last pulse age.

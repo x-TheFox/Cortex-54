@@ -49,6 +49,7 @@ describe("interaction parsing", () => {
       budget: { mode: "NORMAL", worst: { resource: "none", fraction: 0 }, fractions: {} },
       journalHead: { seq: 0, sha: "0".repeat(64) },
       outboxPending: 0,
+      regimes: [],
       accounts: [],
     });
     expect(msg.content).toContain("pulse never");

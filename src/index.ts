@@ -1,3 +1,4 @@
+import { MAX_BATCH_BYTES } from "./contracts/batch.ts";
 import { hudMessage } from "./cortex/Brain.ts";
 import {
   APPLICATION_COMMAND,
@@ -13,6 +14,7 @@ import {
 } from "./discord/interactions.ts";
 import { verifyDiscordRequest } from "./discord/verify.ts";
 import type { Env } from "./env.ts";
+import { verifySignedBody } from "./lib/hmac.ts";
 
 export { AgentCortexDO } from "./cortex/AgentCortexDO.ts";
 
@@ -95,6 +97,27 @@ export default {
       const health = await b.health();
       const stale = health.last_pulse_at === null || Date.now() - health.last_pulse_at > 15 * 60_000;
       return Response.json(health, { status: stale ? 503 : 200 });
+    }
+
+    if (request.method === "POST" && url.pathname === "/ingest/batch") {
+      if (!env.INGEST_HMAC_SECRET) return new Response("ingest not configured", { status: 503 });
+      const body = await request.text();
+      if (body.length > MAX_BATCH_BYTES) return new Response("too large", { status: 413 });
+      const ok = await verifySignedBody(
+        env.INGEST_HMAC_SECRET,
+        request.headers.get("x-cortex-signature"),
+        request.headers.get("x-cortex-timestamp"),
+        body,
+      );
+      if (!ok) return new Response("bad signature", { status: 401 });
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        return new Response("bad json", { status: 400 });
+      }
+      const receipt = await brain(env).ingest(parsed);
+      return Response.json(receipt, { status: receipt.ok ? 200 : 422 });
     }
 
     if (request.method === "POST" && url.pathname === "/discord/interactions") {

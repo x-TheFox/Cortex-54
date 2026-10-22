@@ -15,3 +15,7 @@ GEMINI_API_KEY=
 GROQ_API_KEY=
 NVIDIA_API_KEY=
 OPENROUTER_API_KEY=
+INGEST_HMAC_SECRET=
+# Research job keys (GitHub Actions secrets; locally for dry runs)
+FMP_API_KEY=
+FRED_API_KEY=

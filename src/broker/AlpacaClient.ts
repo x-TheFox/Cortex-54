@@ -16,6 +16,7 @@ import {
   type BrokerApi,
   BrokerError,
   type MarketDataApi,
+  type NewsItem,
   type OrderRequest,
   type Quote,
 } from "./types.ts";
@@ -131,6 +132,28 @@ export class AlpacaClient implements BrokerApi {
   }
 }
 
+const NewsRow = z.object({
+  id: z.union([z.number(), z.string()]),
+  created_at: z.string(),
+  headline: z.string(),
+  summary: z.string().optional().default(""),
+  symbols: z.array(z.string()).default([]),
+  source: z.string().default(""),
+  url: z.string().nullable().optional(),
+});
+
+/** Untrusted text from the outside world: strip control characters and cap length (CLAUDE.md §9). */
+export function cleanText(s: string, max: number): string {
+  return (
+    s
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the point
+      .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, max)
+  );
+}
+
 const QuoteRow = z.object({ ap: z.number(), bp: z.number(), t: z.string() });
 const BarRow = z.object({
   t: z.string(),
@@ -147,6 +170,23 @@ export class AlpacaMarketData implements MarketDataApi {
     private readonly guard: SubrequestGuard,
     private readonly fetcher: Fetcher = (u, i) => fetch(u, i),
   ) {}
+
+  async news(symbols: string[], sinceIso: string): Promise<NewsItem[]> {
+    if (symbols.length === 0) return [];
+    const url =
+      `${DATA_BASE}/v1beta1/news?sort=asc&limit=50&include_content=false` +
+      `&start=${encodeURIComponent(sinceIso)}&symbols=${encodeURIComponent(symbols.join(","))}`;
+    const body = await call(this.fetcher, this.guard, this.creds, url, z.object({ news: z.array(NewsRow) }));
+    return body.news.map((n) => ({
+      id: String(n.id),
+      createdAt: Date.parse(n.created_at),
+      headline: cleanText(n.headline, 300),
+      summary: cleanText(n.summary, 600),
+      symbols: n.symbols.slice(0, 12),
+      source: cleanText(n.source, 40),
+      url: n.url && /^https:\/\//.test(n.url) ? n.url.slice(0, 300) : null,
+    }));
+  }
 
   async cryptoQuotes(symbols: string[]): Promise<Record<string, Quote>> {
     if (symbols.length === 0) return {};

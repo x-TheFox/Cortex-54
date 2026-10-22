@@ -144,8 +144,20 @@ export interface BrokerApi {
   asset(symbol: string): Promise<AlpacaAsset>;
 }
 
+export interface NewsItem {
+  id: string;
+  createdAt: number;
+  headline: string;
+  summary: string;
+  symbols: string[];
+  source: string;
+  url: string | null;
+}
+
 /** Market data (shared by both accounts; any valid key works). */
 export interface MarketDataApi {
+  /** Benzinga news via Alpaca (free plan), oldest first, strictly after `sinceIso`. */
+  news(symbols: string[], sinceIso: string): Promise<NewsItem[]>;
   cryptoQuotes(symbols: string[]): Promise<Record<string, Quote>>;
   stockQuotes(symbols: string[]): Promise<Record<string, Quote>>;
   cryptoDailyBars(symbols: string[], days: number, now: number): Promise<Record<string, Bar[]>>;
