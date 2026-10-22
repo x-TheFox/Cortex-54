@@ -1,0 +1,19 @@
+[project]
+name = "cortex-research"
+version = "0.1.0"
+description = "CORTEX-54 batch research jobs (GitHub Actions): run pinned upstream skills, sign, ingest"
+requires-python = ">=3.11"
+dependencies = [
+  # Upstream tradermonty skills (run from a pinned checkout, never copied): requests everywhere,
+  # pandas-market-calendars for market-top-detector, yfinance as the upstream macro-regime fallback.
+  "requests>=2.31.0",
+  "pandas-market-calendars==5.2.2",
+  "yfinance>=0.2.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

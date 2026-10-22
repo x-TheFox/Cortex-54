@@ -12,7 +12,7 @@ is exhausted the dependent decision is skipped (fail closed).
 | Equity quotes | Alpaca `/v2/stocks/snapshots` (IEX) | — | every pulse | IEX-only on free plan; widen spread assumptions |
 | Crypto quotes / book | Alpaca `/v1beta3/crypto/us/latest/{quotes,orderbooks}` | Coinbase / Kraken public ticker | every pulse | |
 | Market clock / calendar | Alpaca `/v2/clock`, `/v2/calendar` | — | clock each pulse (cached 60 s), calendar daily | drives sessions + settlement |
-| News | Alpaca `/v1beta1/news` (Benzinga) | SEC EDGAR 8-K Atom feed | every pulse with `since` cursor | **verify free-plan news access in Phase 2**; fallback is filings-only |
+| News | Alpaca `/v1beta1/news` (Benzinga) | SEC EDGAR 8-K Atom feed | every pulse with `since` cursor | verified free on 2026-10-22; symbols use no slash (`BTCUSD`); intake → triage queue |
 | Assets metadata | Alpaca `/v2/assets` | — | daily | fractionable, min order size/increment, tradability |
 
 ## Batch (GitHub Actions → `/ingest/batch`)
@@ -20,8 +20,9 @@ is exhausted the dependent decision is skipped (fail closed).
 | Need | Source | Cadence (UTC) | Skill(s) |
 |---|---|---|---|
 | Daily bars (universe) | Alpaca bars (IEX) | pre-open, post-close | screeners, ATR, breadth |
-| Breadth / distribution days / FTD | computed from bars | pre-open | market-breadth-analyzer, ibd-distribution-day-monitor, ftd-detector |
-| Crypto regime | CoinGecko Demo (breadth, dominance), OKX/Hyperliquid (funding, OI) | every 4 h | crypto-regime-analyzer (Binance swapped out) |
+| Breadth / uptrend | TraderMonty public CSVs (keyless) | pre-open, post-close | market-breadth-analyzer, uptrend-analyzer |
+| FTD / market-top / macro regime | FMP free key (~30–60 calls/run of 250/day); macro falls back to yfinance for ETFs FMP free lacks | pre-open, post-close | ftd-detector, market-top-detector, macro-regime-detector → exposure-coach |
+| Crypto regime | CoinGecko public (breadth, dominance) via upstream; **OKX** funding (verified) | every 4 h | crypto-regime-analyzer (Binance swapped out) |
 | Crypto IV | Deribit public (DVOL) | every 4 h | regime context |
 | Earnings calendar | Finnhub free or FMP free (key) | daily | earnings-calendar, event-horizon |
 | Economic calendar | FRED release calendar | daily | macro-regime, event-horizon |
@@ -29,12 +30,13 @@ is exhausted the dependent decision is skipped (fail closed).
 | Insider Form 4 | SEC EDGAR full-text / submissions JSON | daily | insider-form4-watcher |
 | COT | CFTC Socrata (publicreporting.cftc.gov) | Friday after release | cot-contrarian-detector |
 | Polymarket odds | Gamma API | daily (Phase 7+) | macro divergence (read-only) |
+| World events / tone | **GDELT** DOC 2.0 API (free, keyless; ≤1 req / 5 s; verified 2026-10-22) | hourly (Phase 3) | gdelt-world-pulse → world-intel triage |
 
 ## Blocked / avoided
 
 - **Binance, Bybit**: geo-block US IPs (GitHub runners are US; Cloudflare egress varies). Never a primary.
 - **FINVIZ scraping**: ToS risk; use our own screeners on Alpaca bars instead.
-- **yfinance**: unofficial; allowed only in research notebooks, never in the decision path.
+- **yfinance**: unofficial. Only as the upstream macro-regime-detector's fallback for ETFs FMP free doesn't serve; flagged in that item's provenance. Never called by our own code.
 - Paid feeds (SIP, OPRA, Polygon paid, CoinGlass): out of scope by the $0 rule.
 
 ## Hygiene rules

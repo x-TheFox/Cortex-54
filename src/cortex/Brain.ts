@@ -6,6 +6,7 @@ import {
   type Quote,
 } from "../broker/types.ts";
 import { DO_MEMORY_GB, FreeTierBudget, SubrequestBudgetExceeded, utcDay } from "../budget/FreeTierBudget.ts";
+import { type Batch, BatchSchema } from "../contracts/batch.ts";
 import type { Constitution } from "../contracts/constitution.ts";
 import { type DecisionContract, DecisionContractSchema } from "../contracts/decision-contract.ts";
 import type { Doctrine } from "../contracts/doctrine.ts";
@@ -34,6 +35,8 @@ import {
 import { getKV, one, type SqlLike, setKV } from "./store.ts";
 
 export const ACCOUNTS: AccountId[] = ["PAPER", "LIVE"];
+/** Triage queue cap (news + future screener candidates) — keeps DO storage and row writes bounded. */
+export const TRIAGE_QUEUE_MAX = 300;
 /** Valid dial stops (ADR-024): 0 shadow; PAPER trades at 2; LIVE trades at 3; 4 = colleague mode. */
 export const DIAL_STOPS: Record<AccountId, number[]> = { PAPER: [0, 2, 4], LIVE: [0, 3, 4] };
 const OPEN_STATES = [
@@ -135,6 +138,7 @@ export interface PulseReport {
   entries: number;
   exits: number;
   flushed: number;
+  newsQueued: number;
   nextPulseSeconds: number;
 }
 
@@ -144,6 +148,15 @@ export interface StatusView {
   budget: ReturnType<FreeTierBudget["snapshot"]>;
   journalHead: { seq: number; sha: string };
   outboxPending: number;
+  regimes: {
+    arena: string;
+    posture: string;
+    score: number | null;
+    ceiling: number | null;
+    ageMinutes: number;
+    fresh: boolean;
+    source: string;
+  }[];
   accounts: {
     account: AccountId;
     configured: boolean;
@@ -242,6 +255,7 @@ export class Brain {
       entries: 0,
       exits: 0,
       flushed: 0,
+      newsQueued: 0,
       nextPulseSeconds: this.d.cadence.pulse_seconds_flat,
     };
     this.budget.add("do_requests", 1, started);
@@ -293,6 +307,15 @@ export class Brain {
       }
     }
 
+    // 2b. World intake (Phase 2): headlines into the triage queue for Phase 3. Never blocks trading.
+    try {
+      report.newsQueued = await this.intakeNews();
+    } catch (e) {
+      if (!(e instanceof SubrequestBudgetExceeded)) {
+        await this.alertOnce("news-intake", `⚠️ news intake failed: ${errText(e).slice(0, 200)}`);
+      }
+    }
+
     // 3. New entries (never when killed/unknown or budget is in REDUCE_ONLY).
     if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
       try {
@@ -305,6 +328,8 @@ export class Brain {
         }
       }
     }
+
+    await this.checkBatchStaleness(started).catch(() => undefined);
 
     // 4. Persist, report, schedule.
     report.flushed = await this.flushJournal();
@@ -1094,13 +1119,18 @@ ${postmortem}`,
       p.lookback_days + p.atr_period + 5,
       now,
     );
-    const regime = regimeProxyRiskOn(bars["BTC/USD"] ?? [], p);
+    const proxy = regimeProxyRiskOn(bars["BTC/USD"] ?? [], p);
     this.sql.exec(
-      "INSERT INTO regime_state (arena, posture, score, ceiling, payload_json, as_of) VALUES ('CRYPTO', ?, NULL, NULL, ?, ?) ON CONFLICT(arena) DO UPDATE SET posture = excluded.posture, payload_json = excluded.payload_json, as_of = excluded.as_of",
-      regime?.riskOn ? "NEW_ENTRY_ALLOWED" : "REDUCE_ONLY",
-      JSON.stringify({ source: "baseline-proxy", ...regime }),
+      "INSERT INTO regime_state (arena, posture, score, ceiling, payload_json, as_of) VALUES ('CRYPTO_PROXY', ?, NULL, NULL, ?, ?) ON CONFLICT(arena) DO UPDATE SET posture = excluded.posture, payload_json = excluded.payload_json, as_of = excluded.as_of",
+      proxy?.riskOn ? "NEW_ENTRY_ALLOWED" : "REDUCE_ONLY",
+      JSON.stringify({ source: "baseline-proxy", ...proxy }),
       now,
     );
+    // Regime gate (Tier 0): the batch crypto composite wins when fresh; the BTC/EMA proxy is the fallback.
+    const batch = this.freshRegime("CRYPTO", now);
+    const regime = batch
+      ? { riskOn: batch.score !== null && batch.score >= this.d.regime_gates.crypto_composite_min_for_longs }
+      : proxy;
     const missing = universe.filter((s) => !quotes[s]);
     const fresh =
       missing.length > 0 ? { ...quotes, ...(await this.deps.market.cryptoQuotes(missing)) } : quotes;
@@ -1138,6 +1168,145 @@ ${postmortem}`,
       }
     }
     return { contracts, entries };
+  }
+
+  /** Symbols whose news we watch: held positions + all doctrine watchlists, in Alpaca news format (no slash). */
+  private newsSymbols(): string[] {
+    const s = new Set<string>(this.symbolsInPlay());
+    for (const list of Object.values(this.d.watchlists)) for (const x of list) s.add(x);
+    return [...s].map((x) => x.replace("/", "")).slice(0, 40);
+  }
+
+  /** Pull new headlines into triage_queue (deduped, capped at TRIAGE_QUEUE_MAX). Returns how many were queued. */
+  private async intakeNews(): Promise<number> {
+    const m = this.deps.market;
+    if (!m) return 0;
+    const now = this.deps.now();
+    const cursor = one<{ value: string }>(this.sql, "SELECT value FROM cursors WHERE name = 'news'")?.value;
+    const since = cursor ?? new Date(now - 3_600_000).toISOString();
+    const items = await m.news(this.newsSymbols(), since);
+    let queued = 0;
+    let last = since;
+    for (const n of items) {
+      last = new Date(Math.max(Date.parse(last), n.createdAt)).toISOString();
+      const id = `news:${n.id}`;
+      if (one(this.sql, "SELECT candidate_id FROM triage_queue WHERE candidate_id = ?", id)) continue;
+      this.sql.exec(
+        "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 1, ?, ?, ?)",
+        id,
+        n.symbols[0] ?? "",
+        JSON.stringify({ kind: "news", ...n }),
+        now,
+      );
+      queued++;
+    }
+    this.sql.exec(
+      "INSERT INTO cursors (name, value, updated_at) VALUES ('news', ?, ?) ON CONFLICT(name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+      last,
+      now,
+    );
+    this.sql.exec(
+      `DELETE FROM triage_queue WHERE candidate_id NOT IN (SELECT candidate_id FROM triage_queue ORDER BY enqueued_at DESC LIMIT ${TRIAGE_QUEUE_MAX})`,
+    );
+    if (queued > 0) this.journal.append("SYSTEM", "NEWS_INTAKE", null, { queued, since }, now);
+    return queued;
+  }
+
+  /** Research batch from GitHub Actions (HMAC already verified by the router). Returns a short receipt. */
+  async ingestBatch(raw: unknown): Promise<{ ok: boolean; message: string }> {
+    const now = this.deps.now();
+    const parsed = BatchSchema.safeParse(raw);
+    if (!parsed.success) {
+      this.journal.append(
+        "SYSTEM",
+        "INGEST_REJECTED",
+        null,
+        { issues: parsed.error.issues.slice(0, 5) },
+        now,
+      );
+      return { ok: false, message: "schema validation failed" };
+    }
+    const b: Batch = parsed.data;
+    if (b.produced_at > now + 5 * 60_000) return { ok: false, message: "produced_at is in the future" };
+    for (const item of b.items) {
+      this.journal.enqueue(
+        "batch_results",
+        {
+          received_at: now,
+          produced_at: b.produced_at,
+          job: b.job,
+          skill_id: item.skill_id,
+          version: item.version,
+          inputs_sha256: item.inputs_sha256,
+          payload_json: JSON.stringify(item.payload).slice(0, 60_000),
+          run_url: b.run_url,
+        },
+        now,
+      );
+    }
+    const prev = one<{ posture: string; score: number | null }>(
+      this.sql,
+      "SELECT posture, score FROM regime_state WHERE arena = ?",
+      b.posture.arena,
+    );
+    this.sql.exec(
+      "INSERT INTO regime_state (arena, posture, score, ceiling, payload_json, as_of) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(arena) DO UPDATE SET posture = excluded.posture, score = excluded.score, ceiling = excluded.ceiling, payload_json = excluded.payload_json, as_of = excluded.as_of",
+      b.posture.arena,
+      b.posture.posture,
+      b.posture.score,
+      b.posture.ceiling,
+      JSON.stringify({
+        source: b.job,
+        confidence: b.posture.confidence,
+        summary: b.posture.summary,
+        run_url: b.run_url,
+      }),
+      b.produced_at,
+    );
+    this.journal.append(
+      "SYSTEM",
+      "REGIME",
+      b.job,
+      {
+        arena: b.posture.arena,
+        posture: b.posture.posture,
+        score: b.posture.score,
+        ceiling: b.posture.ceiling,
+        from: prev?.posture ?? null,
+      },
+      now,
+    );
+    await this.deps.notifier.post("briefs", postureCard(b, prev?.posture ?? null));
+    await this.flushJournal();
+    return { ok: true, message: `stored ${b.items.length} item(s); ${b.posture.arena} ${b.posture.posture}` };
+  }
+
+  /** Batch regime for an arena if it is within the doctrine staleness limit, else null (fail closed to proxy/none). */
+  freshRegime(
+    arena: "CRYPTO" | "EQUITIES",
+    now: number,
+  ): { posture: string; score: number | null; ceiling: number | null; as_of: number } | null {
+    const row = one<{ posture: string; score: number | null; ceiling: number | null; as_of: number }>(
+      this.sql,
+      "SELECT posture, score, ceiling, as_of FROM regime_state WHERE arena = ?",
+      arena,
+    );
+    if (!row) return null;
+    const maxAge = (this.d.staleness.regime_batch_hours[arena] ?? 24) * 3_600_000;
+    return now - row.as_of <= maxAge ? row : null;
+  }
+
+  /** Alert once per arena when batch data that used to arrive has gone stale (e.g. GitHub disabled the schedule). */
+  private async checkBatchStaleness(now: number): Promise<void> {
+    for (const arena of ["CRYPTO", "EQUITIES"] as const) {
+      const row = one<{ as_of: number }>(this.sql, "SELECT as_of FROM regime_state WHERE arena = ?", arena);
+      if (!row || this.freshRegime(arena, now)) continue;
+      const hours = ((now - row.as_of) / 3_600_000).toFixed(1);
+      await this.alertOnce(
+        `stale-batch:${arena}`,
+        `⏳ ${arena} regime batch is ${hours}h old (limit ${this.d.staleness.regime_batch_hours[arena]}h). Check the research workflow in GitHub Actions.`,
+      );
+    }
   }
 
   recordContract(contract: DecisionContract, now: number): void {
@@ -1558,6 +1727,25 @@ ${postmortem}`,
       budget: this.budget.snapshot(now),
       journalHead: this.journal.head(),
       outboxPending: this.journal.pending(),
+      regimes: this.sql
+        .exec<{
+          arena: string;
+          posture: string;
+          score: number | null;
+          ceiling: number | null;
+          as_of: number;
+          payload_json: string;
+        }>("SELECT arena, posture, score, ceiling, as_of, payload_json FROM regime_state ORDER BY arena")
+        .map((r) => ({
+          arena: r.arena,
+          posture: r.posture,
+          score: r.score,
+          ceiling: r.ceiling,
+          ageMinutes: Math.round((now - r.as_of) / 60_000),
+          fresh:
+            r.arena === "CRYPTO_PROXY" || this.freshRegime(r.arena as "CRYPTO" | "EQUITIES", now) !== null,
+          source: (JSON.parse(r.payload_json) as { source?: string }).source ?? "?",
+        })),
       accounts: ACCOUNTS.flatMap((account) => {
         const row = this.account(account);
         if (!row) return [];
@@ -1691,7 +1879,14 @@ ${postmortem}`,
   }
 
   noteKill(killed: boolean): void {
-    setKV(this.sql, "kill_seen", killed ? "1" : "0", this.deps.now());
+    const now = this.deps.now();
+    const prev = getKV(this.sql, "kill_seen");
+    const next = killed ? "1" : "0";
+    if (prev === next) return;
+    setKV(this.sql, "kill_seen", next, now);
+    // Journal transitions so kill drills are provable from the record (first observation of "clear" is silent).
+    if (killed || prev === "1")
+      this.journal.append("SYSTEM", killed ? "KILL_SEEN" : "KILL_CLEARED", null, {}, now);
   }
 
   // ------------------------------------------------------------------ persistence & telemetry
@@ -1788,8 +1983,16 @@ export function hudMessage(s: StatusView): DiscordMessage {
       },
     ],
   }));
+  const regimeLine = s.regimes
+    .map(
+      (r) =>
+        `${r.arena} **${r.posture}**${r.score !== null ? ` ${r.score.toFixed(0)}` : ""}${r.ceiling !== null ? ` · ceiling ${(r.ceiling * 100).toFixed(0)}%` : ""} · ${r.ageMinutes}m${r.fresh ? "" : " ⚠️stale"}`,
+    )
+    .join("  |  ");
   return {
-    content: `🧠 **CORTEX-54** · pulse ${age} · budget **${s.budget.mode}** (${s.budget.worst.resource} ${(s.budget.worst.fraction * 100).toFixed(0)}%) · journal #${s.journalHead.seq}${s.outboxPending > 0 ? ` (${s.outboxPending} unflushed)` : ""}`,
+    content:
+      `🧠 **CORTEX-54** · pulse ${age} · budget **${s.budget.mode}** (${s.budget.worst.resource} ${(s.budget.worst.fraction * 100).toFixed(0)}%) · journal #${s.journalHead.seq}${s.outboxPending > 0 ? ` (${s.outboxPending} unflushed)` : ""}` +
+      (regimeLine ? `\n🌐 ${regimeLine}` : ""),
     embeds,
   };
 }
@@ -1809,6 +2012,42 @@ export function contractCard(k: DecisionContract): DiscordMessage {
           { name: "Bear case", value: k.bear_case_brief.slice(0, 1000), inline: false },
         ],
         footer: { text: `contract ${k.contract_id}` },
+      },
+    ],
+  };
+}
+
+const postureColor = (p: string) =>
+  p === "NEW_ENTRY_ALLOWED" ? COLORS.green : p === "REDUCE_ONLY" ? COLORS.yellow : COLORS.red;
+
+/** Posture card for #pulse-and-briefs (crypto every 4 h, equities pre-open/post-close). */
+export function postureCard(b: Batch, previous: string | null): DiscordMessage {
+  const p = b.posture;
+  const changed = previous !== null && previous !== p.posture ? ` (was ${previous})` : "";
+  return {
+    embeds: [
+      {
+        title: `${p.arena === "CRYPTO" ? "🪙 Crypto regime" : "📊 Equity posture"} · ${p.posture}${changed}`,
+        color: postureColor(p.posture),
+        description: p.summary,
+        fields: [
+          { name: "Score", value: `${p.score.toFixed(1)} / 100`, inline: true },
+          {
+            name: "Exposure ceiling",
+            value: p.ceiling === null ? "—" : `${(p.ceiling * 100).toFixed(0)}%`,
+            inline: true,
+          },
+          { name: "Confidence", value: p.confidence ?? "—", inline: true },
+          ...b.items.slice(0, 6).map((i) => ({
+            name: i.skill_id,
+            value: String((i.payload as { headline?: unknown }).headline ?? "ok").slice(0, 200),
+            inline: false,
+          })),
+        ],
+        footer: {
+          text: `${b.job} · produced ${new Date(b.produced_at).toISOString()}${b.run_url ? " · GitHub Actions" : ""}`,
+        },
+        timestamp: new Date(b.produced_at).toISOString(),
       },
     ],
   };

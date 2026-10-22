@@ -27,9 +27,19 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
 
+  research:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: research
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --group dev pytest -q
+
   deploy:
     # Deploys only from main, and only once Cloudflare secrets exist (Phase 0 setup).
-    needs: check
+    needs: [check, research]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     env:

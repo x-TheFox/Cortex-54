@@ -23,6 +23,7 @@ const TABLES = {
   orders_log: { ignoreDupes: false },
   fills: { ignoreDupes: true },
   rejections: { ignoreDupes: false },
+  batch_results: { ignoreDupes: false },
 } as const;
 export type OutboxTable = keyof typeof TABLES;
 

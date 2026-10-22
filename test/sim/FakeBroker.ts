@@ -8,6 +8,7 @@ import {
   type BrokerApi,
   BrokerError,
   type MarketDataApi,
+  type NewsItem,
   OPEN_ORDER_STATUSES,
   type OrderRequest,
   type Quote,
@@ -25,6 +26,7 @@ interface SimOrder extends AlpacaOrder {
 
 export class Market {
   quotes: Record<string, Quote> = {};
+  news: NewsItem[] = [];
   bars: Record<string, Bar[]> = {};
   constructor(public clock: () => number) {}
   set(symbol: string, bid: number, ask: number): void {
@@ -250,6 +252,10 @@ export class FakeBroker implements BrokerApi {
 
 export class FakeMarketData implements MarketDataApi {
   constructor(private readonly m: Market) {}
+  async news(symbols: string[], sinceIso: string): Promise<NewsItem[]> {
+    const since = Date.parse(sinceIso);
+    return this.m.news.filter((n) => n.createdAt > since && n.symbols.some((s) => symbols.includes(s)));
+  }
   async cryptoQuotes(symbols: string[]): Promise<Record<string, Quote>> {
     return Object.fromEntries(
       symbols.flatMap((s) => (this.m.quotes[s] ? [[s, { ...this.m.quotes[s] }]] : [])),

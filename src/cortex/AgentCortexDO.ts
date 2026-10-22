@@ -168,6 +168,12 @@ export class AgentCortexDO extends DurableObject<Env> {
     await this.brain.flushJournal();
     return msg;
   }
+
+  /** Research batch from GitHub Actions; the router has already verified the HMAC. */
+  async ingest(batch: unknown): Promise<{ ok: boolean; message: string }> {
+    this.begin();
+    return this.brain.ingestBatch(batch);
+  }
 }
 
 /** Adapts Durable Object SqlStorage to the brain's SqlLike (and counts rows for the free-tier meter). */

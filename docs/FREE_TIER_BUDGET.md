@@ -42,7 +42,7 @@ The meter estimates neurons from token counts *before* the call (chars/3.5 heuri
 
 | Resource | Limit | Use |
 |---|---|---|
-| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research ~5 min × ~10/day; governor ~10 min/week |
+| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research: crypto ~4 min × 6/day + equity ~8 min × 2/weekday; governor ~10 min/week |
 | Schedule granularity | ≥5 min, UTC, may delay 15–30 min or skip | batch jobs carry `produced_at`; brain checks staleness |
 | Inactivity | schedules auto-disable after 60 days of no repo activity | Governor PRs + a monthly keepalive commit; brain alarms on stale batch |
 | Secrets | free | `CLOUDFLARE_API_TOKEN`, `INGEST_HMAC_SECRET`, `DISCORD_WEBHOOK_GOVERNOR`, data API keys |
@@ -73,7 +73,11 @@ available, the sprint is **rejected**, not run single-family.
 | CFTC COT (Socrata) | generous | weekly batch |
 | CoinGecko Demo | ~10k credits/month (3p) | crypto breadth (4-hourly batch ≈ 6×30 days ≈ 180 calls × few) |
 | OKX / Hyperliquid / Coinbase / Kraken / Deribit public | per-exchange public limits | funding, OI, IV |
-| FRED | free key | macro series, VIX close |
+| FRED | free key (stored) | macro series, VIX close |
+| FMP | free key: 250 calls/day | equity job ~30–60 calls × 2/weekday ≈ 120 |
+| OKX public | generous | 3 calls per crypto run |
+| GDELT | free, ≤1 req / 5 s | Phase 3 |
+| Alpaca news | free plan | 1 call per pulse (≤288/day) |
 | Polymarket Gamma | public | macro odds (read-only, later phase) |
 | QuickChart | public endpoint, rate-limited | Discord chart images |
 

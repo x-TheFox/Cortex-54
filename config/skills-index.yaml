@@ -185,10 +185,10 @@ skills:
       id: exposure-coach,
       family: CTX,
       source: tradermonty,
-      runtime: ts-hot,
+      runtime: py-batch,
       phase: 2,
       status: ACTIVE,
-      notes: "combine step in TS; component inputs from batch",
+      notes: "runs upstream calculate_exposure.py in research.yml; posture → /ingest/batch (ADR-026)",
     }
   - {
       id: crypto-regime-analyzer,
@@ -197,7 +197,8 @@ skills:
       runtime: py-batch,
       phase: 2,
       status: ACTIVE,
-      data_swaps: { "fapi.binance.com funding": "OKX public / Hyperliquid info API" },
+      notes: "upstream runs as-is; Binance funding is blocked on US runners, so OKX funding is added as a separate item (ADR-026)",
+      data_swaps: { "fapi.binance.com funding": "OKX public funding-rate API" },
     }
   - {
       id: market-breadth-analyzer,
@@ -217,15 +218,23 @@ skills:
       status: ACTIVE,
     }
   - { id: ftd-detector, family: CTX, source: tradermonty, runtime: py-batch, phase: 2, status: ACTIVE }
-  - { id: market-top-detector, family: CTX, source: tradermonty, runtime: py-batch, phase: 2, status: SHADOW }
+  - {
+      id: market-top-detector,
+      family: CTX,
+      source: tradermonty,
+      runtime: py-batch,
+      phase: 2,
+      status: ACTIVE,
+      notes: "FMP free key",
+    }
   - {
       id: macro-regime-detector,
       family: CTX,
       source: tradermonty,
       runtime: py-batch,
       phase: 2,
-      status: SHADOW,
-      data_swaps: { any_paid: FRED },
+      status: ACTIVE,
+      notes: "FMP free key; upstream falls back to yfinance for ETFs FMP free doesn't serve (flagged in provenance)",
     }
   - {
       id: event-horizon-radar,
@@ -247,6 +256,15 @@ skills:
   - { id: sector-analyst, family: CTX, source: tradermonty, runtime: deferred, phase: 4, status: PROPOSAL }
 
   # ---------- RES ----------
+  - {
+      id: gdelt-world-pulse,
+      family: RES,
+      source: new,
+      runtime: py-batch,
+      phase: 3,
+      status: PROPOSAL,
+      notes: "GDELT DOC 2.0 API (free, keyless, ≤1 request / 5 s): tone + volume timelines and article lists for macro/geopolitical topics → world-intel triage",
+    }
   - {
       id: news-catalyst-sniper,
       family: RES,

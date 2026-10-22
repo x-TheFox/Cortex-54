@@ -1,0 +1,55 @@
+name: research
+
+# Phase 2 batch jobs (docs/ARCHITECTURE.md §9). Runs pinned upstream skills (never copied — ADR-026),
+# summarizes, signs with INGEST_HMAC_SECRET and POSTs to cortex /ingest/batch.
+# Schedules are UTC and may be delayed or skipped; the brain alarms when regime data goes stale.
+on:
+  schedule:
+    - cron: "7 */4 * * *" # crypto regime every 4 h
+    - cron: "40 12 * * 1-5" # equity posture before the US open (08:40 EDT / 07:40 EST)
+    - cron: "20 21 * * 1-5" # equity posture after the close
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Which job"
+        required: true
+        type: choice
+        options: [crypto, equity]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-${{ github.event.schedule || inputs.job }}
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: tradermonty/claude-trading-skills
+  UPSTREAM_SHA: cb0f3aadffed6d1089db4b224162c964368baa46
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Pick job
+        id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "job=${{ inputs.job }}" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.event.schedule }}" = "7 */4 * * *" ]; then echo "job=crypto" >> "$GITHUB_OUTPUT";
+          else echo "job=equity" >> "$GITHUB_OUTPUT"; fi
+      - name: Checkout pinned upstream skills
+        run: |
+          git clone --filter=blob:none "https://github.com/${UPSTREAM_REPO}" research/.vendor/upstream
+          git -C research/.vendor/upstream checkout --quiet "${UPSTREAM_SHA}"
+      - name: Run and ingest
+        working-directory: research
+        env:
+          UPSTREAM_DIR: ${{ github.workspace }}/research/.vendor/upstream
+          CORTEX_URL: ${{ vars.CORTEX_URL }}
+          INGEST_HMAC_SECRET: ${{ secrets.INGEST_HMAC_SECRET }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: uv run python -m cortex_research.run "${{ steps.pick.outputs.job }}"

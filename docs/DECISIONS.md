@@ -158,3 +158,15 @@ The operator deleted the worker that held the account's 5 cron slots. `cortex` r
 the DO still self-arms on start and on /health) and `sentinel` runs `* * * * *` (per-minute watchdog,
 `STALE_ALERT_MINUTES` 8). `watchdog.yml` stays as an independent backup every 30 min. 2 of 5 slots used.
 
+## ADR-026 — Research runs pinned upstream skills as-is in GitHub Actions (2026-10-22)
+**Context:** ADR-006 chose Python batch for screeners/regime. The tradermonty skills run standalone with only
+`requests` (+ `pandas-market-calendars`, optional `yfinance`), and breadth/uptrend need no key.
+**Decision:** `research.yml` clones `tradermonty/claude-trading-skills` at a pinned SHA and runs the scripts
+unchanged; `research/cortex_research` only summarizes their JSON, adds OKX funding (Binance is blocked on US
+runners), signs with HMAC and POSTs `/ingest/batch`. Exposure-coach also runs upstream (it was planned as a TS
+port). FMP free key for FTD/macro/market-top; FRED key stored for the economic calendar. Bumping `UPSTREAM_SHA`
+is a reviewed PR.
+**Consequences:** No forked logic to maintain; upstream changes arrive only by PR. Item `version` = upstream SHA
+and `inputs_sha256` = hash of the upstream output give provenance per batch. A failed upstream skill lowers
+exposure-coach confidence instead of failing the job.
+

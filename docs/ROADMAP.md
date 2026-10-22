@@ -30,10 +30,14 @@ unattended on PAPER, kill drills, budget within plan._
   (LIVE drill with no position or a $1 position); budget meter within plan; all risk code has property tests.
 
 ## Phase 2 — Data & context
-- DataRouter with provenance + staleness. News (verify free access) and EDGAR intake.
-- `research/` Python package + `research.yml`: breadth, distribution days, FTD, crypto regime (OKX/HL),
-  screeners → `/ingest/batch` (HMAC).
-- `ts-hot` indicator ports with Python parity fixtures. Exposure-coach combine step → posture card.
+_Status 2026-10-22: built and live — signed `/ingest/batch`, `research.yml` (crypto every 4 h, equity
+pre-open + post-close), pinned upstream skills (ADR-026), OKX funding, regime gate (fresh batch → proxy
+fallback), staleness alarms, posture cards, HUD regime line, Alpaca news intake → triage queue. Exit gate is
+the 5-day clock. Moved to Phase 3: EDGAR 8-K/Form 4 and GDELT (both feed triage), screeners (equity
+strategies)._
+- Provenance + staleness on every batch item. News intake (verified free) → triage queue.
+- `research/` Python package + `research.yml`: breadth, uptrend, FTD, macro, market-top → exposure-coach;
+  crypto regime + OKX funding → `/ingest/batch` (HMAC).
 - **Exit:** daily posture card for equities + 4-hourly crypto regime card, accurate and on time 5 days running.
 
 ## Phase 3 — Cognitive funnel ⚠️⚠️
