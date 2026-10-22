@@ -42,10 +42,14 @@ The meter estimates neurons from token counts *before* the call (chars/3.5 heuri
 
 | Resource | Limit | Use |
 |---|---|---|
-| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research: crypto ~4 min × 6/day + equity ~8 min × 2/weekday; governor ~10 min/week |
+| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research: crypto ~4 min × 6/day + equity ~8 min × 2/weekday; governor ~2 min/day (daily + Sunday weekly) |
 | Schedule granularity | ≥5 min, UTC, may delay 15–30 min or skip | batch jobs carry `produced_at`; brain checks staleness |
 | Inactivity | schedules auto-disable after 60 days of no repo activity | Governor PRs + a monthly keepalive commit; brain alarms on stale batch |
 | Secrets | free | `CLOUDFLARE_API_TOKEN`, `INGEST_HMAC_SECRET`, `DISCORD_WEBHOOK_GOVERNOR`, data API keys |
+
+The Governor reads the journal through `/governor/export` (≤200 rows per signed request): ~10–40 Worker
+requests and a few thousand D1 rows read per daily run, well inside 100k requests / 5M rows per day. Alpaca bars:
+one request per graded symbol per run (free data plan, 200/min).
 
 If the repo ever goes private: 2,000 min/month free still covers this (~1,700 min/month projected).
 

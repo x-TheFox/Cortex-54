@@ -26,6 +26,11 @@ const TABLES = {
   batch_results: { ignoreDupes: false },
   triage_log: { ignoreDupes: false },
   llm_calls: { ignoreDupes: false },
+  // FK guard: a grade for an unknown rejection is skipped instead of failing (and jamming) the whole batch.
+  rejection_grades: { ignoreDupes: true, requires: { col: "rejection_id", table: "rejections", ref: "id" } },
+  postmortems: { ignoreDupes: false },
+  source_reputation: { ignoreDupes: false, upsert: true },
+  skill_fitness: { ignoreDupes: false, upsert: true },
 } as const;
 export type OutboxTable = keyof typeof TABLES;
 
@@ -103,8 +108,21 @@ export class Journal {
       const obj = JSON.parse(r.row_json) as Record<string, SqlValue>;
       const cols = Object.keys(obj);
       for (const c of cols) if (!/^[a-z_0-9]+$/.test(c)) throw new Error(`outbox: bad column ${c}`);
-      const sql = `INSERT ${spec.ignoreDupes ? "OR IGNORE " : ""}INTO ${r.tbl} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`;
-      return db.prepare(sql).bind(...cols.map((c) => obj[c] ?? null));
+      const verb =
+        "upsert" in spec && spec.upsert
+          ? "INSERT OR REPLACE"
+          : spec.ignoreDupes
+            ? "INSERT OR IGNORE"
+            : "INSERT";
+      const values = cols.map((c) => obj[c] ?? null);
+      const marks = cols.map(() => "?").join(", ");
+      if ("requires" in spec) {
+        const q = spec.requires;
+        const sql = `${verb} INTO ${r.tbl} (${cols.join(", ")}) SELECT ${marks} WHERE EXISTS (SELECT 1 FROM ${q.table} WHERE ${q.ref} = ?)`;
+        return db.prepare(sql).bind(...values, obj[q.col] ?? null);
+      }
+      const sql = `${verb} INTO ${r.tbl} (${cols.join(", ")}) VALUES (${marks})`;
+      return db.prepare(sql).bind(...values);
     });
     await db.batch(statements);
     const last = rows.at(-1)?.id ?? 0;

@@ -965,3 +965,77 @@ describe("intake dedupe + courtroom visibility (regressions)", () => {
     expect(clef.calls).toHaveLength(1);
   });
 });
+
+describe("governor ingest (Phase 4)", () => {
+  const gov = (post: boolean) => ({
+    schema_version: 1,
+    job: "governor",
+    produced_at: T0,
+    run_url: null,
+    items: [
+      {
+        skill_id: "rejection-ledger-grader",
+        version: "gov-v1",
+        as_of: T0,
+        inputs_sha256: "b".repeat(64),
+        payload: {
+          grades: [
+            { rejection_id: 1, horizon: "24h", graded_at: T0, outcome_r: 1.5, hit: "TARGET" },
+            { rejection_id: 1, horizon: "bogus", graded_at: T0, outcome_r: 0, hit: "TARGET" },
+            { rejection_id: 999, horizon: "24h", graded_at: T0, outcome_r: 0, hit: "NEITHER" },
+          ],
+          postmortems: [
+            {
+              contract_id: "k1",
+              account: "PAPER",
+              classification: "GOOD_PROCESS_BAD_LUCK",
+              realized_r: -1,
+              notes: "stop",
+            },
+          ],
+          card: { title: "Governor report", sections: [{ name: "Trades", value: "none" }], post },
+        },
+      },
+    ],
+    posture: null,
+  });
+
+  it("stores valid grades and postmortems once, skips invalid rows, and posts the card only when asked", async () => {
+    const t = setup();
+    t.d1.db
+      .prepare(
+        "INSERT INTO rejections (id, ts, candidate_id, symbol, arena, stage, reason_codes, hypothetical) VALUES (1, 0, 'c', 'BTC/USD', 'CRYPTO', 'VALIDATOR', '[]', '{}')",
+      )
+      .run();
+    const r = await t.brain.ingestBatch(gov(false));
+    expect(r.ok).toBe(true);
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM rejection_grades").get()).toEqual({ n: 1 });
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM postmortems").get()).toEqual({ n: 1 });
+    expect(t.notifier.sent.some((m) => m.channel === "governor")).toBe(false);
+    await t.brain.ingestBatch(gov(true));
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM rejection_grades").get()).toEqual({ n: 1 });
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM postmortems").get()).toEqual({ n: 1 });
+    expect(t.notifier.sent.filter((m) => m.channel === "governor")).toHaveLength(1);
+  });
+});
+
+describe("heartbeat stats", () => {
+  it("DAY_ROLL reports the previous day's pulses and worst gap", async () => {
+    const t = setup();
+    await t.brain.pulse();
+    t.advance(300_000);
+    await t.brain.pulse();
+    t.advance(86_400_000);
+    await t.brain.pulse();
+    const rolls = (
+      t.d1.db.prepare("SELECT payload_json FROM journal WHERE kind = 'DAY_ROLL' ORDER BY seq").all() as {
+        payload_json: string;
+      }[]
+    ).map((r) => JSON.parse(r.payload_json));
+    expect(rolls).toHaveLength(2);
+    expect(rolls[0].pulses).toBeNull();
+    expect(rolls[1].pulses).toBe(2);
+    expect(rolls[1].max_gap_s).toBe(300);
+    expect(rolls[1].equity_cents.PAPER).toBe(5400);
+  });
+});

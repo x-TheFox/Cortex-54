@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type ClefQuestion, type ClefResult, noul, score } from "../clef/ClefClient.ts";
+import { applyMap, type CalibrationMap } from "../contracts/calibration.ts";
 import type { DecisionContract } from "../contracts/decision-contract.ts";
 import type { Doctrine } from "../contracts/doctrine.ts";
 import { roundPrice } from "../lib/num.ts";
@@ -127,8 +128,14 @@ export function interpretSynth(r: ClefResult): Synth | null {
  * Calibration (ADR-008): until enough outcomes exist, shrink toward 0.5 with weight max(warmup, n/min_outcomes).
  * Isotonic maps from the Governor replace this once config/calibration.json has one for "court.win_prob".
  */
-export function calibrate(raw: number, resolvedOutcomes: number, d: Doctrine): number {
+export function calibrate(
+  raw: number,
+  resolvedOutcomes: number,
+  d: Doctrine,
+  map?: CalibrationMap | null,
+): number {
   const c = d.funnel.calibration;
+  if (map && map.n >= c.min_outcomes_before_trusting) return applyMap(map, raw);
   const w = Math.max(c.warmup_min_weight, Math.min(1, resolvedOutcomes / c.min_outcomes_before_trusting));
   return c.shrink_to + (raw - c.shrink_to) * w;
 }

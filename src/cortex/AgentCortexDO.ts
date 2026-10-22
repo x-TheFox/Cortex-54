@@ -6,7 +6,13 @@ import { WorkersAiClef } from "../clef/ClefClient.ts";
 import { GeminiProvider, type LlmProvider, LlmRouter, OpenAICompatProvider } from "../court/llm.ts";
 import { DiscordNotifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
 import type { Env } from "../env.ts";
-import { CONSTITUTION, CONSTITUTION_SHA256, DOCTRINE, DOCTRINE_SHA256 } from "../generated/config.ts";
+import {
+  CALIBRATION,
+  CONSTITUTION,
+  CONSTITUTION_SHA256,
+  DOCTRINE,
+  DOCTRINE_SHA256,
+} from "../generated/config.ts";
 import type { AccountId } from "../lib/ids.ts";
 import { Brain, type StatusView } from "./Brain.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "./hot-schema.ts";
@@ -74,6 +80,7 @@ export class AgentCortexDO extends DurableObject<Env> {
       readKillFlag: async () => (await env.FLAGS.get("killed")) !== null,
       clef: new WorkersAiClef(env.AI),
       llm: new LlmRouter(llmProviders(env), DOCTRINE),
+      calibration: CALIBRATION,
       now: () => Date.now(),
     });
 

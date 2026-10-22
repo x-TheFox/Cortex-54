@@ -275,6 +275,7 @@ gh workflow run research -f job=crypto    # or job=equity: run a research batch 
 pnpm court:smoke BTC/USD ["headline"] [--post]   # real bull/bear/Clef run on live evidence; never trades
 # Discord /court SYMBOL convenes a real session (PAPER, all gates apply); cards go to #bull-vs-bear-court
 pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
+gh workflow run governor -f weekly=true                     # governor now (report card + calibration proposal)
 gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATTEN ALL (ADR-022); action=rearm to clear
 ```
 
@@ -352,5 +353,10 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-22: PR #6 merged. Court was silent (Tier 1 bar too high, ~1 headline/hour, news re-queue bug) →
   ADR-029: Tier 1 bar 0.55/1.5, intake dedupe, wider universe, courtroom card for every session, `/court`.
   SEC_USER_AGENT is set (EDGAR active).
+- 2026-10-22: PR #7 merged. Phase 4 Governor built (branch `phase-4-governor`, ADR-030): `governor.yml` daily
+  (grades, postmortems, fitness, LIVE-gate tracker) and Sunday (report card to #governor, calibration proposal
+  once ≥50 outcomes). Brain reads it via HMAC `/governor/export`; DAY_ROLL now carries pulses / max gap / equity.
+  First live run posted a report card. Actions can't open PRs in this repo (setting off) → the workflow pushes a
+  branch and prints a compare link instead.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

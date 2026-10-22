@@ -216,3 +216,20 @@ liquid Alpaca crypto pairs and 12 mega-cap equities (`equities_catalyst`), which
 session posts a card to #bull-vs-bear-court (bull, bear, Clef bars, outcome), including declines. (5) `/court
 SYMBOL` lets the operator convene a session on demand behind all the usual gates.
 
+## ADR-030 — Governor runs on GitHub Actions and reads the journal over a signed export (2026-10-22)
+**Context:** Phase 4 needs offline statistics (rejection grading over hourly bars, isotonic calibration, bootstrap,
+BH-FDR) that don't fit 10 ms CPU and shouldn't burn DO duration. `wrangler d1 export` needs a Cloudflare API token
+in GitHub, which we haven't issued.
+**Decision:** (1) `governor.yml` runs Python daily (06:23 UTC) and weekly (Sunday). It pages through
+`POST /governor/export` (HMAC with `INGEST_HMAC_SECRET`, whitelisted tables, `rowid` cursor, ≤200 rows) and
+returns results as a signed `governor` batch: append-only grades and postmortems, upserted fitness, and a report
+card posted to #governor on weekly runs. (2) Rejections are graded at 24h/72h/7d by the first touch of stop or
+target on Alpaca hourly bars; a bar touching both counts as a STOP. (3) Court win-probability calibration pairs
+come from COURT trades and VALIDATOR-declined court contracts graded at 72h. Once ≥50 pairs exist, the weekly run
+fits an isotonic map and proposes `config/calibration.json` on a `governor/calibration-*` branch. The operator
+merges (U8); the brain only trusts a map with `n ≥ min_outcomes_before_trusting`. (4) The LIVE gate (RISK_DOCTRINE
+§7 b) is tracked from data: days since the last operator intervention, ≥25 PAPER trades, expectancy, PF, rail
+violations, worst daily pulse gap (new DAY_ROLL fields), Brier. (5) The outbox inserts grades with an
+`EXISTS` guard on `rejections(id)`, so a bad foreign key is skipped instead of failing (and jamming) the batch.
+**Not yet:** source reputation, beliefs with decay, scar-tissue PRs, Monte Carlo beyond the bootstrap.
+

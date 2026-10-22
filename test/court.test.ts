@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { interpretTier2 } from "../src/clef/tier2.ts";
+import { CalibrationMapSchema } from "../src/contracts/calibration.ts";
 import { contractViolations, DecisionContractSchema } from "../src/contracts/decision-contract.ts";
 import { type Bull, buildCourtContract, calibrate, checkBull, interpretSynth } from "../src/court/court.ts";
 import { buildEvidence, resolveTradeable } from "../src/court/evidence.ts";
@@ -106,6 +107,36 @@ describe("calibration and synthesis", () => {
     expect(calibrate(0.7, 0, d)).toBeCloseTo(0.5 + 0.2 * 0.3, 9);
     expect(calibrate(0.7, 25, d)).toBeCloseTo(0.5 + 0.2 * 0.5, 9);
     expect(calibrate(0.7, 500, d)).toBeCloseTo(0.7, 9);
+  });
+  it("uses a Governor isotonic map only once it rests on enough outcomes", () => {
+    const map = {
+      n: 60,
+      points: [
+        [0, 0.2],
+        [0.5, 0.4],
+        [1, 0.9],
+      ] as [number, number][],
+    };
+    expect(calibrate(0.75, 0, d, map)).toBeCloseTo(0.65, 9);
+    expect(calibrate(0.75, 0, d, { ...map, n: 10 })).toBeCloseTo(calibrate(0.75, 0, d), 9);
+    expect(
+      CalibrationMapSchema.safeParse({
+        n: 5,
+        points: [
+          [0, 0.5],
+          [0, 0.6],
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      CalibrationMapSchema.safeParse({
+        n: 5,
+        points: [
+          [0, 0.5],
+          [1, 0.4],
+        ],
+      }).success,
+    ).toBe(false);
   });
   it("fails closed on incomplete Clef answers", () => {
     expect(

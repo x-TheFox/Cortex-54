@@ -40,16 +40,59 @@ export type WorldCandidate = z.infer<typeof WorldCandidateSchema>;
 export const BatchSchema = z
   .object({
     schema_version: z.literal(1),
-    job: z.enum(["crypto-regime", "equity-posture", "world-intel"]),
+    job: z.enum(["crypto-regime", "equity-posture", "world-intel", "governor"]),
     produced_at: z.number().int(),
     run_url: z.url().nullable(),
     items: z.array(BatchItemSchema).min(1).max(20),
     posture: PostureSchema.nullable(),
   })
-  .refine((b) => (b.job === "world-intel") === (b.posture === null), {
-    message: "posture is required for regime jobs and must be null for world-intel",
+  .refine((b) => (b.job === "world-intel" || b.job === "governor") === (b.posture === null), {
+    message: "posture is required for regime jobs and must be null for world-intel / governor",
   });
 export type Batch = z.infer<typeof BatchSchema>;
 
 /** Max raw body the worker accepts (keeps JSON parsing well inside the 10 ms CPU budget). */
 export const MAX_BATCH_BYTES = 64 * 1024;
+
+/** Governor payloads (Phase 4). Each item's payload carries one of these lists. */
+export const GradeSchema = z.object({
+  rejection_id: z.number().int().positive(),
+  horizon: z.enum(["24h", "72h", "7d"]),
+  graded_at: z.number().int(),
+  outcome_r: z.number().min(-50).max(50).nullable(),
+  hit: z.enum(["STOP", "TARGET", "NEITHER"]),
+});
+export const PostmortemSchema = z.object({
+  contract_id: z.string().max(80),
+  account: z.enum(["PAPER", "LIVE"]),
+  classification: z.enum([
+    "GOOD_PROCESS_GOOD_OUTCOME",
+    "GOOD_PROCESS_BAD_LUCK",
+    "BAD_PROCESS_BAILOUT_LUCK",
+    "BAD_PROCESS_LOSS",
+  ]),
+  realized_r: z.number().min(-50).max(50),
+  notes: z.string().max(600),
+});
+export const ReputationSchema = z.object({
+  source: z.string().min(1).max(80),
+  signals: z.number().int().nonnegative(),
+  brier_30d: z.number().min(0).max(1).nullable(),
+  expectancy_r_30d: z.number().min(-50).max(50).nullable(),
+  weight: z.number().min(0.5).max(1.2),
+});
+export const FitnessSchema = z.object({
+  skill_id: z.string().min(1).max(80),
+  week: z.string().regex(/^\d{4}-W\d{2}$/),
+  signals: z.number().int().nonnegative(),
+  expectancy_r: z.number().nullable(),
+  brier: z.number().min(0).max(1).nullable(),
+  p_value: z.number().min(0).max(1).nullable(),
+  p_value_bh: z.number().min(0).max(1).nullable(),
+  status: z.string().max(20),
+});
+export const ReportCardSchema = z.object({
+  title: z.string().max(200),
+  sections: z.array(z.object({ name: z.string().max(100), value: z.string().max(1000) })).max(20),
+  post: z.boolean(),
+});
