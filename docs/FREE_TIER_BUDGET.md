@@ -11,7 +11,7 @@ puts the system in `REDUCE_ONLY` at 90% of any limit (constitution untouchable #
 | Worker requests | 100,000 | ~3,000 | 70,000 | 90,000 | Discord, ingest, health, cron; static assets are free |
 | Worker CPU / HTTP or cron invocation | 10 ms | routing only | — | — | heavy work lives in the DO |
 | Subrequests / invocation | 50 (1,000 to CF services) | ~14 per pulse | — | 45 | enforced per pulse |
-| Cron triggers / account | 5 | **0** (all 5 used by another worker, ADR-021) | — | — | GitHub Actions ticks the sentinel |
+| Cron triggers / account | 5 | 2 (`cortex` */5, `sentinel` */1) | — | — | 3 spare; GitHub `watchdog.yml` every 30 min as backup |
 | DO requests | 100,000 | ~2,500 | 70,000 | 90,000 | alarms 1,440 max + RPC + WS/20 |
 | DO duration | 13,000 GB-s | ~400–800 | 9,100 | 11,700 | **no always-on outbound sockets** (would be 10,800) |
 | DO SQLite rows written | 100,000 | ~15,000 | 70,000 | 90,000 | batch writes; no per-tick churn |
@@ -42,7 +42,7 @@ The meter estimates neurons from token counts *before* the call (chars/3.5 heuri
 
 | Resource | Limit | Use |
 |---|---|---|
-| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 288/day; research ~5 min × ~10/day; governor ~10 min/week |
+| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research ~5 min × ~10/day; governor ~10 min/week |
 | Schedule granularity | ≥5 min, UTC, may delay 15–30 min or skip | batch jobs carry `produced_at`; brain checks staleness |
 | Inactivity | schedules auto-disable after 60 days of no repo activity | Governor PRs + a monthly keepalive commit; brain alarms on stale batch |
 | Secrets | free | `CLOUDFLARE_API_TOKEN`, `INGEST_HMAC_SECRET`, `DISCORD_WEBHOOK_GOVERNOR`, data API keys |

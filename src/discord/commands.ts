@@ -16,11 +16,11 @@ export const CORTEX_COMMANDS = [
   { name: "resume", description: "Allow new entries again (not after a RED lock)", options: [account] },
   {
     name: "dial",
-    description: "Set the autonomy dial (0 shadow, 1 approve, 2 paper-auto, 3 live-auto, 4 colleague)",
+    description: "Autonomy dial: PAPER 0 shadow / 2 autonomous; LIVE 0 dormant / 3 autonomous (needs RATIFY)",
     options: [
       account,
       { type: 4, name: "stop", description: "0-4", required: true, min_value: 0, max_value: 4 },
-      { type: 3, name: "confirm", description: "Type RATIFY to raise LIVE above Stop 1", required: false },
+      { type: 3, name: "confirm", description: "Type RATIFY to let LIVE trade real money", required: false },
     ],
   },
   {

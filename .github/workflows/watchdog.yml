@@ -1,10 +1,10 @@
 name: watchdog
 
-# Drives the sentinel when no Cloudflare cron slot is free (ADR-021). GitHub schedules are UTC and can be
-# delayed or skipped under load; the brain's own alarm is the primary heartbeat, this is the independent check.
+# Independent backup for the sentinel's own per-minute cron (ADR-021): if Cloudflare cron stalls, this still runs
+# the checks. GitHub schedules are UTC and can be delayed or skipped under load.
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions: {}

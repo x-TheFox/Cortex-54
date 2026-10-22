@@ -7,14 +7,13 @@ accounts:
   PAPER:
     alpaca_base_url: https://paper-api.alpaca.markets
     starting_equity_usd: 54
-    autonomy_stop: 2 # 0 shadow, 1 approve, 2 paper-auto, 3 live-auto, 4 colleague
+    autonomy_stop: 2 # PAPER: 0 shadow, 2 autonomous, 4 colleague. No approve-each-trade mode (ADR-024).
     apply_fee_model: true # Alpaca paper charges nothing; we do
   LIVE:
     alpaca_base_url: https://api.alpaca.markets
     starting_equity_usd: 54
-    autonomy_stop: 1
+    autonomy_stop: 0 # LIVE: dormant until all phases are built + PAPER graduates + operator RATIFY → 3
     apply_fee_model: false # real fees come from the broker
-    approval_ttl_minutes: 20
 
 rungs:
   R1:
@@ -69,6 +68,7 @@ breakers:
   red_drawdown: 0.10
   red_daily_loss: 0.05
   red_consecutive_stopouts_24h: 3
+  paper_auto_unlock_hours: 24 # PAPER self-recovers after RED once flat (ADR-025); LIVE never does
   multipliers: { GREEN: 1.0, YELLOW: 0.5, ORANGE: 0.0, RED: 0.0 }
 
 sizing:

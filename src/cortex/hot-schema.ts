@@ -45,8 +45,6 @@ export const HOT_SCHEMA: readonly string[] = [
   // Contracts the brain is still acting on (full history lives in D1).
   `CREATE TABLE IF NOT EXISTS contracts (contract_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, json TEXT NOT NULL,
      created_at INTEGER NOT NULL)`,
-  `CREATE TABLE IF NOT EXISTS pending_approvals (contract_id TEXT NOT NULL, account TEXT NOT NULL,
-     expires_at INTEGER NOT NULL, decision TEXT, PRIMARY KEY (contract_id, account))`,
 
   `CREATE TABLE IF NOT EXISTS exits (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT NOT NULL,
      symbol TEXT NOT NULL, contract_id TEXT NOT NULL, reason TEXT NOT NULL, pnl_cents INTEGER, at INTEGER NOT NULL)`,

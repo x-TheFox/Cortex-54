@@ -168,18 +168,6 @@ export class AgentCortexDO extends DurableObject<Env> {
     await this.brain.flushJournal();
     return msg;
   }
-
-  async decide(
-    contractId: string,
-    account: AccountId,
-    decision: "APPROVE" | "VETO",
-    by: string,
-  ): Promise<string> {
-    this.begin();
-    const msg = await this.brain.decide(contractId, account, decision, by);
-    await this.brain.flushJournal();
-    return msg;
-  }
 }
 
 /** Adapts Durable Object SqlStorage to the brain's SqlLike (and counts rows for the free-tier meter). */

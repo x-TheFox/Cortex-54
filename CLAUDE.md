@@ -15,7 +15,7 @@ Alpaca accounts in lockstep: a **$54 paper account** and a **$54 real-money acco
 world (news, filings, crypto microstructure, regime data), filters it through a four-tier cognitive funnel
 that spends thinking like money (math → Clef-flash → Clef → frontier LLM debate), and may only trade through
 a schema-valid `DecisionContract` that a deterministic risk engine sizes and can veto. A Discord bot is the
-command center (alerts, approvals, autonomy dial, kill-switch). The harness, not any model, is the product:
+command center (alerts, HUD, autonomy dial, kill-switch). Trading is fully autonomous: no human approves trades. The harness, not any model, is the product:
 **models reason, code computes, the risk engine decides, the operator governs.**
 
 Hard constraint from the operator: **$0 operating cost. No paid plans, no credit cards on file, ever.**
@@ -36,15 +36,18 @@ No model, no Governor, no Discord button can change them at runtime.
    options, no leveraged/inverse ETFs.
 4. **Every position has an exit.** Each position carries a stop; a broker-side stop wherever Alpaca accepts
    one, and a synthetic stop checked on every pulse otherwise.
-5. **The kill-switch and Red breaker are sacred.** Only the operator can unlock after a Red trip, and only by
-   submitting a written postmortem. The `sentinel` worker can flatten everything independently of the brain.
+5. **The kill-switch and Red breaker are sacred.** No model or Governor can override them. LIVE unlocks only with
+   an operator-written postmortem. PAPER (fully autonomous) unlocks itself after a cooldown (≥12 h) once flat,
+   with a machine postmortem that counts against LIVE graduation. The `sentinel` worker can flatten everything
+   independently of the brain.
 6. **Fail closed.** Stale data, unknown broker state, reconciliation mismatch, or any free-tier budget at
    ≥90% puts the system in `REDUCE_ONLY`. We never fail open. We never trade on a guess.
 7. **The journal is append-only and hash-chained.** No UPDATE or DELETE on journal tables (SQL triggers block
    them). The daily chain head is posted to Discord as an external anchor.
-8. **Self-modification is a pull request.** The Governor can only *propose* doctrine/scar-tissue/calibration
-   changes as a GitHub PR. The operator merges. Promotion up the capital ladder or autonomy dial for the LIVE
-   account always needs operator ratification.
+8. **Self-modification is a pull request; real money needs ratification.** The Governor can only *propose*
+   doctrine/scar-tissue/calibration changes as a GitHub PR; the operator merges. There is **no approve-each-trade
+   mode**. LIVE stays dormant (Stop 0) until every roadmap phase is built and the fully autonomous PAPER account
+   passes the graduation gate; then the operator ratifies once (`RATIFY`) and LIVE trades autonomously.
 
 If you are about to write code that weakens any of these, stop and ask the operator.
 
@@ -61,7 +64,7 @@ If you are about to write code that weakens any of these, stop and ask the opera
                                ▼                               │
 ┌──────────── Cloudflare Workers FREE ─────────────────────────┴───────────────────────────────┐
 │ worker `cortex` (src/index.ts) — fetch router (≤10 ms CPU): Discord interactions, ingest,     │
-│   health, web API. No cron (ADR-021): the DO self-arms its alarm; /health re-arms it.         │
+│   health, web API. Cron */5 self-heal; the DO also self-arms its alarm (ADR-021 revised).     │
 │                                                                                               │
 │   AgentCortexDO "CORTEX-54-PRIMARY" (SQLite-backed Durable Object, the only brain)            │
 │     • alarm-driven PULSE (60 s when exposed/in-session, 300 s when flat) — NO always-on       │
@@ -72,8 +75,8 @@ If you are about to write code that weakens any of these, stop and ask the opera
 │   ResearchSprintWorkflow — Tier 3 bull / bear / synth → DecisionContract (I/O-only steps)     │
 │   D1 `cortex-journal` — append-only journal, contracts, rejections, beliefs, reputation       │
 │                                                                                               │
-│ worker `sentinel` (workers/sentinel) — separate deploy, ticked every ~5 min by GitHub Actions │
-│   (ADR-021): heartbeat watchdog + LIVE daily-loss check + FLATTEN ALL (kill-switch.yml).     │
+│ worker `sentinel` (workers/sentinel) — separate deploy, cron * * * * * (+ GitHub backup tick │
+│   every 30 min): heartbeat watchdog + LIVE daily-loss check + FLATTEN ALL (kill-switch.yml).  │
 └───────────────────────────────────────────────────────────────────────────────────────────────┘
    Alpaca (paper + live REST)   Free LLMs (Gemini / Groq / NIM / OpenRouter :free)   Discord
 ```
@@ -187,8 +190,12 @@ official changelog — do not depend on it.**
 - Equities: fractional, $0 commission, track per-lot settlement (T+1) to avoid good-faith violations.
 - Breakers (drawdown from high-water mark): Green <3% (×1.0), Yellow 3–6% (×0.5), Orange 6–10% (reduce-only),
   Red ≥10% or daily loss ≥5% (flatten + lock, operator postmortem to unlock).
-- LIVE starts at autonomy **Stop 1** (each trade needs a Discord ✅) and moves to Stop 3 only after the PAPER
-  account passes the R1 graduation gate *with modeled fees*, and the operator ratifies.
+- **No human approves trades, on either account (ADR-024).** PAPER is fully autonomous from day one (Stop 2).
+  LIVE is **dormant (Stop 0)** until: all roadmap phases (0–6) are built, the fully autonomous PAPER account has run
+  ≥30 days and passed the graduation gate *with modeled fees*, a live kill drill passes, and the operator ratifies
+  `LIVE Stop 0 → 3`. Then LIVE runs autonomously. Valid dial stops: PAPER {0, 2, 4}; LIVE {0, 3, 4}.
+- PAPER self-heals: auto-cleared entry blocks once a condition resolves; RED auto-unlocks after 24 h once flat
+  (ADR-025). LIVE never self-unlocks from RED.
 - Paper and live run the **same contract**; divergence (slippage, fills, fees) is a first-class metric.
 
 ---
@@ -304,12 +311,15 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-22: Phase 0 merged (docs, config, schema, scaffold).
 - 2026-10-22: Phase 1 safety spine code-complete on `phase-1-safety-spine`: Brain pulse (reconcile, fills,
   paper fee model, broker + synthetic stops, exits, breakers, reservations), baseline crypto strategy (PAPER
-  only), Discord commands + approvals, sentinel kill-switch with KV flag. 61 tests incl. simulated pulses.
+  only), Discord commands, sentinel kill-switch with KV flag. Tests incl. simulated pulses.
 - 2026-10-22: DEPLOYED on the operator's Workers Free account (`cortex.samplayz2ks.workers.dev`,
   `cortex-sentinel.samplayz2ks.workers.dev`). D1 `cortex-journal` + KV `FLAGS` created; PAPER keys set;
   Discord guild wired (CORTEX-54 category, HUD live, slash commands, interactions URL verified). No LIVE keys.
-  No cron triggers (ADR-021). Kill switch via GitHub Actions (ADR-022).
-- Open question: another process traded the same Alpaca paper account on 2026-10-22 (AMD/META/NVDA/SOXL/SOXX).
-  CORTEX needs exclusive use of its accounts; unknown positions force REDUCE_ONLY.
+  Kill switch via GitHub Actions (ADR-022). Cron slots freed later the same day → crons restored (ADR-021 rev.).
+- 2026-10-22: the other worker (`mahoraga`, likely the source of the earlier AMD/META/NVDA/SOXL/SOXX paper fills)
+  was deleted by the operator. CORTEX needs exclusive use of its accounts; unknown positions block entries.
+- 2026-10-22: PR #2 merged (watchdog + kill-switch workflows active). Operator policy: no approve-each-trade on
+  either account; real money only after total implementation + fully autonomous paper testing (ADR-024/025).
+  Free LLM keys (Gemini, Groq, NIM, OpenRouter) verified and stored as `cortex` secrets for Phase 3.
 - Next: Phase 1 exit gate (7 days unattended on PAPER, kill drill via kill-switch.yml), then Phase 2.
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

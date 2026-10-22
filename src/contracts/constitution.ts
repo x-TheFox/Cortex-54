@@ -18,6 +18,7 @@ export const ConstitutionSchema = z.object({
     min_stop_atr_multiple: z.number().positive(),
     max_orders_per_day_per_account: z.number().int().positive(),
     max_live_autonomy_stop_without_ratification: z.number().int().min(0).max(4),
+    paper_red_auto_unlock_min_hours: z.number().positive(),
     free_tier_hard_stop_fraction: Fraction,
     max_quote_staleness_seconds: z.number().int().positive(),
     max_reconcile_age_seconds: z.number().int().positive(),

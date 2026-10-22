@@ -25,7 +25,7 @@
     {
       "id": "U5",
       "name": "kill-switch-sacred",
-      "rule": "The kill-switch and RED breaker cannot be overridden by any model, Governor or automation. Unlock requires an operator-written postmortem."
+      "rule": "The kill-switch and RED breaker cannot be overridden by any model or Governor. LIVE unlock requires an operator-written postmortem. PAPER, which runs fully autonomously, unlocks itself only after the minimum cooldown, once flat, with a machine postmortem; every RED trip counts against LIVE graduation."
     },
     {
       "id": "U6",
@@ -40,7 +40,7 @@
     {
       "id": "U8",
       "name": "self-modification-is-a-pr",
-      "rule": "The Governor may only propose changes as pull requests. LIVE capital-ladder and autonomy-dial promotions require operator ratification."
+      "rule": "The Governor may only propose changes as pull requests. There is no approve-each-trade mode: LIVE stays dormant (Stop 0) until every roadmap phase is built and the fully autonomous PAPER account has passed the graduation gate, and then trades only after the operator ratifies (RATIFY). Capital-ladder promotions also need ratification."
     }
   ],
   "hard_limits": {
@@ -52,7 +52,8 @@
     "red_breaker_max_drawdown_pct": 0.12,
     "min_stop_atr_multiple": 1.0,
     "max_orders_per_day_per_account": 30,
-    "max_live_autonomy_stop_without_ratification": 1,
+    "max_live_autonomy_stop_without_ratification": 0,
+    "paper_red_auto_unlock_min_hours": 12,
     "free_tier_hard_stop_fraction": 0.9,
     "max_quote_staleness_seconds": 180,
     "max_reconcile_age_seconds": 600

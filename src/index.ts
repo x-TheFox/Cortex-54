@@ -7,10 +7,8 @@ import {
   followUp,
   type Interaction,
   InteractionSchema,
-  MESSAGE_COMPONENT,
   option,
   PING,
-  parseDecision,
   userId,
 } from "./discord/interactions.ts";
 import { verifyDiscordRequest } from "./discord/verify.ts";
@@ -47,20 +45,6 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
   if (!env.OPERATOR_DISCORD_ID || who !== env.OPERATOR_DISCORD_ID) return ephemeral("⛔ Operator only.");
   const by = `discord:${who}`;
   const b = brain(env);
-
-  if (i.type === MESSAGE_COMPONENT && i.data?.custom_id) {
-    const d = parseDecision(i.data.custom_id);
-    if (!d || !i.token || !env.DISCORD_APP_ID) return ephemeral("Unknown action.");
-    const appId = env.DISCORD_APP_ID;
-    const token = i.token;
-    ctx.waitUntil(
-      b.decide(d.contractId, d.account, d.decision, by).then(
-        (msg) => followUp(appId, token, msg),
-        (e) => followUp(appId, token, `Error: ${String(e)}`),
-      ),
-    );
-    return deferredEphemeral();
-  }
 
   if (i.type !== APPLICATION_COMMAND) return ephemeral("Unsupported interaction.");
   const name = i.data?.name;
