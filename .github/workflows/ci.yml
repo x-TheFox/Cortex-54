@@ -48,4 +48,4 @@ jobs:
         run: |
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "configured=false" >> "$GITHUB_OUTPUT"; else echo "configured=true" >> "$GITHUB_OUTPUT"; fi
       - if: steps.gate.outputs.configured == 'true'
-        run: pnpm db:migrate:remote && pnpm deploy && pnpm sentinel:deploy
+        run: pnpm db:migrate:remote && pnpm deploy:cortex && pnpm deploy:sentinel

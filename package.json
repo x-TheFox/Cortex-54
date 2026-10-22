@@ -16,12 +16,13 @@
     "test": "pnpm config:build && vitest run",
     "test:watch": "vitest",
     "dev": "pnpm config:build && wrangler dev",
-    "deploy": "pnpm config:build && wrangler deploy",
+    "deploy:cortex": "pnpm config:build && wrangler deploy",
     "sentinel:dev": "wrangler dev -c workers/sentinel/wrangler.jsonc",
-    "sentinel:deploy": "wrangler deploy -c workers/sentinel/wrangler.jsonc",
+    "deploy:sentinel": "wrangler deploy -c workers/sentinel/wrangler.jsonc",
     "db:migrate:local": "wrangler d1 migrations apply cortex-journal --local",
     "db:migrate:remote": "wrangler d1 migrations apply cortex-journal --remote",
-    "discord:register": "node scripts/register-commands.ts"
+    "discord:register": "node scripts/register-commands.ts",
+    "discord:setup": "node scripts/discord-setup.ts"
   },
   "dependencies": {
     "zod": "^4.6.7"

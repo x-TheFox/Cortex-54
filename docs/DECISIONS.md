@@ -111,3 +111,25 @@ exit reused the entry's client_order_id. The simulator caught it: Alpaca rejecte
 adopted the old filled entry as the "exit".
 **Decision:** `E` entry, `S` stop, `X` exit, with a regression test.
 
+## ADR-021 — No Cloudflare cron triggers (2026-10-22)
+**Context:** The operator's Cloudflare account already uses all 5 free cron slots (another worker,
+`mahoraga`). Deploying `cortex` with a cron failed with code 10072.
+**Decision:** The brain needs no cron: the Durable Object arms its own alarm in its constructor and every
+`/health` call re-arms it. The sentinel has no cron either; `.github/workflows/watchdog.yml` calls
+`POST /tick` (bearer `SENTINEL_TICK_SECRET`) every ~5 minutes, so `STALE_ALERT_MINUTES` is 12.
+**Consequences:** The independent watchdog runs every ~5 min (GitHub can delay or skip runs) instead of every
+minute. If a cron slot frees up, set `["* * * * *"]` in `workers/sentinel/wrangler.jsonc`.
+
+## ADR-022 — Kill switch over GitHub Actions instead of a second Discord app (2026-10-22)
+**Context:** ADR-012 planned a separate SENTINEL Discord app; only one Discord app exists.
+**Decision:** Sentinel exposes bearer-protected `POST /kill?reason=` and `POST /rearm`;
+`.github/workflows/kill-switch.yml` (manual dispatch, works from the GitHub mobile app) calls them. This path
+is independent of the brain worker and of Discord. The Discord `/kill` handler stays in the sentinel for the day a
+second app is added. Alpaca's own dashboard remains the manual last resort.
+
+## ADR-023 — First sync starts the activity cursor at "now" (2026-10-22)
+**Context:** The first deploy replayed the paper account's whole activity history (fills placed by another
+process earlier the same day) and raised an alert per fill.
+**Decision:** With no cursor, record `ACTIVITY_BASELINE` (count skipped) and start from the current time.
+Unknown fills after that point still alert, and unknown open positions/orders still force REDUCE_ONLY.
+

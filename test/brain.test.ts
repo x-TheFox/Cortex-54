@@ -266,6 +266,23 @@ describe("Brain pulse (simulated Alpaca)", () => {
     );
   });
 
+  it("first sync skips pre-existing account history instead of alerting on it", async () => {
+    t.paper.acts.push({
+      id: "old-1",
+      activity_type: "FILL",
+      transaction_time: new Date(T0 - 3_600_000).toISOString(),
+      price: "100",
+      qty: "1",
+      side: "buy",
+      symbol: "AMD",
+      order_id: "someone-else",
+      net_amount: null,
+    });
+    await t.brain.pulse();
+    expect(t.notifier.sent.filter((m) => m.channel === "alarms")).toHaveLength(0);
+    expect(t.sql.exec("SELECT id FROM d1_outbox WHERE row_json LIKE '%UNKNOWN_FILL%'")).toHaveLength(0);
+  });
+
   it("budget at the hard stop blocks entries (fail closed)", async () => {
     t.brain.budget.add("do_rows_written", 95_000, T0);
     breakout(t);

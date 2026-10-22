@@ -6,14 +6,17 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "observability": { "enabled": true },
-  "triggers": { "crons": ["* * * * *"] },
+  // No cron by default (ADR-021): the account's 5 free slots are taken. GitHub Actions calls POST /tick every
+  // ~5 min instead. If a slot frees up, set ["* * * * *"] for per-minute checks.
+  "triggers": { "crons": [] },
   // Same KV namespace as cortex. Sentinel writes `killed`; the brain only reads it.
   // Run `pnpm wrangler kv namespace create FLAGS` and paste the id here and in ../../wrangler.jsonc.
-  "kv_namespaces": [{ "binding": "FLAGS", "id": "00000000000000000000000000000000" }],
+  "kv_namespaces": [{ "binding": "FLAGS", "id": "3891963cf8c445ce90481c4d422596b6" }],
   "vars": {
     // Set to your deployed cortex URL, e.g. https://cortex.<subdomain>.workers.dev/health
-    "CORTEX_HEALTH_URL": "",
-    "STALE_ALERT_MINUTES": "3",
+    "CORTEX_HEALTH_URL": "https://cortex.samplayz2ks.workers.dev/health",
+    // Ticks arrive every ~5 min (GitHub schedules can slip), so staleness is judged on that cadence.
+    "STALE_ALERT_MINUTES": "12",
     // Constitution max_daily_loss_pct. The brain's own RED (5%) normally trips first.
     "MAX_DAILY_LOSS_PCT": "0.06",
     "FLATTEN_ON_BRAIN_DEATH_MINUTES": "60"

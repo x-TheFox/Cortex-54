@@ -61,7 +61,7 @@ If you are about to write code that weakens any of these, stop and ask the opera
                                ▼                               │
 ┌──────────── Cloudflare Workers FREE ─────────────────────────┴───────────────────────────────┐
 │ worker `cortex` (src/index.ts) — fetch router (≤10 ms CPU): Discord interactions, ingest,     │
-│   health, web API. Cron */5: "is the brain's alarm armed?" self-heal.                         │
+│   health, web API. No cron (ADR-021): the DO self-arms its alarm; /health re-arms it.         │
 │                                                                                               │
 │   AgentCortexDO "CORTEX-54-PRIMARY" (SQLite-backed Durable Object, the only brain)            │
 │     • alarm-driven PULSE (60 s when exposed/in-session, 300 s when flat) — NO always-on       │
@@ -72,8 +72,8 @@ If you are about to write code that weakens any of these, stop and ask the opera
 │   ResearchSprintWorkflow — Tier 3 bull / bear / synth → DecisionContract (I/O-only steps)     │
 │   D1 `cortex-journal` — append-only journal, contracts, rejections, beliefs, reputation       │
 │                                                                                               │
-│ worker `sentinel` (workers/sentinel) — separate deploy, separate Discord app, cron * * * * *: │
-│   heartbeat watchdog + independent daily-loss check + FLATTEN ALL. Shares no code path.       │
+│ worker `sentinel` (workers/sentinel) — separate deploy, ticked every ~5 min by GitHub Actions │
+│   (ADR-021): heartbeat watchdog + LIVE daily-loss check + FLATTEN ALL (kill-switch.yml).     │
 └───────────────────────────────────────────────────────────────────────────────────────────────┘
    Alpaca (paper + live REST)   Free LLMs (Gemini / Groq / NIM / OpenRouter :free)   Discord
 ```
@@ -247,9 +247,11 @@ pnpm lint                 # biome check (pnpm format to fix)
 pnpm dev                  # wrangler dev (local DO + D1; AI calls hit the real free quota)
 pnpm db:migrate:local     # apply migrations to local D1
 pnpm db:migrate:remote    # apply migrations to the real D1 (operator only)
-pnpm deploy               # wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists)
-pnpm sentinel:deploy      # deploy the independent watchdog/kill-switch worker
-pnpm discord:register     # register slash commands for both Discord apps (needs app ids + bot tokens in env)
+pnpm deploy:cortex        # wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists). NOT `pnpm deploy` (pnpm builtin)
+pnpm deploy:sentinel      # deploy the independent watchdog/kill-switch worker
+pnpm discord:setup        # idempotent: CORTEX-54 category + 8 channels, sentinel webhook, guild slash commands
+pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
+gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATTEN ALL (ADR-022); action=rearm to clear
 ```
 
 A doctrine value looser than the constitution fails `config:build`, which fails CI, which blocks deploy.
@@ -303,5 +305,11 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-22: Phase 1 safety spine code-complete on `phase-1-safety-spine`: Brain pulse (reconcile, fills,
   paper fee model, broker + synthetic stops, exits, breakers, reservations), baseline crypto strategy (PAPER
   only), Discord commands + approvals, sentinel kill-switch with KV flag. 61 tests incl. simulated pulses.
-- Next: operator account setup (docs/RUNBOOK.md §A), first deploy, then the Phase 1 exit gate (7 days on
-  PAPER, kill drills). Phase 2 (data + context) after that.
+- 2026-10-22: DEPLOYED on the operator's Workers Free account (`cortex.samplayz2ks.workers.dev`,
+  `cortex-sentinel.samplayz2ks.workers.dev`). D1 `cortex-journal` + KV `FLAGS` created; PAPER keys set;
+  Discord guild wired (CORTEX-54 category, HUD live, slash commands, interactions URL verified). No LIVE keys.
+  No cron triggers (ADR-021). Kill switch via GitHub Actions (ADR-022).
+- Open question: another process traded the same Alpaca paper account on 2026-10-22 (AMD/META/NVDA/SOXL/SOXX).
+  CORTEX needs exclusive use of its accounts; unknown positions force REDUCE_ONLY.
+- Next: Phase 1 exit gate (7 days unattended on PAPER, kill drill via kill-switch.yml), then Phase 2.
+- Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.
