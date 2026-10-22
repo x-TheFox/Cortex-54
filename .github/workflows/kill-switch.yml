@@ -1,0 +1,38 @@
+name: kill-switch
+
+# Independent emergency path (ADR-022): works even if the brain worker or Discord is down.
+# Run from the GitHub app or: gh workflow run kill-switch -f action=kill -f reason="why"
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "kill = cancel all orders + close all positions on PAPER and LIVE; rearm = clear the kill flag"
+        required: true
+        type: choice
+        options: [kill, rearm]
+      reason:
+        description: "Why (journaled and posted to #alarms)"
+        required: false
+        default: "operator kill via GitHub"
+
+permissions: {}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Call sentinel
+        env:
+          SENTINEL_URL: ${{ vars.SENTINEL_URL }}
+          SENTINEL_TICK_SECRET: ${{ secrets.SENTINEL_TICK_SECRET }}
+          ACTION: ${{ inputs.action }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          set -eu
+          if [ "$ACTION" = "kill" ]; then
+            curl -fsS --max-time 30 -X POST -G --data-urlencode "reason=$REASON" \
+              -H "authorization: Bearer $SENTINEL_TICK_SECRET" "$SENTINEL_URL/kill"
+          else
+            curl -fsS --max-time 30 -X POST -H "authorization: Bearer $SENTINEL_TICK_SECRET" "$SENTINEL_URL/rearm"
+          fi

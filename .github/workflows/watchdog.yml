@@ -1,0 +1,23 @@
+name: watchdog
+
+# Drives the sentinel when no Cloudflare cron slot is free (ADR-021). GitHub schedules are UTC and can be
+# delayed or skipped under load; the brain's own alarm is the primary heartbeat, this is the independent check.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Tick sentinel
+        env:
+          SENTINEL_URL: ${{ vars.SENTINEL_URL }}
+          SENTINEL_TICK_SECRET: ${{ secrets.SENTINEL_TICK_SECRET }}
+        run: |
+          if [ -z "$SENTINEL_URL" ] || [ -z "$SENTINEL_TICK_SECRET" ]; then echo "sentinel not configured"; exit 0; fi
+          curl -fsS --max-time 30 -X POST -H "authorization: Bearer $SENTINEL_TICK_SECRET" "$SENTINEL_URL/tick"

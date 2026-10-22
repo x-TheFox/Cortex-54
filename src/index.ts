@@ -106,7 +106,9 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      const health = await brain(env).health();
+      const b = brain(env);
+      await b.ensureAlarm(); // sentinel ticks keep the heart armed even without a cron (ADR-021)
+      const health = await b.health();
       const stale = health.last_pulse_at === null || Date.now() - health.last_pulse_at > 15 * 60_000;
       return Response.json(health, { status: stale ? 503 : 200 });
     }

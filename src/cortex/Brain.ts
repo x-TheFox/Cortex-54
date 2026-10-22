@@ -392,7 +392,14 @@ export class Brain {
 
     // Fills and fees, oldest first.
     let lastTs = cursor;
-    for (const act of activities) {
+    // First sync of an account: history before CORTEX existed isn't ours. Start the cursor now instead of
+    // replaying (and alerting on) every past fill.
+    const backlog = cursor === null ? activities : [];
+    if (cursor === null) {
+      lastTs = new Date(now).toISOString();
+      this.journal.append(account, "ACTIVITY_BASELINE", null, { skipped_history: backlog.length }, now);
+    }
+    for (const act of cursor === null ? [] : activities) {
       lastTs = act.transaction_time ?? act.date ?? lastTs;
       const seen = one(this.sql, "SELECT id FROM seen_activities WHERE id = ?", act.id);
       if (seen) continue;

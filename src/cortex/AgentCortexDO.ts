@@ -85,6 +85,8 @@ export class AgentCortexDO extends DurableObject<Env> {
         hot_schema_version: HOT_SCHEMA_VERSION,
         accounts: Object.keys(brokers),
       });
+      // Self-starting heart: no cron needed (ADR-021).
+      if ((await ctx.storage.getAlarm()) === null) await ctx.storage.setAlarm(Date.now() + 1_000);
     });
   }
 

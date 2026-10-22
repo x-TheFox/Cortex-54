@@ -2,7 +2,7 @@
  * SENTINEL — independent watchdog + kill-switch (docs/ARCHITECTURE.md §12, constitution U5).
  * Shares no runtime code with `cortex` on purpose: if the brain's code is broken, this still works.
  *
- *  cron (every minute):
+ *  tick (cron every minute when a slot is free, otherwise POST /tick from .github/workflows/watchdog.yml):
  *   - brain heartbeat via /health; alert when stale (≤ ~5 alerts/hour, stateless de-dupe)
  *   - LIVE daily-loss check straight from Alpaca; breach → flatten LIVE + set the kill flag
  *   - brain dead for FLATTEN_ON_BRAIN_DEATH_MINUTES with LIVE positions → flatten LIVE + kill flag
@@ -14,6 +14,8 @@ import { verifyDiscordRequest } from "./verify.ts";
 
 interface SentinelEnv {
   FLAGS: KVNamespace;
+  /** Bearer secret for POST /tick (GitHub Actions watchdog when no cron slot is free, ADR-021). */
+  SENTINEL_TICK_SECRET?: string;
   CORTEX_HEALTH_URL: string;
   STALE_ALERT_MINUTES: string;
   MAX_DAILY_LOSS_PCT: string;
@@ -211,11 +213,40 @@ async function interactions(request: Request, env: SentinelEnv, ctx: ExecutionCo
   }
 }
 
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+function bearerOk(request: Request, env: SentinelEnv): boolean {
+  const auth = request.headers.get("authorization") ?? "";
+  return Boolean(env.SENTINEL_TICK_SECRET) && timingSafeEqual(auth, `Bearer ${env.SENTINEL_TICK_SECRET}`);
+}
+
 export default {
   async fetch(request: Request, env: SentinelEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "POST" && url.pathname === "/discord/interactions")
       return interactions(request, env, ctx);
+
+    // Token-protected HTTP paths for the GitHub Actions watchdog and kill-switch (ADR-021, ADR-022).
+    if (request.method === "POST" && ["/tick", "/kill", "/rearm"].includes(url.pathname)) {
+      if (!bearerOk(request, env)) return new Response("unauthorized", { status: 401 });
+      if (url.pathname === "/tick") {
+        await cron(env, Date.now());
+        return new Response("ok");
+      }
+      if (url.pathname === "/kill") {
+        const reason = (url.searchParams.get("reason") ?? "operator kill (http)").slice(0, 200);
+        return new Response(await killAll(env, ["PAPER", "LIVE"], "http", reason));
+      }
+      const prev = await env.FLAGS.get("killed");
+      await env.FLAGS.delete("killed");
+      await alert(env, `🟢 SENTINEL re-armed via http. Previous kill: ${prev ?? "none"}`);
+      return new Response("re-armed");
+    }
     return new Response("cortex-sentinel", { status: 200 });
   },
 

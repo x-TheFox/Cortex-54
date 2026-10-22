@@ -48,6 +48,13 @@
    ```
    GitHub secrets for Actions: `INGEST_HMAC_SECRET`, `DISCORD_GOVERNOR_WEBHOOK`, data keys (FRED, Finnhub).
 
+## A2. What was set up on 2026-10-22 (re-run safely)
+```bash
+set -a; . ./.dev.vars; set +a      # DISCORD_BOT_TOKEN, DISCORD_APP_ID, DISCORD_GUILD_ID, Alpaca paper keys
+pnpm discord:setup                 # category, channels, webhook → workers/sentinel/.dev.vars, guild commands
+```
+GitHub: secret `SENTINEL_TICK_SECRET`, variable `SENTINEL_URL` (watchdog.yml + kill-switch.yml).
+
 ## B. Daily operator glance (Discord)
 - `command-center`: rung, dial, breaker band, budget mode, last pulse age.
 - `alarms-and-watchdog` should be quiet. Anything there is actionable.
@@ -60,7 +67,7 @@
 | Budget mode REDUCE_ONLY | read which limit; usually waits until 00:00 UTC; investigate the spike |
 | Reconciliation mismatch | system already REDUCE_ONLY; compare Alpaca dashboard vs `/status`; adopt or flatten orphan |
 | RED breaker | everything flattened; fill the postmortem modal to unlock; Governor reviews next week |
-| Anything feels wrong | SENTINEL `/kill` → cancels all orders and closes all positions on both accounts; `/rearm` when resolved |
+| Anything feels wrong | `gh workflow run kill-switch -f action=kill -f reason="…"` (or Actions → kill-switch in the GitHub app) → cancels all orders and closes all positions on both accounts; `action=rearm` when resolved |
 | Orphan position/order | entries blocked; close it in Alpaca or `/flatten`, then `/resume` |
 
 Manual last resort: Alpaca dashboard → "Close all positions" + "Cancel all orders".
