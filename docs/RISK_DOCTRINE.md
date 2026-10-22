@@ -21,17 +21,21 @@ reject if N < max(asset_min_notional, $1.00) or qty < asset_min_qty
 Constraints: `|P_e − P_s| ≥ 1.2 · ATR14` (no noise stops); `W_rep = 1.0` until a source has ≥20 resolved
 signals; `D_bear = min(0.7, max(0, bear_lethality − 0.3))` by default.
 
+`p̂` source: COURT contracts use calibrated Clef probability, shrunk toward 0.5 with weight
+`max(warmup_min_weight, n/50)` until 50 outcomes exist (so the system can still trade small and learn);
+RULE contracts use the strategy's `prior_win_prob` from doctrine.
+
 ### Worked example (R1, E = $54, crypto)
 `r_trade = 2.5%`, `c = 7`, `D_bear = 0.1`, `W_rep = 1`, `M = 1`, `p̂ = 0.66 → g = 0.64`
 → `r_eff = 0.025·0.7·0.9·0.64 = 1.008%` → risk budget $0.544.
-Stop 4% + fees 0.30% + half-spread 0.05% → `d_stop = 4.35%` → `N = $12.51` (< $18.90 cap) → OK.
-Max loss if stopped ≈ $0.54. Fee cost ≈ $0.04.
+Stop 4% + fees 0.40% (maker entry 0.15% + taker exit 0.25%) + half-spread 0.05% → `d_stop = 4.45%` →
+`N = $12.23` (< $18.90 cap) → OK. Max loss if stopped ≈ $0.54. Fee cost ≈ $0.05.
 
 ## 2. Fee hurdle (Tier 0)
 
 ```
 expected_move ≥ hurdle_mult · (f_rt + s/P_e)       hurdle_mult = 3.0
-crypto maker f_rt ≈ 0.30%   taker ≈ 0.50%   (Alpaca tier < $100k / 30 d)
+crypto f_rt = maker entry + taker exit ≈ 0.40%   (all-taker 0.50%; Alpaca tier < $100k / 30 d)
 equities f_rt ≈ 0 + regulatory sell fee (≥ $0.01 rounding → ~5 bps on an $18 sell)
 paper ledgers apply the same fees + slippage_bps (default 5 bps equities, 10 bps crypto)
 ```

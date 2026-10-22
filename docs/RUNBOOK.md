@@ -7,6 +7,7 @@
    pnpm install
    pnpm wrangler login
    pnpm wrangler d1 create cortex-journal      # paste database_id into wrangler.jsonc
+   pnpm wrangler kv namespace create FLAGS     # paste id into wrangler.jsonc AND workers/sentinel/wrangler.jsonc
    pnpm db:migrate:remote
    ```
    Create an API token (template "Edit Cloudflare Workers" + D1 edit) → GitHub secret
@@ -24,6 +25,15 @@
    - Create app **SENTINEL** → interactions URL `https://cortex-sentinel.<subdomain>.workers.dev/discord/interactions`.
    - Create a webhook in `alarms-and-watchdog` (sentinel alerts) and `governor-and-evolution` (Actions).
    - Enable Developer Mode, copy your user ID → `OPERATOR_DISCORD_ID`.
+   - Copy channel IDs into `DISCORD_CHANNELS` in `wrangler.jsonc`:
+     `{"command_center":"…","briefs":"…","court":"…","executions":"…","alarms":"…"}` (IDs are not secret).
+   - Invite both bots to the server (scope `bot` + `applications.commands`, permission: Send Messages,
+     Embed Links, Read Message History).
+   - Register slash commands:
+     ```bash
+     DISCORD_APP_ID=… DISCORD_BOT_TOKEN=… SENTINEL_APP_ID=… SENTINEL_BOT_TOKEN=… pnpm discord:register
+     ```
+   - Set `CORTEX_HEALTH_URL` in `workers/sentinel/wrangler.jsonc` to `https://cortex.<subdomain>.workers.dev/health`.
 4. **Free LLM keys** — Google AI Studio (Gemini), Groq, NVIDIA NIM (optional), OpenRouter (optional).
 5. **Secrets**
    ```bash
@@ -34,7 +44,7 @@
      pnpm wrangler secret put $s; done
    # sentinel (its own copies — independence is the point)
    cd workers/sentinel && for s in ALPACA_PAPER_KEY_ID ALPACA_PAPER_SECRET ALPACA_LIVE_KEY_ID ALPACA_LIVE_SECRET \
-            DISCORD_PUBLIC_KEY OPERATOR_DISCORD_ID DISCORD_ALARM_WEBHOOK; do pnpm wrangler secret put $s; done
+            DISCORD_APP_ID DISCORD_PUBLIC_KEY OPERATOR_DISCORD_ID DISCORD_ALARM_WEBHOOK; do pnpm wrangler secret put $s; done
    ```
    GitHub secrets for Actions: `INGEST_HMAC_SECRET`, `DISCORD_GOVERNOR_WEBHOOK`, data keys (FRED, Finnhub).
 
@@ -50,7 +60,8 @@
 | Budget mode REDUCE_ONLY | read which limit; usually waits until 00:00 UTC; investigate the spike |
 | Reconciliation mismatch | system already REDUCE_ONLY; compare Alpaca dashboard vs `/status`; adopt or flatten orphan |
 | RED breaker | everything flattened; fill the postmortem modal to unlock; Governor reviews next week |
-| Anything feels wrong | SENTINEL `/kill` → cancels all orders and closes all positions on both accounts |
+| Anything feels wrong | SENTINEL `/kill` → cancels all orders and closes all positions on both accounts; `/rearm` when resolved |
+| Orphan position/order | entries blocked; close it in Alpaca or `/flatten`, then `/resume` |
 
 Manual last resort: Alpaca dashboard → "Close all positions" + "Cancel all orders".
 

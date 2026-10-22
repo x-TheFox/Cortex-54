@@ -8,6 +8,8 @@ DISCORD_APP_ID=
 DISCORD_PUBLIC_KEY=
 DISCORD_BOT_TOKEN=
 OPERATOR_DISCORD_ID=
+# Channel IDs (also settable in wrangler.jsonc vars): {"command_center":"…","briefs":"…","court":"…","executions":"…","alarms":"…"}
+DISCORD_CHANNELS={}
 INGEST_HMAC_SECRET=
 GEMINI_API_KEY=
 GROQ_API_KEY=

@@ -22,7 +22,8 @@ puts the system in `REDUCE_ONLY` at 90% of any limit (constitution untouchable #
 | D1 storage | 500 MB/DB, 5 GB total | grows ~1–3 MB/day | — | 450 MB/DB | monthly roll-up job if needed |
 | Workflows | 100k exec/day shared; 100 concurrent; 10 ms CPU/step | ≤20 sprints | — | — | I/O-only steps |
 | Workers AI | **10,000 neurons** | see below | 7,000 | 9,000 | hard fail when exhausted |
-| Bundle size | 3 MB compressed (Workflows doc) | target <2 MB | — | — | no satori/resvg/Agents SDK |
+| Workers KV (`FLAGS`) | 100k reads, 1k writes/day | ~1,440 reads, ~0 writes | — | — | kill flag (ADR-015) |
+| Bundle size | 3 MB compressed (Workflows doc) | 152 KB gzip (Phase 1) | — | — | no satori/resvg/Agents SDK |
 
 ### Workers AI neuron allocation (per UTC day)
 

@@ -20,7 +20,8 @@
     "sentinel:dev": "wrangler dev -c workers/sentinel/wrangler.jsonc",
     "sentinel:deploy": "wrangler deploy -c workers/sentinel/wrangler.jsonc",
     "db:migrate:local": "wrangler d1 migrations apply cortex-journal --local",
-    "db:migrate:remote": "wrangler d1 migrations apply cortex-journal --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply cortex-journal --remote",
+    "discord:register": "node scripts/register-commands.ts"
   },
   "dependencies": {
     "zod": "^4.6.7"

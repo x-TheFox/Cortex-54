@@ -216,10 +216,21 @@ src/
   cortex/AgentCortexDO.ts the brain (pulse, accounts, hot state)
   cortex/hot-schema.ts    DO SQLite schema (applied in constructor via blockConcurrencyWhile)
   contracts/              zod schemas: DecisionContract, constitution, doctrine (validated at boot)
-  risk/ budget/ broker/ clef/ court/ discord/ data/ skills/ workflows/  (filled in by phase)
-workers/sentinel/         independent watchdog + kill-switch worker (own wrangler.jsonc)
+  cortex/Brain.ts          ALL trading logic (pulse, reconcile, fills, stops, exits, entries, operator RPC)
+  cortex/store.ts          SqlLike: the narrow SQL surface Brain depends on (DO storage or node:sqlite)
+  risk/                    PositionSizer, PreTradeValidator, CircuitBreakerLadder, fees, rungs (pure)
+  broker/                  Alpaca client + zod schemas + BrokerApi/MarketDataApi interfaces
+  budget/FreeTierBudget.ts free-tier meter + per-invocation subrequest guard
+  journal/Journal.ts       hash chain + D1 outbox
+  strategy/                indicators + CRYPTO_BREAKOUT_BASELINE_V1 (deterministic, RULE contracts)
+  discord/                 signature verify, commands, interactions, notifier (REST)
+  lib/                     sync sha256, uuidv7, client_order_id, money helpers
+  clef/ court/ data/ workflows/  (Phase 2–3)
+workers/sentinel/         independent watchdog + kill-switch worker (own wrangler.jsonc, vendored verify.ts,
+                          writes the KV kill flag the brain reads — ADR-015)
 research/                 Python batch jobs for GitHub Actions (screeners, governor)
-test/                     vitest (workers pool) — risk math has property tests
+test/                     vitest in Node: pure risk tests + full pulses against test/sim (FakeBroker + node:sqlite
+                          with the real D1 migrations) — ADR-019
 .github/workflows/        ci.yml (+ research.yml, governor.yml added in later phases)
 ```
 
@@ -231,17 +242,19 @@ test/                     vitest (workers pool) — risk math has property tests
 pnpm install
 pnpm config:build         # validate config/ vs constitution → src/generated/config.ts (runs before typecheck/test/dev/deploy)
 pnpm typecheck            # Workers tsconfig (src, sentinel) + Node tsconfig (scripts, test)
-pnpm test                 # vitest (Node env for pure logic; Workers pool added in Phase 1)
+pnpm test                 # vitest in Node (pure logic + simulated pulses; Node ≥22.13 for node:sqlite)
 pnpm lint                 # biome check (pnpm format to fix)
 pnpm dev                  # wrangler dev (local DO + D1; AI calls hit the real free quota)
 pnpm db:migrate:local     # apply migrations to local D1
 pnpm db:migrate:remote    # apply migrations to the real D1 (operator only)
 pnpm deploy               # wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists)
 pnpm sentinel:deploy      # deploy the independent watchdog/kill-switch worker
+pnpm discord:register     # register slash commands for both Discord apps (needs app ids + bot tokens in env)
 ```
 
 A doctrine value looser than the constitution fails `config:build`, which fails CI, which blocks deploy.
-Bundle check: `pnpm wrangler deploy --dry-run --outdir <scratch>` (Phase 0: ~4 KB gzip; budget 2 MB).
+Bundle check: `pnpm wrangler deploy --dry-run --outdir <scratch>` (Phase 1: ~152 KB gzip; budget 2 MB).
+Smoke test: `pnpm wrangler dev --test-scheduled`, then hit `/__scheduled?cron=*/5+*+*+*+*` and `/health`.
 
 Secrets go in `.dev.vars` locally (template: `.dev.vars.example`) and `wrangler secret put` remotely.
 Never commit secrets. Never log API keys, account numbers or Discord tokens.
@@ -257,8 +270,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   from/to Alpaca are decimal strings, parsed once at the boundary. Conservative rounding everywhere.
 - **Time:** epoch milliseconds UTC internally. Market sessions only from Alpaca clock/calendar. ET only for
   display.
-- **IDs:** `contract_id` = UUIDv7. `client_order_id` = `c54-{acct}-{contract8}-{leg}-{attempt}` (idempotent;
-  re-submits reuse the same id).
+- **IDs:** `contract_id` = UUIDv7. `client_order_id` = `c54-{P|L}-{contract8}-{E|S|X}-{attempt}` (idempotent;
+  re-submits reuse the same id; role letters must stay distinct — ADR-020).
 - **CPU discipline:** fetch/cron handlers do routing only (<10 ms CPU). Real work happens in the DO.
   Workflow steps are I/O-only. Anything heavy (backtests, Monte Carlo over large sets, screeners) goes to
   GitHub Actions.
@@ -286,6 +299,9 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 
 ## 11. Current status
 
-- 2026-10-22: Spec read and critiqued; free-tier research complete; docs/config/schema scaffolding written
-  (Phase 0 in progress). No trading logic yet. No accounts wired.
-- Next: Phase 0 exit (CI green, deploy hello-brain to Workers Free, D1 migrated), then Phase 1 safety spine.
+- 2026-10-22: Phase 0 merged (docs, config, schema, scaffold).
+- 2026-10-22: Phase 1 safety spine code-complete on `phase-1-safety-spine`: Brain pulse (reconcile, fills,
+  paper fee model, broker + synthetic stops, exits, breakers, reservations), baseline crypto strategy (PAPER
+  only), Discord commands + approvals, sentinel kill-switch with KV flag. 61 tests incl. simulated pulses.
+- Next: operator account setup (docs/RUNBOOK.md §A), first deploy, then the Phase 1 exit gate (7 days on
+  PAPER, kill drills). Phase 2 (data + context) after that.

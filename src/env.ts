@@ -5,11 +5,15 @@ export interface Env {
   CORTEX: DurableObjectNamespace<AgentCortexDO>;
   DB: D1Database;
   AI: Ai;
+  /** Shared with `sentinel`. Sentinel writes the `killed` key; the brain only reads it. */
+  FLAGS: KVNamespace;
 
   CORTEX_ENV: string;
   CORTEX_DO_NAME: string;
+  /** JSON: {"command_center":"<id>","briefs":"<id>","court":"<id>","executions":"<id>","alarms":"<id>"} */
+  DISCORD_CHANNELS?: string;
 
-  // Secrets (wrangler secret put). Optional until the phase that needs them.
+  // Secrets (wrangler secret put). Each feature switches on only when its secrets exist.
   ALPACA_PAPER_KEY_ID?: string;
   ALPACA_PAPER_SECRET?: string;
   ALPACA_LIVE_KEY_ID?: string;
