@@ -89,7 +89,6 @@ fees:
 execution:
   order_style: passive_limit # peg at best bid (buy) / best ask (sell), never cross unless IMMEDIATE
   max_unfilled_pulses: 3
-  repeg_on_move_atr: 0.15
   exit_collar_bps: 75 # marketable-limit exits capped this far through the touch
   no_entry_last_minutes_of_session: 10
   earnings_blackout_hours: 72

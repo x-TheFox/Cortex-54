@@ -274,7 +274,7 @@ pnpm db:migrate:remote    # apply migrations to the real D1 (operator only)
 pnpm deploy:cortex        # wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists). NOT `pnpm deploy` (pnpm builtin)
 pnpm deploy:sentinel      # deploy the independent watchdog/kill-switch worker
 pnpm discord:setup        # idempotent: CORTEX-54 category + 8 channels, sentinel webhook, guild slash commands
-gh workflow run research -f job=crypto    # or job=equity | world | options: run a research batch now
+gh workflow run research -f job=crypto    # or job=equity | world | options | screeners: run a research batch now
 pnpm court:smoke BTC/USD ["headline"] [--post]   # real bull/bear/Clef run on live evidence; never trades
 # Discord /court SYMBOL convenes a real session (PAPER, all gates apply); cards go to #bull-vs-bear-court
 pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
@@ -375,5 +375,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   #agent-terminal stream, web terminal (`public/`, `/terminal` login link, Command Deck / Court / Memory Vault /
   Options Lab), shared Discord/web command runner with a parity test. Deployed; WEB_SESSION_SECRET set.
   All roadmap build phases (0–6) are now code-complete; LIVE still needs the 30-day autonomous PAPER run.
+- 2026-10-23: PR #12 merged. Spec gap pass (ADR-035): correlation guard, 72 h earnings blackout (Nasdaq + FMP
+  calendar, fail closed), Stockbee setup screeners → Tier 2 (`gh workflow run research -f job=screeners`),
+  daily journal chain verification, shadow-twin divergence; unused re-peg setting removed. Hot schema v5.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

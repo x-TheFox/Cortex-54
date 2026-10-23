@@ -40,15 +40,19 @@ export type WorldCandidate = z.infer<typeof WorldCandidateSchema>;
 export const BatchSchema = z
   .object({
     schema_version: z.literal(1),
-    job: z.enum(["crypto-regime", "equity-posture", "world-intel", "governor", "options-lab"]),
+    job: z.enum(["crypto-regime", "equity-posture", "world-intel", "governor", "options-lab", "screeners"]),
     produced_at: z.number().int(),
     run_url: z.url().nullable(),
     items: z.array(BatchItemSchema).min(1).max(20),
     posture: PostureSchema.nullable(),
   })
-  .refine((b) => ["world-intel", "governor", "options-lab"].includes(b.job) === (b.posture === null), {
-    message: "posture is required for regime jobs and must be null for world-intel / governor / options-lab",
-  });
+  .refine(
+    (b) => ["world-intel", "governor", "options-lab", "screeners"].includes(b.job) === (b.posture === null),
+    {
+      message:
+        "posture is required for regime jobs and must be null for world-intel / governor / options-lab / screeners",
+    },
+  );
 export type Batch = z.infer<typeof BatchSchema>;
 
 /** Max raw body the worker accepts (keeps JSON parsing well inside the 10 ms CPU budget). */
@@ -139,3 +143,17 @@ export const BeliefSchema = z.object({
   evidence: z.array(z.string().max(80)).max(50),
 });
 export type Belief = z.infer<typeof BeliefSchema>;
+
+/** Setup-screener hit (ADR-035): a deterministic setup proposed straight to Tier 2. */
+export const ScreenerCandidateSchema = z.object({
+  id: z.string().min(1).max(200),
+  screener: z.string().regex(/^[a-z0-9-]{3,60}$/),
+  symbol: z.string().min(1).max(16),
+  bar_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  score: z.number().int().min(0).max(100),
+  state: z.string().max(40),
+  headline: z.string().min(1).max(400),
+  entry_reference: z.number().positive().nullable(),
+  stop_reference: z.number().positive().nullable(),
+  as_of: z.number().int(),
+});

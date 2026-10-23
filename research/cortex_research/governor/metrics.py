@@ -178,3 +178,46 @@ def strategy_stats(rs: Sequence[float]) -> dict:
         "profit_factor": (None if pf is None else (round(pf, 3) if pf != math.inf else 99.0)),
         **bootstrap(rs),
     }
+
+
+GENESIS = "0" * 64
+
+
+def verify_chain(rows: Sequence[dict]) -> dict:
+    """Recompute the journal hash chain (src/journal/Journal.ts rowHash). Constitution U7 / spec §8.8.
+
+    Checks every row's hash, every link, contiguous seq from 1, and that seq 1 links to GENESIS.
+    """
+    import hashlib
+
+    ordered = sorted(rows, key=lambda r: r["seq"])
+    prev_sha = GENESIS
+    for i, r in enumerate(ordered):
+        if r["seq"] != i + 1:
+            return {"ok": False, "rows": len(ordered), "broken_at": r["seq"], "why": f"gap: expected seq {i + 1}"}
+        if r["prev_row_sha256"] != prev_sha:
+            return {"ok": False, "rows": len(ordered), "broken_at": r["seq"], "why": "link mismatch"}
+        h = hashlib.sha256(f"{r['prev_row_sha256']}|{r['seq']}|{r['ts']}|{r['kind']}|{r['payload_json']}".encode()).hexdigest()
+        if h != r["row_sha256"]:
+            return {"ok": False, "rows": len(ordered), "broken_at": r["seq"], "why": "row hash mismatch"}
+        prev_sha = r["row_sha256"]
+    return {"ok": True, "rows": len(ordered), "broken_at": None, "why": None, "head": prev_sha}
+
+
+def twin_divergence(fills: Sequence[dict]) -> dict:
+    """Paper-vs-live shadow twin (spec §2.3 / RISK_DOCTRINE R2 gate): for every contract filled on both accounts,
+    the live price's deviation from paper in bps, signed against us (buys: live higher is worse; sells: lower)."""
+    by: dict[tuple[str, str], dict[str, list[tuple[float, float]]]] = {}
+    for f in fills:
+        key = (str(f.get("contract")), str(f.get("role")))
+        by.setdefault(key, {}).setdefault(f["account"], []).append((float(f["qty"]), float(f["price"])))
+    diffs = []
+    for (cid, role), accts in by.items():
+        if "PAPER" not in accts or "LIVE" not in accts:
+            continue
+        vw = {a: sum(q * p for q, p in v) / sum(q for q, _ in v) for a, v in accts.items()}
+        sign = 1 if role == "ENTRY" else -1
+        diffs.append(sign * (vw["LIVE"] - vw["PAPER"]) / vw["PAPER"] * 10_000)
+    return {"pairs": len(diffs), "mean_bps": round(sum(diffs) / len(diffs), 2) if diffs else None,
+            "worst_bps": round(max(diffs), 2) if diffs else None}
+

@@ -178,7 +178,12 @@ export class FakeBroker implements BrokerApi {
   }
 
   async clock(): Promise<AlpacaClock> {
-    return { timestamp: this.iso(), is_open: this.isOpen, next_open: this.iso(), next_close: this.iso() };
+    return {
+      timestamp: this.iso(),
+      is_open: this.isOpen,
+      next_open: this.iso(),
+      next_close: new Date(this.clockFn() + 6 * 3_600_000).toISOString(),
+    };
   }
 
   async asset(symbol: string): Promise<AlpacaAsset> {

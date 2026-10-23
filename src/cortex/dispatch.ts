@@ -25,6 +25,7 @@ export const DISPATCH_JOBS: readonly DispatchJob[] = [
   { key: "world", workflow: "research.yml", cron: "17 * * * *", inputs: { job: "world" } },
   { key: "options-open", workflow: "research.yml", cron: "50 14 * * 1-5", inputs: { job: "options" } },
   { key: "options-close", workflow: "research.yml", cron: "40 19 * * 1-5", inputs: { job: "options" } },
+  { key: "screeners", workflow: "research.yml", cron: "45 14 * * *", inputs: { job: "screeners" } },
   { key: "governor", workflow: "governor.yml", cron: "23 6 * * 1-6", inputs: { weekly: "false" } },
   { key: "governor-weekly", workflow: "governor.yml", cron: "23 6 * * 0", inputs: { weekly: "true" } },
 ];

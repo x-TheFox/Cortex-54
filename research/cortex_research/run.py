@@ -24,11 +24,17 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+import yaml
 
 from . import payload as P
+from .calendar import earnings_calendar
+from .world import watch_tickers
+
+REPO = Path(__file__).resolve().parents[2]
 
 TIMEOUT_S = 420
 
@@ -156,6 +162,15 @@ def equity_job(out: Path, version: str) -> dict:
             },
         )
     )
+    # Earnings calendar for the brain's 72 h blackout (ADR-035). Skipped when every source fails (fail closed).
+    universe = set(watch_tickers(REPO / "config" / "doctrine.yaml")) | {
+        u for st in yaml.safe_load((REPO / "config" / "doctrine.yaml").read_text())["strategies"]
+        if st["arena"] == "EQUITIES" for u in st.get("universe", [])
+    }
+    cal = earnings_calendar(universe, datetime.now(timezone.utc).date())
+    print(f"earnings calendar: {len(cal['events'])} events from {cal['sources']} (failed: {cal['failed'][:3]})")
+    if cal["sources"]:
+        items.append(P.item("earnings-calendar", "cal-v1", t, P.dumps(cal).encode(), cal))
     return P.batch("equity-posture", t, run_url(), items, P.equity_posture(exposure))
 
 
@@ -184,16 +199,20 @@ def sign_and_post(body: str) -> requests.Response:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["crypto", "equity", "world"])
+    ap.add_argument("job", choices=["crypto", "equity", "world", "screeners"])
     ap.add_argument("--dry-run", action="store_true", help="print the payload instead of posting")
     a = ap.parse_args()
     version = os.environ.get("UPSTREAM_SHA", "unknown")
-    if a.job == "world":
+    if a.job == "screeners":
+        from .screeners import screener_job
+
+        b = screener_job(Path(os.environ["UPSTREAM_DIR"]), version, run_skill, newest, now_ms(), REPO / "config" / "doctrine.yaml")
+    elif a.job == "world":
         b = world_job(version)
         if b is None:
             print("world-intel: no candidates this run")
             return 0
-    else:
+    if a.job in ("crypto", "equity"):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             b = crypto_job(out, version) if a.job == "crypto" else equity_job(out, version)

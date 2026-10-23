@@ -13,13 +13,14 @@ on:
     - cron: "17 * * * *" # world intel (GDELT + EDGAR) hourly
     - cron: "50 14 * * 1-5" # options shadow lab after the open (10:50 EDT / 09:50 EST)
     - cron: "40 19 * * 1-5" # options shadow lab before the close
+    - cron: "45 14 * * *" # setup screeners during the session (crypto only on weekends)
   workflow_dispatch:
     inputs:
       job:
         description: "Which job"
         required: true
         type: choice
-        options: [crypto, equity, world, options]
+        options: [crypto, equity, world, options, screeners]
 
 permissions:
   contents: read
@@ -47,6 +48,7 @@ jobs:
           elif [ "${{ github.event.schedule }}" = "7 */4 * * *" ]; then echo "job=crypto" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "17 * * * *" ]; then echo "job=world" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "50 14 * * 1-5" ] || [ "${{ github.event.schedule }}" = "40 19 * * 1-5" ]; then echo "job=options" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.event.schedule }}" = "45 14 * * *" ]; then echo "job=screeners" >> "$GITHUB_OUTPUT";
           else echo "job=equity" >> "$GITHUB_OUTPUT"; fi
       - name: Skip if the brain already dispatched this job
         id: dedupe
@@ -60,7 +62,7 @@ jobs:
                 --json displayTitle --jq "[.[] | select(.displayTitle == \"research $JOB\")] | length")
           if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "brain dispatched $JOB already ($n run(s) since $since)"; fi
       - name: Checkout pinned upstream skills
-        if: steps.dedupe.outputs.skip != 'true' && (steps.pick.outputs.job == 'crypto' || steps.pick.outputs.job == 'equity')
+        if: steps.dedupe.outputs.skip != 'true' && (steps.pick.outputs.job == 'crypto' || steps.pick.outputs.job == 'equity' || steps.pick.outputs.job == 'screeners')
         run: |
           git clone --filter=blob:none "https://github.com/${UPSTREAM_REPO}" research/.vendor/upstream
           git -C research/.vendor/upstream checkout --quiet "${UPSTREAM_SHA}"
@@ -74,6 +76,9 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          ALPACA_KEY_ID: ${{ secrets.ALPACA_PAPER_KEY_ID }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_PAPER_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: uv run python -m cortex_research.run "${{ steps.pick.outputs.job }}"
       - name: Options shadow lab (virtual ledger, never sent to a broker)
         if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job == 'options'

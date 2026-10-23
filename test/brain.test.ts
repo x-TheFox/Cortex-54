@@ -1255,3 +1255,132 @@ describe("cockpit (Phase 6)", () => {
     expect(t.brain.consumeOnce("login:n1")).toBe(false);
   });
 });
+
+describe("entry guards (ADR-035)", () => {
+  const eq = (symbol: string, id: string): DecisionContract => ({
+    contract_id: id,
+    created_at: T0,
+    schema_version: 1 as const,
+    origin: "RULE" as const,
+    symbol,
+    arena: "EQUITIES" as const,
+    strategy_id: "EQUITY_CATALYST_COURT_V1",
+    thesis_summary: `${symbol} test contract for the earnings blackout guard.`,
+    bull_case_receipts: [{ evidence_id: "x", source_skill: "t", metric: "m", metric_value: 1, as_of: T0 }],
+    bear_case_brief: "Test: earnings within 72 hours must block the entry.",
+    kill_criteria: ["stop hit"],
+    invalidation_criteria: { stop_price: "96", max_hold_hours: 72 },
+    entry_plan: { zone_low: "99", zone_high: "101", urgency: "NORMAL" as const, targets: ["112"] },
+    clef_probabilities: null,
+    win_prob_used: 0.6,
+    bear_lethality: 0,
+    atr: 2,
+    cost_and_fee_drag: { entry_fee_bps: 0, exit_fee_bps: 1, expected_slippage_bps: 5, cognitive_cost_usd: 0 },
+    proposed_conviction: 5,
+    models_used: [
+      {
+        role: "RULE" as const,
+        provider: "cortex",
+        model: "x",
+        family: "deterministic",
+        prompt_version: "n/a",
+      },
+    ],
+  });
+  const reasons = (t: ReturnType<typeof setup>) =>
+    (t.d1.db.prepare("SELECT reason_codes FROM rejections").all() as { reason_codes: string }[])
+      .map((r) => r.reason_codes)
+      .join(" ");
+
+  it("blocks equity entries when the calendar is stale, and inside the earnings window", async () => {
+    const t = setup();
+    await t.brain.pulse();
+    t.market.set("AAPL", 100, 100.02);
+    const k = eq("AAPL", "01930f4e-7b2a-7c3d-8e4f-5a6b7c8d9e01");
+    t.brain.recordContract(k, T0);
+    expect(await t.brain.executeEntry("PAPER", k, { bid: 100, ask: 100.02, at: T0 })).toBe(false);
+    await t.brain.flushJournal();
+    expect(reasons(t)).toContain("earnings calendar stale");
+    const tomorrow = new Date(T0 + 86_400_000).toISOString().slice(0, 10);
+    const r = await t.brain.ingestBatch({
+      schema_version: 1,
+      job: "equity-posture",
+      produced_at: T0,
+      run_url: null,
+      items: [
+        {
+          skill_id: "earnings-calendar",
+          version: "fmp",
+          as_of: T0,
+          inputs_sha256: "e".repeat(64),
+          payload: { events: [{ symbol: "AAPL", date: tomorrow }] },
+        },
+      ],
+      posture: {
+        arena: "EQUITIES",
+        posture: "NEW_ENTRY_ALLOWED",
+        score: 60,
+        ceiling: 0.6,
+        confidence: null,
+        summary: "ok",
+      },
+    });
+    expect(r.ok).toBe(true);
+    const k2 = eq("AAPL", "01930f4e-7b2a-7c3d-8e4f-5a6b7c8d9e02");
+    t.brain.recordContract(k2, T0);
+    expect(await t.brain.executeEntry("PAPER", k2, { bid: 100, ask: 100.02, at: T0 })).toBe(false);
+    await t.brain.flushJournal();
+    expect(reasons(t)).toContain(`earnings on ${tomorrow}`);
+  });
+});
+
+describe("setup screeners (ADR-035)", () => {
+  const batch = (producedAt: number, score = 74) => ({
+    schema_version: 1,
+    job: "screeners",
+    produced_at: producedAt,
+    run_url: null,
+    items: [
+      {
+        skill_id: "setup-screeners",
+        version: "x",
+        as_of: producedAt,
+        inputs_sha256: "f".repeat(64),
+        payload: {
+          candidates: [
+            {
+              id: "stockbee-momentum-burst-screener:SOL/USD:2026-10-21",
+              screener: "stockbee-momentum-burst-screener",
+              symbol: "SOL/USD",
+              bar_date: "2026-10-21",
+              score,
+              state: "ACTIONABLE_DAY1",
+              headline: "SOL/USD: momentum burst setup",
+              entry_reference: 100,
+              stop_reference: 95,
+              as_of: producedAt,
+            },
+          ],
+        },
+      },
+    ],
+    posture: null,
+  });
+
+  it("queues hits straight to Tier 2 once, keyed for reputation by screener", async () => {
+    const t = setup();
+    expect((await t.brain.ingestBatch(batch(T0))).message).toContain("queued 1");
+    expect((await t.brain.ingestBatch(batch(T0))).message).toContain("queued 0");
+    const row = t.sql.exec<{ tier: number; payload_json: string }>(
+      "SELECT tier, payload_json FROM triage_queue",
+    )[0];
+    expect(row?.tier).toBe(2);
+    expect(JSON.parse(row?.payload_json ?? "{}").kind).toBe("screener:momentum-burst");
+  });
+
+  it("refuses stale batches", async () => {
+    const t = setup();
+    t.advance(31 * 3_600_000);
+    expect((await t.brain.ingestBatch(batch(T0))).ok).toBe(false);
+  });
+});

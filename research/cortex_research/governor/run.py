@@ -315,6 +315,20 @@ def main() -> int:
         llm_ok[f"{c['role']} {c['provider']}"][0 if c["outcome"] == "OK" else 1] += 1
     gate = gate_status(journal, trades, rejections, b_raw, len(pairs), now)
     gate += options_gate(options)
+    fills = []
+    for r in journal:
+        if r["kind"] != "FILL":
+            continue
+        p = jload(r["payload_json"], {}) or {}
+        parts = (r.get("ref_id") or "").split("-")
+        if len(parts) > 2 and p.get("price") and p.get("qty"):
+            fills.append({"account": r["account"], "contract": parts[2], "role": p.get("role"), "qty": p["qty"], "price": p["price"]})
+    twin = M.twin_divergence(fills)
+    gate.append({"criterion": "R2: live-vs-paper slippage < 15 bps", "status": "WAIT" if not twin["pairs"] else ("PASS" if twin["mean_bps"] < 15 else "FAIL"),
+                 "value": "no LIVE fills yet" if not twin["pairs"] else f"mean {twin['mean_bps']} bps, worst {twin['worst_bps']} over {twin['pairs']}"})
+    chain = M.verify_chain(journal)
+    gate.insert(0, {"criterion": "Journal hash chain intact (U7)", "status": "PASS" if chain["ok"] else "FAIL",
+                    "value": f"{chain['rows']} rows verified" if chain["ok"] else f"BROKEN at seq {chain['broken_at']}: {chain['why']}"})
 
     # memory: reputation (trades + graded court shadow outcomes), beliefs, scar proposals (ADR-033)
     win_p = lambda k: ((jload(k.get("clef_probabilities"), {}) or {}).get("raw") or {}).get("win_prob")
@@ -352,6 +366,7 @@ def main() -> int:
     ]
     sections = [{"name": x["name"][:100], "value": (x["value"] or "—")[:1000]} for x in sections]
     card = {"title": f"🧬 Governor report · {week}", "sections": sections, "post": bool(a.weekly)}
+    alarm = None if chain["ok"] else f"🚨 Journal hash chain BROKEN at seq {chain['broken_at']} ({chain['why']}). Investigate before trusting any history."
 
     # calibration map → file (the workflow turns a changed file into a PR)
     if a.weekly and len(pairs) >= MIN_OUTCOMES_FOR_MAP:
@@ -370,7 +385,7 @@ def main() -> int:
         P.item("rejection-ledger-grader", "gov-v1", now, P.dumps(new_grades).encode(), {"grades": new_grades}),
         P.item("signal-postmortem", "gov-v1", now, P.dumps(postmortems).encode(), {"postmortems": postmortems}),
         P.item("skill-fitness-leaderboard", "gov-v1", now, P.dumps(fitness).encode(), {"fitness": fitness, "gate": gate}),
-        P.item("weekly-performance-digest", "gov-v1", now, P.dumps(card).encode(), {"card": card}),
+        P.item("weekly-performance-digest", "gov-v1", now, P.dumps(card).encode(), {"card": card, "alarm": alarm, "chain": chain}),
         P.item("source-reputation", "gov-v1", now, P.dumps(rep).encode(), {"reputation": rep}),
         P.item("belief-writer", "gov-v1", now, P.dumps(bel).encode(), {"beliefs": bel}),
     ]
