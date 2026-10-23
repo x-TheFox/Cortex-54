@@ -59,7 +59,6 @@ export const DoctrineSchema = z.object({
   execution: z.object({
     order_style: z.literal("passive_limit"),
     max_unfilled_pulses: z.number().int().positive(),
-    repeg_on_move_atr: z.number().positive(),
     exit_collar_bps: z.number().positive(),
     no_entry_last_minutes_of_session: z.number().int().nonnegative(),
     earnings_blackout_hours: z.number().int().nonnegative(),

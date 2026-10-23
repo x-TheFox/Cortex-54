@@ -305,3 +305,25 @@ interventions for the LIVE gate, like Discord ones. (4) **Live data:** the Comma
 100k/day. (5) **Discord cockpit:** the HUD shows a QuickChart equity line from new hourly equity samples (hot
 schema v4). `#agent-terminal` gets one compact message per pulse with that pulse's notable journal events.
 
+## ADR-035 — Spec gap closure: entry guards, earnings calendar, setup screeners, chain verification, shadow twin (2026-10-23)
+**Context:** A pass over the 45-page vision document found doctrine settings with no code behind them and spec
+features never built.
+**Decision:** (1) **Correlation guard** (`sizing.correlation_guard`): before an entry, Pearson correlation of
+daily log returns (60 days, aligned by UTC date, ≥20 shared days) against every position already held on that
+account; above 0.7 → validator rejection. (2) **72 h earnings blackout** (`execution.earnings_blackout_hours`):
+the equity job sends an earnings calendar (Nasdaq public calendar, full coverage, plus FMP free as a backup).
+The brain keeps it hot (schema v5). An equity entry with earnings inside the window is rejected, and so is any
+equity entry when the calendar is older than 4 days (fail closed, U6). (3) **Re-peg** (`repeg_on_move_atr`)
+is removed: the spec re-pegs only `IMMEDIATE` contracts and no strategy emits one, so the code would never run;
+unfilled entries are still cancelled after `max_unfilled_pulses`. (4) **Setup screeners:** research job
+`screeners` (14:45 UTC daily; crypto only on weekends) runs the pinned Stockbee momentum-burst and
+exhaustion-hammer screeners offline on Alpaca daily bars for the tradeable universe. Hits scoring ≥70 skip Tier 1
+(they are setups, not news) and queue for Tier 2. The kind `screener:<name>` becomes the reputation key, so the
+Governor learns which screener pays. Batches older than `staleness.screener_batch_hours` are refused.
+(5) **Chain verification** (spec §8.8): the daily Governor recomputes the entire journal hash chain (links,
+hashes, contiguous seq from GENESIS). A break posts to #alarms and journals `CHAIN_ALARM`. (6) **Shadow twin:**
+the Governor measures live-vs-paper fill divergence per contract (bps, signed against us) for the R2 gate
+(<15 bps); WAIT until LIVE trades.
+**Still open:** VCP/CANSLIM/COT/insider-cluster screeners (FMP-quota or data limits), macro event calendar
+(FOMC/CPI), implied-move extractor, IV-vs-RV routing, weekend crypto→Monday equity signals.
+

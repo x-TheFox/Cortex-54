@@ -25,6 +25,7 @@ import {
   PostmortemSchema,
   ReportCardSchema,
   ReputationSchema,
+  ScreenerCandidateSchema,
   WorldCandidateSchema,
 } from "../contracts/batch.ts";
 import type { Calibration } from "../contracts/calibration.ts";
@@ -68,6 +69,7 @@ import {
 import { dec, defaultTick, roundPrice, toCents } from "../lib/num.ts";
 import { sha256Hex } from "../lib/sha256.ts";
 import { type Band, evaluateBreaker } from "../risk/CircuitBreakerLadder.ts";
+import { correlationVeto } from "../risk/correlation.ts";
 import { type Arena, modeledPaperCostCents, roundTripFeeRate } from "../risk/fees.ts";
 import { type AccountView, type AssetView, validateEntry } from "../risk/PreTradeValidator.ts";
 import { effectiveRung, type RungName } from "../risk/rungs.ts";
@@ -78,6 +80,7 @@ import {
   baselineSignal,
   regimeProxyRiskOn,
 } from "../strategy/CryptoBreakoutBaseline.ts";
+import type { Bar } from "../strategy/indicators.ts";
 import { dueJobs, type WorkflowDispatcher } from "./dispatch.ts";
 import { getKV, one, type SqlLike, setKV } from "./store.ts";
 
@@ -1455,6 +1458,52 @@ ${postmortem}`,
     return r && typeof r.metric_value === "string" ? r.metric_value : null;
   }
 
+  /**
+   * Entry guards from the doctrine (ADR-035): 72 h earnings blackout for equities (fail closed when the calendar
+   * is stale) and the correlation guard against positions already held on this account.
+   */
+  private async entryGuards(
+    account: AccountId,
+    contract: DecisionContract,
+    now: number,
+  ): Promise<string | null> {
+    if (contract.arena === "EQUITIES") {
+      const asOf = Number(getKV(this.sql, "earnings_as_of") ?? 0);
+      if (now - asOf > EARNINGS_CALENDAR_MAX_AGE_MS) return "earnings calendar stale (fail closed)";
+      const today = utcDay(now);
+      const horizon = utcDay(now + this.d.execution.earnings_blackout_hours * 3_600_000);
+      const e = one<{ date: string }>(
+        this.sql,
+        "SELECT date FROM earnings WHERE symbol = ? AND date >= ? AND date <= ?",
+        contract.symbol,
+        today,
+        horizon,
+      );
+      if (e)
+        return `earnings on ${e.date} (inside the ${this.d.execution.earnings_blackout_hours} h blackout)`;
+    }
+    const held = this.positions(account)
+      .map((p) => p.symbol)
+      .filter((s) => s !== contract.symbol);
+    const m = this.deps.market;
+    if (held.length === 0 || !m) return null;
+    const g = this.d.sizing.correlation_guard;
+    const days = g.lookback_days + 10;
+    const all = [contract.symbol, ...held];
+    const crypto = all.filter(isCryptoSymbol);
+    const stocks = all.filter((s) => !isCryptoSymbol(s));
+    const [cb, sb] = await Promise.all([
+      crypto.length ? m.cryptoDailyBars(crypto, days, now) : Promise.resolve({} as Record<string, Bar[]>),
+      stocks.length ? m.stockDailyBars(stocks, days, now) : Promise.resolve({} as Record<string, Bar[]>),
+    ]);
+    const bars: Record<string, Bar[]> = { ...cb, ...sb };
+    const cand = bars[contract.symbol];
+    if (!cand) return null;
+    const heldBars = Object.fromEntries(held.filter((h) => bars[h]).map((h) => [h, bars[h] as Bar[]]));
+    const hit = correlationVeto(cand, heldBars, g.max_corr, now - g.lookback_days * 86_400_000);
+    return hit ? `correlated with ${hit.symbol} (ρ=${hit.corr} > ${g.max_corr})` : null;
+  }
+
   /** What a scar rule can see about an entry (ADR-033). Unknown facts never match a rule. */
   facts(
     arena: string,
@@ -2089,6 +2138,7 @@ ${postmortem}`,
     }
     if (b.job === "governor") return this.ingestGovernor(b, now);
     if (b.job === "options-lab") return this.ingestOptionsLab(b, now);
+    if (b.job === "screeners") return this.ingestScreeners(b, now);
     if (b.job === "world-intel" || b.posture === null) {
       const pulse = b.items.find((x) => x.skill_id === "gdelt-world-pulse")?.payload as
         | {
@@ -2174,6 +2224,26 @@ ${postmortem}`,
       },
       now,
     );
+    const cal = b.items.find((x) => x.skill_id === "earnings-calendar")?.payload as
+      | { events?: { symbol?: unknown; date?: unknown }[] }
+      | undefined;
+    if (cal && Array.isArray(cal.events)) {
+      this.sql.exec("DELETE FROM earnings");
+      for (const ev of cal.events.slice(0, 3000)) {
+        if (
+          typeof ev.symbol !== "string" ||
+          typeof ev.date !== "string" ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(ev.date)
+        )
+          continue;
+        this.sql.exec(
+          "INSERT OR REPLACE INTO earnings (symbol, date) VALUES (?, ?)",
+          ev.symbol.toUpperCase().slice(0, 12),
+          ev.date,
+        );
+      }
+      setKV(this.sql, "earnings_as_of", String(b.produced_at), now);
+    }
     await this.deps.notifier.post("briefs", postureCard(b, prev?.posture ?? null));
     await this.flushJournal();
     return { ok: true, message: `stored ${b.items.length} item(s); ${b.posture.arena} ${b.posture.posture}` };
@@ -2233,6 +2303,10 @@ ${postmortem}`,
         if (!r.success) continue;
         this.journal.enqueue("skill_fitness", { ...r.data }, now);
         counts.fitness++;
+      }
+      if (typeof p.alarm === "string" && p.alarm.length > 0) {
+        await this.deps.notifier.post("alarms", { content: p.alarm.slice(0, 1900) });
+        this.journal.append("SYSTEM", "CHAIN_ALARM", null, { chain: p.chain ?? null }, now);
       }
       const card = ReportCardSchema.safeParse(p.card);
       if (card.success && card.data.post) {
@@ -2325,6 +2399,44 @@ ${postmortem}`,
     this.journal.append("SYSTEM", "OPTIONS_LAB", null, counts, now);
     await this.flushJournal();
     return { ok: true, message: `options-lab: ${JSON.stringify(counts)}` };
+  }
+
+  /** Setup-screener hits (ADR-035) skip Tier 1 (they are setups, not news) and queue for Tier 2. */
+  private async ingestScreeners(b: Batch, now: number): Promise<{ ok: boolean; message: string }> {
+    if (now - b.produced_at > this.d.staleness.screener_batch_hours * 3_600_000) {
+      return { ok: false, message: "screener batch is stale" };
+    }
+    let queued = 0;
+    for (const item of b.items) {
+      const list = (item.payload as { candidates?: unknown }).candidates;
+      if (!Array.isArray(list)) continue;
+      for (const raw of list.slice(0, 50)) {
+        const r = ScreenerCandidateSchema.safeParse(raw);
+        if (!r.success) continue;
+        const c = r.data;
+        const id = `screener:${c.id}`;
+        if (!this.markSeen(id, now)) continue;
+        this.sql.exec(
+          "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 2, ?, ?, ?)",
+          id,
+          c.symbol,
+          JSON.stringify({
+            kind: `screener:${c.screener.replace(/^stockbee-/, "").replace(/-screener$/, "")}`,
+            headline: c.headline,
+            summary: `score ${c.score} · ${c.state} · entry ref ${c.entry_reference ?? "?"} · stop ref ${c.stop_reference ?? "?"}`,
+            symbols: [c.symbol],
+            source: c.screener,
+            url: null,
+            createdAt: b.produced_at,
+          }),
+          now,
+        );
+        queued++;
+      }
+    }
+    this.journal.append("SYSTEM", "SCREENER_INTAKE", null, { queued }, now);
+    await this.flushJournal();
+    return { ok: true, message: `queued ${queued} screener candidate(s) for Tier 2` };
   }
 
   /** Batch regime for an arena if it is within the doctrine staleness limit, else null (fail closed to proxy/none). */
@@ -2481,6 +2593,11 @@ ${postmortem}`,
         vetoes.map((r) => `${r.id}: ${r.rule}`),
         now,
       );
+      return false;
+    }
+    const guard = await this.entryGuards(account, contract, now);
+    if (guard) {
+      this.reject(account, contract, "VALIDATOR", [guard], now);
       return false;
     }
     const repWeight = this.reputationWeight(sourceKey);
@@ -3096,6 +3213,9 @@ ${postmortem}`,
 }
 
 // ---------------------------------------------------------------------- helpers
+
+/** An equity earnings calendar older than this blocks equity entries (fail closed, ADR-035). */
+const EARNINGS_CALENDAR_MAX_AGE_MS = 4 * 86_400_000;
 
 const TERMINAL_KINDS: Record<string, string> = {
   ENTRY_FACTS: "🎯",

@@ -92,3 +92,29 @@ def test_options_gate_and_summary():
     g = options_gate(ev)
     assert g[0]["status"] == "FAIL" and g[0]["value"] == 1
     assert "1 open · 1 closed" in options_summary(ev)
+
+
+def test_verify_chain_detects_edits_and_gaps():
+    import hashlib
+
+    rows, prev = [], M.GENESIS
+    for seq in range(1, 4):
+        r = {"seq": seq, "ts": seq * 10, "kind": "K", "payload_json": f'{{"n":{seq}}}', "prev_row_sha256": prev}
+        r["row_sha256"] = hashlib.sha256(f"{prev}|{seq}|{seq * 10}|K|{r['payload_json']}".encode()).hexdigest()
+        prev = r["row_sha256"]
+        rows.append(r)
+    assert M.verify_chain(rows)["ok"] and M.verify_chain(rows)["rows"] == 3
+    tampered = [dict(r) for r in rows]
+    tampered[1]["payload_json"] = '{"n":999}'
+    assert M.verify_chain(tampered) == {**M.verify_chain(tampered), "ok": False, "broken_at": 2, "why": "row hash mismatch"}
+    assert M.verify_chain([rows[0], rows[2]])["why"].startswith("gap")
+
+
+def test_twin_divergence_signs_against_us():
+    fills = [{"account": "PAPER", "contract": "k1", "role": "ENTRY", "qty": 1, "price": 100},
+             {"account": "LIVE", "contract": "k1", "role": "ENTRY", "qty": 1, "price": 100.1},
+             {"account": "PAPER", "contract": "k1", "role": "EXIT", "qty": 1, "price": 110},
+             {"account": "LIVE", "contract": "k1", "role": "EXIT", "qty": 1, "price": 109.89},
+             {"account": "PAPER", "contract": "k2", "role": "ENTRY", "qty": 1, "price": 50}]
+    t = M.twin_divergence(fills)
+    assert t["pairs"] == 2 and t["mean_bps"] == 10.0 and M.twin_divergence([])["mean_bps"] is None
