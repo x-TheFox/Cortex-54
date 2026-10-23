@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { ClefAnswer, ClefApi, ClefQuestion, ClefResult } from "../src/clef/ClefClient.ts";
 import type { DecisionContract } from "../src/contracts/decision-contract.ts";
 import type { Doctrine } from "../src/contracts/doctrine.ts";
-import { Brain } from "../src/cortex/Brain.ts";
+import { Brain, equityChartUrl, terminalLine } from "../src/cortex/Brain.ts";
 import type { WorkflowDispatcher } from "../src/cortex/dispatch.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
 import { type LlmProvider, LlmRouter } from "../src/court/llm.ts";
@@ -1222,5 +1222,36 @@ describe("memory: scar tissue, reputation, beliefs (ADR-033)", () => {
     expect(t.brain.reputationWeight(null)).toBe(1);
     expect(t.sql.exec("SELECT belief_id FROM beliefs")).toHaveLength(1);
     expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM beliefs").get()).toEqual({ n: 1 });
+  });
+});
+
+describe("cockpit (Phase 6)", () => {
+  it("samples equity hourly and charts it on the HUD", async () => {
+    const t = setup();
+    await t.brain.pulse();
+    t.advance(3_600_000);
+    await t.brain.pulse();
+    const s = t.brain.status();
+    expect(s.equity.PAPER?.length).toBe(2);
+    expect(equityChartUrl(s.equity.PAPER)).toMatch(/^https:\/\/quickchart\.io\/chart\?/);
+    expect(equityChartUrl([[1, 2]])).toBeNull();
+  });
+
+  it("streams notable journal events to #agent-terminal once per pulse", async () => {
+    const t = setup();
+    breakout(t);
+    await t.brain.pulse();
+    const term = t.notifier.sent.filter((m) => m.channel === "terminal");
+    expect(term).toHaveLength(1);
+    expect(term[0]?.msg.content).toContain("ENTRY_FACTS");
+    expect(
+      terminalLine({ ts: 0, account: "SYSTEM", kind: "PULSE", refId: null, payloadJson: "{}" }),
+    ).toBeNull();
+  });
+
+  it("login nonces are single use", () => {
+    const t = setup();
+    expect(t.brain.consumeOnce("login:n1")).toBe(true);
+    expect(t.brain.consumeOnce("login:n1")).toBe(false);
   });
 });

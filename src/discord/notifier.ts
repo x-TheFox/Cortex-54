@@ -8,7 +8,8 @@ export type ChannelKey =
   | "executions"
   | "alarms"
   | "world_intel"
-  | "governor";
+  | "governor"
+  | "terminal";
 
 export interface Embed {
   title?: string;
@@ -17,6 +18,7 @@ export interface Embed {
   fields?: { name: string; value: string; inline?: boolean }[];
   footer?: { text: string };
   timestamp?: string;
+  image?: { url: string };
 }
 
 export interface Button {
@@ -111,6 +113,7 @@ export function parseChannels(json: string | undefined): Partial<Record<ChannelK
       "alarms",
       "world_intel",
       "governor",
+      "terminal",
     ] as const) {
       const v = raw[k];
       if (typeof v === "string" && /^\d{5,25}$/.test(v)) out[k] = v;

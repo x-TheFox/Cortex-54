@@ -31,4 +31,8 @@ export interface Env {
   GITHUB_REPO?: string;
   /** Fine-grained token, this repo only, Actions: read and write. Absent → GitHub's own crons only. */
   GH_DISPATCH_TOKEN?: string;
+  /** HMAC key for web-terminal login links and session cookies (ADR-034). */
+  WEB_SESSION_SECRET?: string;
+  /** Static web terminal (public/). */
+  ASSETS?: Fetcher;
 }

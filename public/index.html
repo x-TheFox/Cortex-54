@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>CORTEX-54 Terminal</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">🧠 CORTEX-54</div>
+      <nav id="tabs" aria-label="Workspaces">
+        <button type="button" data-tab="deck" class="on">Command Deck</button>
+        <button type="button" data-tab="court">Court</button>
+        <button type="button" data-tab="memory">Memory Vault</button>
+        <button type="button" data-tab="options">Options Lab</button>
+      </nav>
+      <div id="pulse" class="muted">…</div>
+    </header>
+    <main>
+      <section id="signin" class="card hidden">
+        <h2>Signed out</h2>
+        <p>Run <code>/terminal</code> in Discord and open the link it gives you (single use, 10 minutes).</p>
+      </section>
+      <section id="deck" class="tab"></section>
+      <section id="court" class="tab hidden"></section>
+      <section id="memory" class="tab hidden"></section>
+      <section id="options" class="tab hidden"></section>
+    </main>
+    <div id="toast" class="toast hidden" role="status"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

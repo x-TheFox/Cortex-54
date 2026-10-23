@@ -34,6 +34,9 @@
   // Uses 1 of the account's 5 free cron slots; sentinel uses another.
   "triggers": { "crons": ["*/5 * * * *"] },
 
+  // Web terminal (Phase 6, ADR-034): static assets are served before the worker and are free; /api/* has no
+  // matching file, so it reaches the worker.
+  "assets": { "directory": "./public", "binding": "ASSETS" },
   "vars": {
     "CORTEX_ENV": "production",
     "CORTEX_DO_NAME": "CORTEX-54-PRIMARY",

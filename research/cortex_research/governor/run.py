@@ -205,7 +205,7 @@ def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict],
         p = jload(r["payload_json"], {}) or {}
         k = r["kind"]
         if k in ("KILL_SEEN", "COURT_REQUEST") or (k == "UNLOCK" and p.get("by") != "auto") or (k == "DIAL") or (
-            k == "MODE" and "discord:" in str(p.get("reason", ""))
+            k == "MODE" and ("discord:" in str(p.get("reason", "")) or "web:" in str(p.get("reason", "")))
         ) or (k == "FLATTEN" and "operator" in str(p.get("why", ""))):
             interventions.append(r["ts"])
     since = max([min(boots)] + interventions) if boots else now

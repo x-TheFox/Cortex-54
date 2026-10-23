@@ -46,4 +46,5 @@ export const CORTEX_COMMANDS = [
     description: "Convene the bull-vs-bear court on a symbol now (all risk gates still apply; PAPER only)",
     options: [{ type: 3, name: "symbol", description: "e.g. BTC/USD, ETH/USD, NVDA, SPY", required: true }],
   },
+  { name: "terminal", description: "Get a single-use link to the web terminal (expires in 10 minutes)" },
 ] as const;
