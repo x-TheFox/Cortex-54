@@ -15,7 +15,17 @@ import {
   TIER1_PROMPT_VERSION,
   type TriageItem,
 } from "../clef/triage.ts";
-import { type Batch, BatchSchema, WorldCandidateSchema } from "../contracts/batch.ts";
+import {
+  type Batch,
+  BatchSchema,
+  FitnessSchema,
+  GradeSchema,
+  PostmortemSchema,
+  ReportCardSchema,
+  ReputationSchema,
+  WorldCandidateSchema,
+} from "../contracts/batch.ts";
+import type { Calibration } from "../contracts/calibration.ts";
 import type { Constitution } from "../contracts/constitution.ts";
 import {
   contractViolations,
@@ -163,6 +173,8 @@ export interface BrainDeps {
   clef?: ClefApi | null;
   /** Free-tier LLM chains for the court (Tier 3). Null disables the court. */
   llm?: LlmRouter | null;
+  /** Governor-produced calibration maps (config/calibration.json). */
+  calibration?: Calibration | null;
 }
 
 export interface PulseReport {
@@ -414,6 +426,16 @@ export class Brain {
     // 4. Persist, report, schedule.
     report.flushed = await this.flushJournal();
     await this.updateHud().catch(() => undefined);
+    // Heartbeat stats for the day (reported in DAY_ROLL; the Governor's LIVE-gate heartbeat criterion).
+    const prevPulse = Number(getKV(this.sql, "last_pulse_at") ?? 0);
+    const gapS = prevPulse > 0 ? Math.round((started - prevPulse) / 1000) : 0;
+    setKV(this.sql, "day_pulses", String(Number(getKV(this.sql, "day_pulses") ?? 0) + 1), started);
+    setKV(
+      this.sql,
+      "day_max_gap_s",
+      String(Math.max(Number(getKV(this.sql, "day_max_gap_s") ?? 0), gapS)),
+      started,
+    );
     setKV(this.sql, "last_pulse_at", String(started), started);
     const exposed = ACCOUNTS.some((a) => this.positions(a).length > 0 || this.openOrders(a).length > 0);
     report.nextPulseSeconds = exposed
@@ -451,7 +473,31 @@ export class Brain {
     }
     if (getKV(this.sql, "anchor_day") !== day) {
       const head = this.journal.head();
-      this.journal.append("SYSTEM", "DAY_ROLL", null, { day, head }, now);
+      const pulses = Number(getKV(this.sql, "day_pulses") ?? 0);
+      const maxGap = Number(getKV(this.sql, "day_max_gap_s") ?? 0);
+      const equity = Object.fromEntries(
+        this.sql
+          .exec<AccountRow>("SELECT * FROM accounts")
+          .map((r) => [r.account, this.effectiveEquityCents(r)] as const),
+      );
+      // pulses / max_gap_s describe the day that just ended (null on the very first roll).
+      const prev = getKV(this.sql, "anchor_day");
+      this.journal.append(
+        "SYSTEM",
+        "DAY_ROLL",
+        null,
+        {
+          day,
+          head,
+          prev_day: prev,
+          pulses: prev ? pulses : null,
+          max_gap_s: prev ? maxGap : null,
+          equity_cents: equity,
+        },
+        now,
+      );
+      setKV(this.sql, "day_pulses", "0", now);
+      setKV(this.sql, "day_max_gap_s", "0", now);
       setKV(this.sql, "anchor_day", day, now);
       // External anchor for the hash chain (U7). Fire-and-forget; failure is retried tomorrow by design.
       void this.deps.notifier.post("briefs", {
@@ -1693,7 +1739,12 @@ ${postmortem}`,
       await close("❌ Clef synthesis incomplete", false);
       return 0;
     }
-    const calibrated = calibrate(synth.winProb, this.resolvedCourtOutcomes(), this.d);
+    const calibrated = calibrate(
+      synth.winProb,
+      this.resolvedCourtOutcomes(),
+      this.d,
+      this.deps.calibration?.maps["court.win_prob"] ?? null,
+    );
     session.synth = { ...synth, calibrated };
     const viaAccount = (this.d.strategies.find((s) => s.arena === e.arena && s.status === "ACTIVE")
       ?.accounts[0] ?? "PAPER") as AccountId;
@@ -1898,6 +1949,7 @@ ${postmortem}`,
         now,
       );
     }
+    if (b.job === "governor") return this.ingestGovernor(b, now);
     if (b.job === "world-intel" || b.posture === null) {
       const pulse = b.items.find((x) => x.skill_id === "gdelt-world-pulse")?.payload as
         | {
@@ -1986,6 +2038,58 @@ ${postmortem}`,
     await this.deps.notifier.post("briefs", postureCard(b, prev?.posture ?? null));
     await this.flushJournal();
     return { ok: true, message: `stored ${b.items.length} item(s); ${b.posture.arena} ${b.posture.posture}` };
+  }
+
+  /** Governor results (Phase 4): append-only grades/postmortems, upserted reputation/fitness, optional report card. */
+  private async ingestGovernor(b: Batch, now: number): Promise<{ ok: boolean; message: string }> {
+    const counts = { grades: 0, postmortems: 0, reputation: 0, fitness: 0, cards: 0 };
+    const list = (p: Record<string, unknown>, k: string) =>
+      Array.isArray(p[k]) ? (p[k] as unknown[]).slice(0, 2000) : [];
+    for (const item of b.items) {
+      const p = item.payload;
+      for (const g of list(p, "grades")) {
+        const r = GradeSchema.safeParse(g);
+        if (!r.success) continue;
+        this.journal.enqueue("rejection_grades", { ...r.data }, now);
+        counts.grades++;
+      }
+      for (const m of list(p, "postmortems")) {
+        const r = PostmortemSchema.safeParse(m);
+        if (!r.success || !this.markSeen(`pm:${r.data.contract_id}:${r.data.account}`, now)) continue;
+        this.journal.enqueue("postmortems", { created_at: now, author: "governor", ...r.data }, now);
+        counts.postmortems++;
+      }
+      for (const s of list(p, "reputation")) {
+        const r = ReputationSchema.safeParse(s);
+        if (!r.success) continue;
+        this.journal.enqueue("source_reputation", { ...r.data, updated_at: now }, now);
+        counts.reputation++;
+      }
+      for (const f of list(p, "fitness")) {
+        const r = FitnessSchema.safeParse(f);
+        if (!r.success) continue;
+        this.journal.enqueue("skill_fitness", { ...r.data }, now);
+        counts.fitness++;
+      }
+      const card = ReportCardSchema.safeParse(p.card);
+      if (card.success && card.data.post) {
+        await this.deps.notifier.post("governor", {
+          embeds: [
+            {
+              title: card.data.title,
+              color: COLORS.cyan,
+              fields: card.data.sections.map((s) => ({ name: s.name, value: s.value.slice(0, 1024) })),
+              footer: { text: b.run_url ? "Governor · GitHub Actions" : "Governor" },
+              timestamp: new Date(b.produced_at).toISOString(),
+            },
+          ],
+        });
+        counts.cards++;
+      }
+    }
+    this.journal.append("SYSTEM", "GOVERNOR", null, counts, now);
+    await this.flushJournal();
+    return { ok: true, message: `governor: ${JSON.stringify(counts)}` };
   }
 
   /** Batch regime for an arena if it is within the doctrine staleness limit, else null (fail closed to proxy/none). */

@@ -60,6 +60,8 @@ Remaining for the Phase 3 exit: ≥10 COURT contracts produced and executed/decl
 - `governor.yml` weekly: report card, Monte Carlo, BH-FDR, rejection grading → PRs to config.
 - Beliefs (D1) with decay; scar tissue via PR.
 - **Exit:** first Governor PR merged by the operator; report card posted.
+- Status 2026-10-22: governor.yml live (grading, postmortems, fitness, LIVE-gate tracker, report card; ADR-030).
+  Open: source reputation, beliefs, scar tissue; first calibration PR waits for ≥50 outcomes.
 
 ## Phase 5 — Options shadow lab (parallel with 4)
 - Greeks/IV, spread structurer, PMCC rubric (ts-hot); options chain via Alpaca indicative feed.

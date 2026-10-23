@@ -101,6 +101,53 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
   }
 }
 
+/**
+ * Read-only, HMAC-signed D1 export for the Governor (Phase 4). Paginates by rowid; whitelisted tables only.
+ * Keeps the GitHub side free of Cloudflare credentials.
+ */
+const EXPORT_TABLES = new Set([
+  "journal",
+  "decision_contracts",
+  "fills",
+  "orders_log",
+  "rejections",
+  "rejection_grades",
+  "triage_log",
+  "llm_calls",
+  "postmortems",
+]);
+
+async function governorExport(request: Request, env: Env): Promise<Response> {
+  if (!env.INGEST_HMAC_SECRET) return new Response("not configured", { status: 503 });
+  const body = await request.text();
+  if (body.length > 2_000) return new Response("too large", { status: 413 });
+  const ok = await verifySignedBody(
+    env.INGEST_HMAC_SECRET,
+    request.headers.get("x-cortex-signature"),
+    request.headers.get("x-cortex-timestamp"),
+    body,
+  );
+  if (!ok) return new Response("bad signature", { status: 401 });
+  let q: { table?: unknown; after?: unknown; limit?: unknown };
+  try {
+    q = JSON.parse(body) as typeof q;
+  } catch {
+    return new Response("bad json", { status: 400 });
+  }
+  const table = String(q.table ?? "");
+  if (!EXPORT_TABLES.has(table)) return new Response("table not allowed", { status: 400 });
+  const after = Number.isInteger(q.after) ? (q.after as number) : 0;
+  const limit = Math.min(200, Math.max(1, Number.isInteger(q.limit) ? (q.limit as number) : 100));
+  const res = await env.DB.prepare(
+    `SELECT rowid AS _rid, * FROM ${table} WHERE rowid > ? ORDER BY rowid LIMIT ?`,
+  )
+    .bind(after, limit)
+    .all();
+  const rows = res.results ?? [];
+  const last = rows.at(-1) as { _rid?: number } | undefined;
+  return Response.json({ rows, next: last?._rid ?? null });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -132,6 +179,10 @@ export default {
       }
       const receipt = await brain(env).ingest(parsed);
       return Response.json(receipt, { status: receipt.ok ? 200 : 422 });
+    }
+
+    if (request.method === "POST" && url.pathname === "/governor/export") {
+      return governorExport(request, env);
     }
 
     if (request.method === "POST" && url.pathname === "/discord/interactions") {

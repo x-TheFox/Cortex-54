@@ -1,7 +1,14 @@
 import type { Fetcher } from "../broker/AlpacaClient.ts";
 
 /** Channels the brain writes to (docs/ARCHITECTURE.md §10). IDs come from the DISCORD_CHANNELS var. */
-export type ChannelKey = "command_center" | "briefs" | "court" | "executions" | "alarms" | "world_intel";
+export type ChannelKey =
+  | "command_center"
+  | "briefs"
+  | "court"
+  | "executions"
+  | "alarms"
+  | "world_intel"
+  | "governor";
 
 export interface Embed {
   title?: string;
@@ -96,7 +103,15 @@ export function parseChannels(json: string | undefined): Partial<Record<ChannelK
   try {
     const raw = JSON.parse(json) as Record<string, unknown>;
     const out: Partial<Record<ChannelKey, string>> = {};
-    for (const k of ["command_center", "briefs", "court", "executions", "alarms", "world_intel"] as const) {
+    for (const k of [
+      "command_center",
+      "briefs",
+      "court",
+      "executions",
+      "alarms",
+      "world_intel",
+      "governor",
+    ] as const) {
       const v = raw[k];
       if (typeof v === "string" && /^\d{5,25}$/.test(v)) out[k] = v;
     }
