@@ -104,6 +104,41 @@ describe("bull checks (code wins)", () => {
   });
 });
 
+describe("Tier 2 exception bar (ADR-039)", () => {
+  const ans = (lf: number, ra: number) => ({
+    model: "clef",
+    usage: {},
+    answers: {
+      long_favored: { type: "noul" as const, noul: lf },
+      regime_alignment: { type: "noul" as const, noul: ra },
+      bear_lethality: { type: "noul" as const, noul: 0.1 },
+      setup_class: {
+        type: "choice" as const,
+        choice: "catalyst_continuation",
+        probabilities: {},
+        confidence: 0.8,
+      },
+      structural_quality: {
+        type: "score" as const,
+        score: 3,
+        probabilities: {},
+        legend: [],
+        confidence: 0.8,
+      },
+    },
+  });
+  it("waives regime alignment but demands a higher long_favored for exception candidates", () => {
+    const normal = interpretTier2(ans(0.8, 0.2) as never, d);
+    expect(normal.reasons.join(" ")).toContain("regime_alignment");
+    expect(interpretTier2(ans(0.8, 0.2) as never, d, { exception: true }).reasons.join(" ")).toContain(
+      "long_favored 0.80 < 0.85",
+    );
+    expect(interpretTier2(ans(0.9, 0.2) as never, d, { exception: true }).reasons.join(" ")).not.toContain(
+      "regime_alignment",
+    );
+  });
+});
+
 describe("calibration and synthesis", () => {
   it("shrinks hard toward 0.5 during warm-up and trusts after enough outcomes", () => {
     expect(calibrate(0.7, 0, d)).toBeCloseTo(0.5 + 0.2 * 0.3, 9);

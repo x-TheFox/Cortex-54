@@ -118,3 +118,15 @@ def test_twin_divergence_signs_against_us():
              {"account": "PAPER", "contract": "k2", "role": "ENTRY", "qty": 1, "price": 50}]
     t = M.twin_divergence(fills)
     assert t["pairs"] == 2 and t["mean_bps"] == 10.0 and M.twin_divergence([])["mean_bps"] is None
+
+
+def test_gate_cost_grades_regime_refusals():
+    from cortex_research.governor.run import gate_cost
+
+    rej = [{"id": 1, "reason_codes": '["equity posture REDUCE_ONLY"]'}, {"id": 2, "reason_codes": '["crypto regime gate closed (score 30)"]'},
+           {"id": 3, "reason_codes": '["already held"]'}]
+    grades = [{"rejection_id": 1, "horizon": "72h", "outcome_r": 1.5}, {"rejection_id": 2, "horizon": "72h", "outcome_r": -1.0},
+              {"rejection_id": 3, "horizon": "72h", "outcome_r": 3.0}]
+    out = gate_cost(rej, grades)
+    assert "2 graded" in out and "avg R +0.25" in out and "1 would have won" in out
+    assert "none graded" in gate_cost(rej, [])

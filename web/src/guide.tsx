@@ -156,7 +156,8 @@ const STEPS: Step[] = [
     page: "STS",
     title: "STS: market mood and system health",
     body: [
-      "Regime is the robot's read of the market's mood. When stock markets look dangerous (REDUCE_ONLY), it won't buy stocks at all. That rule protects it from buying while prices keep falling.",
+      "Regime is the robot's read of the market's mood. When stock markets look shaky (REDUCE_ONLY), it normally doesn't buy stocks, because buying while prices keep falling is how robots lose money.",
+      "The exception: truly huge news (rated near the top of the scale by two AI checks and then the court) can still be traded, at half size and only one at a time. In the danger posture (CASH_PRIORITY) or when its data is out of date, it buys nothing.",
       "Below that are today's free-service usage and the diary's status.",
     ],
   },

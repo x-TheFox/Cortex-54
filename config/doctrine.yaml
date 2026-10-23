@@ -176,6 +176,17 @@ llm_routing:
 regime_gates:
   crypto_composite_min_for_longs: 40
   equity_postures_allowing_entries: [NEW_ENTRY_ALLOWED]
+  # ADR-039: an exceptional catalyst may still trade against a closed gate, smaller and judged harder.
+  # Never in CASH_PRIORITY, never on stale regime data (fail closed, U6), never more than one at a time.
+  exception_lane:
+    enabled: true
+    equity_postures: [REDUCE_ONLY]
+    crypto_composite_floor: 25
+    min_tier1_material: 0.85
+    min_tier1_escalate: 2.2
+    min_tier2_long_favored: 0.85
+    size_multiplier: 0.5
+    max_concurrent: 1
 
 strategies:
   - id: CRYPTO_BREAKOUT_BASELINE_V1

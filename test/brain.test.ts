@@ -664,7 +664,7 @@ describe("Tier 1 triage (Phase 3)", () => {
     expect(t.sql.exec("SELECT candidate_id FROM triage_queue")).toHaveLength(0);
     expect(
       t.d1.db.prepare("SELECT stage, reason_codes FROM rejections WHERE candidate_id = 'news:1'").get(),
-    ).toEqual({ stage: "TIER0", reason_codes: '["crypto regime gate closed"]' });
+    ).toEqual({ stage: "TIER0", reason_codes: '["crypto regime gate closed (stale)"]' });
     expect(clef.calls.every((c) => c.model === "clef-flash")).toBe(true);
     expect(t.notifier.sent.filter((m) => m.channel === "world_intel")).toHaveLength(1);
     expect(t.d1.db.prepare("SELECT tier, model FROM triage_log").get()).toEqual({
@@ -1412,5 +1412,101 @@ describe("fresh start (ADR-038)", () => {
     // the next pulse re-baselines the activity cursor and works normally
     const p = await t.brain.pulse();
     expect(p.accounts.PAPER?.ok).toBe(true);
+  });
+});
+
+describe("exception lane (ADR-039)", () => {
+  const news = (id: string) => ({
+    id,
+    createdAt: T0 - 5 * 60_000,
+    headline: `Headline ${id}`,
+    summary: "s",
+    symbols: ["BTCUSD"],
+    source: "benzinga",
+    url: null,
+  });
+  const cryptoBatch = (score: number) => ({
+    schema_version: 1,
+    job: "crypto-regime",
+    produced_at: T0,
+    run_url: null,
+    items: [
+      {
+        skill_id: "crypto-regime-analyzer",
+        version: "x",
+        as_of: T0,
+        inputs_sha256: "a".repeat(64),
+        payload: { composite: { score } },
+      },
+    ],
+    posture: {
+      arena: "CRYPTO",
+      posture: "REDUCE_ONLY",
+      score,
+      ceiling: null,
+      confidence: null,
+      summary: "weak",
+    },
+  });
+  const stage = (t: ReturnType<typeof setup>, id: string) =>
+    t.d1.db
+      .prepare("SELECT stage, reason_codes, hypothetical FROM rejections WHERE candidate_id = ?")
+      .get(id) as { stage: string; reason_codes: string; hypothetical: string } | undefined;
+
+  it("lets an exceptional catalyst through a closed crypto gate to Tier 2; ordinary ones are refused but gradeable", async () => {
+    const clef = new FakeClef(
+      (h) => (h === "Headline 1" ? 0.92 : 0.6),
+      (h) => (h === "Headline 1" ? 2.6 : 1.4),
+    );
+    const t = setup({ clef });
+    t.market.set("BTC/USD", 100, 100.02);
+    expect((await t.brain.ingestBatch(cryptoBatch(30))).ok).toBe(true);
+    t.market.news.push(news("1"));
+    await t.brain.pulse();
+    await t.brain.flushJournal();
+    // exceptional: not refused at Tier 0, went on to Clef 27B (this Tier 1 fake can't answer Tier 2 itself)
+    expect(clef.calls.some((c) => c.model === "clef")).toBe(true);
+    expect(stage(t, "news:1")?.stage).not.toBe("TIER0");
+    // ordinary (promoted by Tier 1 but not exceptional): refused at Tier 0 with a gradeable bid/ATR hypothetical
+    const u = setup({
+      clef: new FakeClef(
+        () => 0.6,
+        () => 1.4,
+      ),
+    });
+    u.market.set("BTC/USD", 100, 100.02);
+    await u.brain.ingestBatch(cryptoBatch(30));
+    u.market.news.push(news("2"));
+    await u.brain.pulse();
+    await u.brain.flushJournal();
+    const r2 = stage(u, "news:2");
+    expect(r2?.stage).toBe("TIER0");
+    expect(r2?.reason_codes).toContain("crypto regime gate closed (score 30)");
+    expect(JSON.parse(r2?.hypothetical ?? "{}")).toMatchObject({ bid: 100, gate: true });
+  });
+
+  it("never opens below the crypto floor or on stale data", async () => {
+    const clef = new FakeClef(
+      () => 0.95,
+      () => 2.9,
+    );
+    const t = setup({ clef });
+    t.market.set("BTC/USD", 100, 100.02);
+    await t.brain.ingestBatch(cryptoBatch(20));
+    t.market.news.push(news("1"));
+    await t.brain.pulse();
+    await t.brain.flushJournal();
+    expect(stage(t, "news:1")?.reason_codes).toContain("score 20");
+    const t2 = setup({
+      clef: new FakeClef(
+        () => 0.95,
+        () => 2.9,
+      ),
+    });
+    t2.market.set("BTC/USD", 100, 100.02);
+    t2.market.news.push(news("9"));
+    await t2.brain.pulse();
+    await t2.brain.flushJournal();
+    expect(stage(t2, "news:9")?.reason_codes).toContain("stale");
   });
 });

@@ -165,7 +165,11 @@ export function buildCourtContract(i: {
   const cited = new Set(bull.receipts);
   // The catalyst and its source always travel with the contract (Governor attribution, scar facts — ADR-033).
   const receipts = e.receipts.filter(
-    (r) => cited.has(r.evidence_id) || r.evidence_id === "catalyst" || r.evidence_id === "catalyst_source",
+    (r) =>
+      cited.has(r.evidence_id) ||
+      r.evidence_id === "catalyst" ||
+      r.evidence_id === "catalyst_source" ||
+      r.evidence_id === "regime_exception",
   );
   const notional = 18;
   const entryFee = legFeeRate(e.arena, "buy", "maker", notional, i.d);

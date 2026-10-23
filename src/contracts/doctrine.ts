@@ -128,6 +128,16 @@ export const DoctrineSchema = z.object({
   regime_gates: z.object({
     crypto_composite_min_for_longs: z.number().min(0).max(100),
     equity_postures_allowing_entries: z.array(z.string()),
+    exception_lane: z.object({
+      enabled: z.boolean(),
+      equity_postures: z.array(z.enum(["REDUCE_ONLY"])),
+      crypto_composite_floor: z.number().min(0).max(100),
+      min_tier1_material: Fraction,
+      min_tier1_escalate: z.number().min(0).max(3),
+      min_tier2_long_favored: Fraction,
+      size_multiplier: z.number().gt(0).max(1), // can only shrink a position
+      max_concurrent: z.number().int().min(0).max(3),
+    }),
   }),
   strategies: z.array(
     z.object({

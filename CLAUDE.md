@@ -387,5 +387,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-23 13:18 UTC: fresh start (ADR-038). Old paper keys had returned 401 since 12:59; the operator's new
   paper account ($54.00, no history) replaced them everywhere and `/admin/reset` cleared PAPER's hot state.
   The 7-day and 30-day autonomous clocks restart from this RESET.
+- 2026-10-23: ADR-039 exception lane: exceptional catalysts (Tier 1 ≥ 0.85 / 2.2, Tier 2 ≥ 0.85) may trade through a
+  REDUCE_ONLY gate at half size, one at a time; gate refusals are now graded; Tier 2 is one attempt per candidate.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

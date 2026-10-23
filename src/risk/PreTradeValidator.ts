@@ -46,6 +46,7 @@ export interface ValidateInput {
   market: MarketView;
   asset: AssetView;
   reputationWeight: number;
+  regimeMultiplier?: number;
   now: number;
 }
 
@@ -130,6 +131,7 @@ export function validateEntry(i: ValidateInput, d: Doctrine, c: Constitution): V
       pWin: k.win_prob_used,
       bearLethality: k.bear_lethality,
       reputationWeight: i.reputationWeight,
+      regimeMultiplier: i.regimeMultiplier ?? 1,
       breakerMultiplier: a.breakerMultiplier,
       entry: entryPrice,
       stop,

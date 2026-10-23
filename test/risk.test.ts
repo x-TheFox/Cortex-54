@@ -28,6 +28,17 @@ const base: SizingInput = {
 };
 
 describe("PositionSizer", () => {
+  it("the exception-lane multiplier only ever shrinks risk", () => {
+    const full = sizePosition(base, d);
+    const half = sizePosition({ ...base, regimeMultiplier: 0.5 }, d);
+    const over = sizePosition({ ...base, regimeMultiplier: 3 }, d);
+    expect(full.ok && half.ok && over.ok).toBe(true);
+    if (full.ok && half.ok && over.ok) {
+      expect(half.rEff).toBeCloseTo(full.rEff / 2, 12);
+      expect(over.rEff).toBeCloseTo(full.rEff, 12);
+    }
+  });
+
   it("caps effective risk at the rung even with a top reputation weight", () => {
     const r = sizePosition(
       { ...base, conviction: 10, bearLethality: 0, pWin: 0.9, reputationWeight: 1.2 },

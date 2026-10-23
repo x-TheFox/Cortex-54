@@ -40,6 +40,8 @@ export interface Evidence {
   world: Record<string, unknown> | null;
   catalyst: Catalyst;
   portfolio: { held: string[] };
+  /** ADR-039: true when this catalyst trades through the exception lane against a closed regime gate. */
+  regimeException: boolean;
   /** Operator-merged scar lessons and decayed Governor beliefs (data, not instructions). ADR-033. */
   memory: { lessons: string[]; beliefs: string[] };
   receipts: Receipt[];
@@ -76,6 +78,7 @@ export function buildEvidence(i: {
   catalyst: Catalyst;
   held: string[];
   memory?: { lessons: string[]; beliefs: string[] };
+  regimeException?: boolean;
 }): Evidence | null {
   const closes = i.bars.map((b) => b.c);
   const a = atr(i.bars, 14);
@@ -161,6 +164,17 @@ export function buildEvidence(i: {
       metric_value: reputationKey(i.catalyst.kind, i.catalyst.source),
       as_of: i.now,
     },
+    ...(i.regimeException
+      ? [
+          {
+            evidence_id: "regime_exception",
+            source_skill: "exception-lane",
+            metric: "regime_exception",
+            metric_value: "exceptional catalyst against a closed regime gate (half size, ADR-039)",
+            as_of: i.now,
+          },
+        ]
+      : []),
   ];
   return {
     symbol: i.symbol,
@@ -173,6 +187,7 @@ export function buildEvidence(i: {
     catalyst: i.catalyst,
     portfolio: { held: i.held },
     memory: i.memory ?? { lessons: [], beliefs: [] },
+    regimeException: i.regimeException ?? false,
     receipts,
   };
 }
