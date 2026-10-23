@@ -361,3 +361,15 @@ command runner as slash commands and the web. (5) The web terminal has an in-pan
 spotlight walkthrough of every part of the cockpit in plain English for someone new to trading, offered once on
 first visit.
 
+## ADR-038 — Operator fresh start on a new broker account (2026-10-23)
+**Context:** The old paper keys began returning 401 at 12:59 UTC (the account was replaced). The operator supplied
+a new paper account ($54.00, no history) and asked to reset everything and start fresh.
+**Decision:** `Brain.resetAccount(account)` behind the HMAC-signed `POST /admin/reset` (same secret as ingest; never
+exposed in Discord or the web). It refuses unless the broker is flat with no open orders. It then wipes that
+account's hot trading state (positions, orders, reservations, exits, settlement lots, seen activities, equity
+history, activity cursor) and re-creates the account row from the doctrine (HWM, breaker, lock, mode, modeled
+costs). The next pulse re-baselines the activity cursor. The journal is append-only (U7), so it is not wiped: it
+records `RESET`, and the Governor counts RESET as an intervention, which restarts the 30-day autonomous clock.
+Market data, budgets, memory and regime are kept. Keys rotate in four places: cortex secrets, sentinel secrets,
+GitHub secrets, local `.dev.vars` (RUNBOOK C).
+
