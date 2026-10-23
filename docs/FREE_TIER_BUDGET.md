@@ -53,6 +53,9 @@ one request per graded symbol per run (free data plan, 200/min). The options lab
 underlying (≤9 underlyings) plus one snapshot request per 100 open legs, twice per weekday: ~120 requests/day,
 spread over a minute, under the 200/min cap.
 
+The batch dispatcher (ADR-032) adds ~35 GitHub API calls/day from the brain (one subrequest each, inside the pulse's
+existing budget). GitHub allows 5,000 requests/hour per token.
+
 If the repo ever goes private: 2,000 min/month free still covers this (~1,700 min/month projected).
 
 ## LLM providers (Tier 3) — all $0, all volatile (3p)

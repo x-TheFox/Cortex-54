@@ -58,6 +58,14 @@ GitHub: secrets `SENTINEL_TICK_SECRET`, `INGEST_HMAC_SECRET`, `FMP_API_KEY`, `FR
 EDGAR needs secret `SEC_USER_AGENT` = `"<name> <contact email>"` (SEC policy); without it the world job skips EDGAR.
 Local dry run: `cd research && UPSTREAM_DIR=<checkout> uv run python -m cortex_research.run crypto --dry-run`.
 
+**Batch dispatcher token (ADR-032).** GitHub drops most free scheduled runs, so the brain starts the batch jobs
+itself once it has a token:
+1. GitHub → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate.
+2. Repository access: **Only select repositories** → `x-TheFox/Cortex-54`. Permissions → Repository →
+   **Actions: Read and write** (Metadata: read is added automatically). Nothing else. Expiry: up to 1 year.
+3. `pnpm wrangler secret put GH_DISPATCH_TOKEN` and paste it. The next pulse dispatches; each run appears in
+   Actions as `research <job>` and in the journal as `DISPATCH`. Revoke the token to fall back to GitHub's crons.
+
 ## B. Daily operator glance (Discord)
 - `command-center`: rung, dial, breaker band, budget mode, last pulse age.
 - `alarms-and-watchdog` should be quiet. Anything there is actionable.

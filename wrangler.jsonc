@@ -37,6 +37,8 @@
   "vars": {
     "CORTEX_ENV": "production",
     "CORTEX_DO_NAME": "CORTEX-54-PRIMARY",
+    // Batch workflows the brain dispatches on schedule once the GH_DISPATCH_TOKEN secret exists (ADR-032).
+    "GITHUB_REPO": "x-TheFox/Cortex-54",
     // Discord channel ids (not secret): command_center, briefs, court, executions, alarms
     "DISCORD_CHANNELS": "{\"command_center\":\"1562933931324477455\",\"briefs\":\"1562933933849706556\",\"court\":\"1562933936299184240\",\"executions\":\"1562933938895323270\",\"world_intel\":\"1562933941147664424\",\"governor\":\"1562933943559389275\",\"alarms\":\"1562933946407321770\",\"terminal\":\"1562933948521123940\"}"
   }

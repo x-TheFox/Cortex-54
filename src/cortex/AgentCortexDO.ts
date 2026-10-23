@@ -15,6 +15,7 @@ import {
 } from "../generated/config.ts";
 import type { AccountId } from "../lib/ids.ts";
 import { Brain, type StatusView } from "./Brain.ts";
+import { GitHubDispatcher } from "./dispatch.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "./hot-schema.ts";
 import { getKV, type Row, type SqlLike, type SqlValue } from "./store.ts";
 
@@ -81,6 +82,10 @@ export class AgentCortexDO extends DurableObject<Env> {
       clef: new WorkersAiClef(env.AI),
       llm: new LlmRouter(llmProviders(env), DOCTRINE),
       calibration: CALIBRATION,
+      dispatcher:
+        env.GITHUB_REPO && env.GH_DISPATCH_TOKEN
+          ? new GitHubDispatcher(env.GITHUB_REPO, env.GH_DISPATCH_TOKEN, guard)
+          : null,
       now: () => Date.now(),
     });
 

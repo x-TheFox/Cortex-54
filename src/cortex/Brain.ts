@@ -75,6 +75,7 @@ import {
   baselineSignal,
   regimeProxyRiskOn,
 } from "../strategy/CryptoBreakoutBaseline.ts";
+import { dueJobs, type WorkflowDispatcher } from "./dispatch.ts";
 import { getKV, one, type SqlLike, setKV } from "./store.ts";
 
 export const ACCOUNTS: AccountId[] = ["PAPER", "LIVE"];
@@ -176,6 +177,8 @@ export interface BrainDeps {
   llm?: LlmRouter | null;
   /** Governor-produced calibration maps (config/calibration.json). */
   calibration?: Calibration | null;
+  /** Starts the GitHub batch workflows on schedule (ADR-032). Null leaves scheduling to GitHub's own crons. */
+  dispatcher?: WorkflowDispatcher | null;
 }
 
 export interface PulseReport {
@@ -423,6 +426,7 @@ export class Brain {
     }
 
     await this.checkBatchStaleness(started).catch(() => undefined);
+    await this.dispatchDue(started).catch(() => undefined);
 
     // 4. Persist, report, schedule.
     report.flushed = await this.flushJournal();
@@ -450,6 +454,32 @@ export class Brain {
     this.budget.add("do_rows_written", this.sql.stats.rowsWritten - rowsBefore.rowsWritten, ended);
     this.budget.add("do_rows_read", this.sql.stats.rowsRead - rowsBefore.rowsRead, ended);
     return report;
+  }
+
+  /** Start any batch workflow whose slot came due in the last 20 min (ADR-032). Never blocks trading. */
+  private async dispatchDue(now: number): Promise<number> {
+    const dispatcher = this.deps.dispatcher;
+    if (!dispatcher) return 0;
+    let last: Record<string, number> = {};
+    try {
+      last = JSON.parse(getKV(this.sql, "dispatch_last") ?? "{}") as Record<string, number>;
+    } catch {
+      last = {};
+    }
+    let n = 0;
+    for (const { job, slot } of dueJobs(now, last)) {
+      try {
+        await dispatcher.dispatch(job.workflow, job.inputs);
+        last[job.key] = slot;
+        setKV(this.sql, "dispatch_last", JSON.stringify(last), now);
+        this.journal.append("SYSTEM", "DISPATCH", null, { job: job.key, workflow: job.workflow, slot }, now);
+        n++;
+      } catch (e) {
+        if (e instanceof SubrequestBudgetExceeded) break;
+        await this.alertOnce("dispatch", `⚠️ batch dispatch failed (${job.key}): ${errText(e).slice(0, 200)}`);
+      }
+    }
+    return n;
   }
 
   private async readKill(): Promise<KillState> {

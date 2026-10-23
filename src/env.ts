@@ -27,4 +27,8 @@ export interface Env {
   GROQ_API_KEY?: string;
   NVIDIA_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
+  /** "owner/name" of this repo; the brain dispatches its batch workflows there (ADR-032). */
+  GITHUB_REPO?: string;
+  /** Fine-grained token, this repo only, Actions: read and write. Absent → GitHub's own crons only. */
+  GH_DISPATCH_TOKEN?: string;
 }

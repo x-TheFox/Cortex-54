@@ -65,6 +65,7 @@ If you are about to write code that weakens any of these, stop and ask the opera
 ┌──────────── Cloudflare Workers FREE ─────────────────────────┴───────────────────────────────┐
 │ worker `cortex` (src/index.ts) — fetch router (≤10 ms CPU): Discord interactions, ingest,     │
 │   health, web API. Cron */5 self-heal; the DO also self-arms its alarm (ADR-021 revised).     │
+│   The pulse also dispatches the GitHub batch workflows on schedule (ADR-032).                │
 │                                                                                               │
 │   AgentCortexDO "CORTEX-54-PRIMARY" (SQLite-backed Durable Object, the only brain)            │
 │     • alarm-driven PULSE (60 s when exposed/in-session, 300 s when flat) — NO always-on       │
@@ -362,7 +363,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-22: Phase 5 options shadow lab built (branch `phase-5-options-lab`, ADR-031): research.yml
   job=options, virtual D1 ledger `options_shadow` (migration 0003 applied), three SHADOW strategies, staskh
   Black-Scholes + PMCC rubric ported (NOTICE.md). Deployed; first opens wait for market hours.
-- GitHub scheduled runs had not fired at all as of 23:43 UTC (manual dispatch works). The batch layer depends
-  on them; a Cloudflare-cron dispatcher fallback needs a fine-grained token from the operator.
+- 2026-10-23: PRs #8 and #9 merged. GitHub schedules began firing ~00:07 UTC but dropped most slots →
+  ADR-032: the brain dispatches the batch workflows each pulse (dormant until the `GH_DISPATCH_TOKEN` cortex
+  secret exists; RUNBOOK A2). GitHub crons stay as a deduped backup.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

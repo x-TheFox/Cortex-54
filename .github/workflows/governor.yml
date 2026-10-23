@@ -1,4 +1,5 @@
 name: governor
+run-name: governor ${{ github.event_name == 'workflow_dispatch' && 'dispatch' || github.event.schedule }}
 
 # Phase 4 learning loop (docs/ARCHITECTURE.md §9). Daily: grade the rejection shadow ledger, postmortem closed
 # trades, score fitness and the LIVE gate, send results to the brain. Sunday: also post the report card and, once
@@ -18,6 +19,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: read # dedupe step lists recent runs
 
 concurrency:
   group: governor
@@ -28,13 +30,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Skip if the brain already dispatched today's run
+        id: dedupe
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          since=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ)
+          n=$(gh run list -R "$GITHUB_REPOSITORY" --workflow governor.yml --event workflow_dispatch --created ">=$since" --json databaseId --jq length)
+          if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "already dispatched"; fi
       - uses: actions/checkout@v4
+        if: steps.dedupe.outputs.skip != 'true'
       - uses: astral-sh/setup-uv@v6
+        if: steps.dedupe.outputs.skip != 'true'
       - name: Mode
         id: mode
+        if: steps.dedupe.outputs.skip != 'true'
         run: |
           if [ "${{ github.event.schedule }}" = "23 6 * * 0" ] || [ "${{ inputs.weekly }}" = "true" ]; then echo "flag=--weekly" >> "$GITHUB_OUTPUT"; else echo "flag=" >> "$GITHUB_OUTPUT"; fi
       - name: Run governor
+        if: steps.dedupe.outputs.skip != 'true'
         working-directory: research
         env:
           CORTEX_URL: ${{ vars.CORTEX_URL }}
@@ -44,6 +59,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: uv run python -m cortex_research.governor.run ${{ steps.mode.outputs.flag }}
       - name: Propose calibration (branch + PR)
+        if: steps.dedupe.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           AUTHOR_EMAIL: ${{ vars.GIT_AUTHOR_EMAIL }}
