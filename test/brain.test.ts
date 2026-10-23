@@ -3,6 +3,7 @@ import type { ClefAnswer, ClefApi, ClefQuestion, ClefResult } from "../src/clef/
 import type { DecisionContract } from "../src/contracts/decision-contract.ts";
 import type { Doctrine } from "../src/contracts/doctrine.ts";
 import { Brain } from "../src/cortex/Brain.ts";
+import type { WorkflowDispatcher } from "../src/cortex/dispatch.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
 import { type LlmProvider, LlmRouter } from "../src/court/llm.ts";
 import { NullNotifier } from "../src/discord/notifier.ts";
@@ -38,7 +39,14 @@ function flat(n: number, price: number): Bar[] {
 }
 
 function setup(
-  opts: { d?: Doctrine; live?: boolean; killed?: boolean; clef?: ClefApi; llm?: LlmRouter } = {},
+  opts: {
+    d?: Doctrine;
+    live?: boolean;
+    killed?: boolean;
+    clef?: ClefApi;
+    llm?: LlmRouter;
+    dispatcher?: WorkflowDispatcher;
+  } = {},
 ) {
   let now = T0;
   const clock = () => now;
@@ -67,6 +75,7 @@ function setup(
     now: clock,
     clef: opts.clef ?? null,
     llm: opts.llm ?? null,
+    dispatcher: opts.dispatcher ?? null,
   });
   brain.init({ test: true });
   return {
@@ -1095,5 +1104,36 @@ describe("options shadow lab ingest (Phase 5)", () => {
     expect(t.notifier.sent.filter((m) => m.channel === "governor")).toHaveLength(1);
     // a virtual trade never becomes a broker order
     expect(t.paper.orders.size).toBe(0);
+  });
+});
+
+describe("batch dispatcher (ADR-032)", () => {
+  it("dispatches a due job once per slot, journals it, and alerts once on failure without blocking the pulse", async () => {
+    const calls: string[] = [];
+    let fail = false;
+    const dispatcher: WorkflowDispatcher = {
+      async dispatch(workflow, inputs) {
+        if (fail) throw new Error("HTTP 401");
+        calls.push(`${workflow}:${JSON.stringify(inputs)}`);
+      },
+    };
+    const t = setup({ dispatcher });
+    t.advance(17 * 60_000 + 30_000); // T0 is 12:00 UTC → 12:17:30, just after the hourly world slot
+    await t.brain.pulse();
+    await t.brain.pulse();
+    expect(calls.filter((c) => c.includes('"job":"world"'))).toHaveLength(1);
+    const kinds = (
+      t.d1.db.prepare("SELECT payload_json FROM journal WHERE kind = 'DISPATCH'").all() as {
+        payload_json: string;
+      }[]
+    ).map((r) => JSON.parse(r.payload_json).job);
+    expect(kinds).toContain("world");
+    fail = true;
+    t.advance(3_600_000);
+    const r = await t.brain.pulse();
+    expect(r.kill).toBeDefined();
+    expect(
+      t.notifier.sent.filter((m) => m.msg.content?.includes("batch dispatch failed")).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 });

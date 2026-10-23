@@ -255,3 +255,17 @@ criterion.
 **Known gaps:** no rolls (the PMCC closes before its short expires); no early assignment model; the indicative
 feed may differ from OPRA; no earnings filter (no free calendar we trust).
 
+## ADR-032 — The brain dispatches the batch workflows; GitHub crons are the backup (2026-10-23)
+**Context:** GitHub's free scheduler fired nothing for the first ~3 hours, then dropped most slots (first
+night: 2 of ~16 watchdog runs, 3 of ~10 research runs). Stale regime/world data blocks entries (U6), so dropped
+batches cost trading time.
+**Decision:** (1) Each pulse, `dispatchDue` checks `DISPATCH_JOBS` (the same UTC crons as research.yml /
+governor.yml; a test fails if they drift) and starts any slot that came due in the last 20 min, through
+`POST /repos/{repo}/actions/workflows/{file}/dispatches`. It records the slot in hot KV and journals
+`DISPATCH`. A failure alerts once and never blocks the pulse. ~35 calls/day, one subrequest each. (2) Token:
+fine-grained, this repo only, Actions read/write, stored as the cortex secret `GH_DISPATCH_TOKEN`. Without it
+the dispatcher is off and nothing changes. (3) The GitHub schedules stay. A scheduled run first lists the
+dispatched runs from the last 90 min (6 h for the governor) and skips if the brain already started the same
+job; `run-name` carries the job for that check. (4) The sentinel is untouched: the safety net keeps its own
+minute cron and the 30-min GitHub watchdog.
+

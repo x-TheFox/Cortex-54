@@ -1,4 +1,6 @@
 name: research
+# "research <job>" for dispatched runs (the brain dispatches on schedule, ADR-032); scheduled runs show the cron.
+run-name: research ${{ inputs.job || github.event.schedule }}
 
 # Phase 2 batch jobs (docs/ARCHITECTURE.md §9). Runs pinned upstream skills (never copied — ADR-026),
 # summarizes, signs with INGEST_HMAC_SECRET and POSTs to cortex /ingest/batch.
@@ -21,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # dedupe step lists recent runs
 
 concurrency:
   group: research-${{ github.event.schedule || inputs.job }}
@@ -45,13 +48,24 @@ jobs:
           elif [ "${{ github.event.schedule }}" = "17 * * * *" ]; then echo "job=world" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "50 14 * * 1-5" ] || [ "${{ github.event.schedule }}" = "40 19 * * 1-5" ]; then echo "job=options" >> "$GITHUB_OUTPUT";
           else echo "job=equity" >> "$GITHUB_OUTPUT"; fi
+      - name: Skip if the brain already dispatched this job
+        id: dedupe
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB: ${{ steps.pick.outputs.job }}
+        run: |
+          since=$(date -u -d '-90 minutes' +%Y-%m-%dT%H:%M:%SZ)
+          n=$(gh run list -R "$GITHUB_REPOSITORY" --workflow research.yml --event workflow_dispatch --created ">=$since" \
+                --json displayTitle --jq "[.[] | select(.displayTitle == \"research $JOB\")] | length")
+          if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "brain dispatched $JOB already ($n run(s) since $since)"; fi
       - name: Checkout pinned upstream skills
-        if: steps.pick.outputs.job == 'crypto' || steps.pick.outputs.job == 'equity'
+        if: steps.dedupe.outputs.skip != 'true' && (steps.pick.outputs.job == 'crypto' || steps.pick.outputs.job == 'equity')
         run: |
           git clone --filter=blob:none "https://github.com/${UPSTREAM_REPO}" research/.vendor/upstream
           git -C research/.vendor/upstream checkout --quiet "${UPSTREAM_SHA}"
       - name: Run and ingest
-        if: steps.pick.outputs.job != 'options'
+        if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job != 'options'
         working-directory: research
         env:
           UPSTREAM_DIR: ${{ github.workspace }}/research/.vendor/upstream
@@ -62,7 +76,7 @@ jobs:
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
         run: uv run python -m cortex_research.run "${{ steps.pick.outputs.job }}"
       - name: Options shadow lab (virtual ledger, never sent to a broker)
-        if: steps.pick.outputs.job == 'options'
+        if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job == 'options'
         working-directory: research
         env:
           CORTEX_URL: ${{ vars.CORTEX_URL }}
