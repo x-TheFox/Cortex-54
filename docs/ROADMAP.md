@@ -61,7 +61,8 @@ Remaining for the Phase 3 exit: ≥10 COURT contracts produced and executed/decl
 - Beliefs (D1) with decay; scar tissue via PR.
 - **Exit:** first Governor PR merged by the operator; report card posted.
 - Status 2026-10-22: governor.yml live (grading, postmortems, fitness, LIVE-gate tracker, report card; ADR-030).
-  Open: source reputation, beliefs, scar tissue; first calibration PR waits for ≥50 outcomes.
+  2026-10-23: source reputation → W_rep, scar tissue (Tier 0 veto + lessons, Governor proposals via PR) and
+  decayed beliefs built (ADR-033). Exit still waits for the first Governor PR (needs real outcomes).
 
 ## Phase 5 — Options shadow lab (parallel with 4)
 - Greeks/IV, spread structurer, PMCC rubric (ts-hot); options chain via Alpaca indicative feed.

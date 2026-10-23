@@ -28,6 +28,14 @@ const base: SizingInput = {
 };
 
 describe("PositionSizer", () => {
+  it("caps effective risk at the rung even with a top reputation weight", () => {
+    const r = sizePosition(
+      { ...base, conviction: 10, bearLethality: 0, pWin: 0.9, reputationWeight: 1.2 },
+      d,
+    );
+    expect(r.ok && r.rEff).toBeLessThanOrEqual(d.rungs.R1.per_trade_risk);
+  });
+
   it("reproduces the RISK_DOCTRINE worked example", () => {
     const r = sizePosition(base, d);
     expect(r.ok).toBe(true);

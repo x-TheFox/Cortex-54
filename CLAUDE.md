@@ -366,5 +366,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-23: PRs #8 and #9 merged. GitHub schedules began firing ~00:07 UTC but dropped most slots →
   ADR-032: the brain dispatches the batch workflows each pulse (dormant until the `GH_DISPATCH_TOKEN` cortex
   secret exists; RUNBOOK A2). GitHub crons stay as a deduped backup.
+- 2026-10-23: PR #10 merged; `GH_DISPATCH_TOKEN` set (classic `repo` token; the operator accepted that).
+- 2026-10-23: Phase 4 memory built (branch `phase-4-memory`, ADR-033): reputation → W_rep (rung-capped), scar
+  tissue veto + lessons with Governor PR proposals, beliefs (hot schema v3). Phase 4 code-complete.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

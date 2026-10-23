@@ -83,7 +83,9 @@ describe("Tier 0 evidence", () => {
       "low20",
       "rsi14",
       "catalyst",
+      "catalyst_source",
     ]);
+    expect(e.receipts.at(-1)?.metric_value).toMatch(/^news:/);
   });
 });
 
@@ -170,7 +172,12 @@ describe("calibration and synthesis", () => {
     expect(DecisionContractSchema.safeParse(k).success).toBe(true);
     expect(contractViolations(k)).toEqual([]);
     expect(k.strategy_id).toBe("CRYPTO_CATALYST_COURT_V1");
-    expect(k.bull_case_receipts.map((r) => r.evidence_id)).toEqual(["close", "atr14", "catalyst"]);
+    expect(k.bull_case_receipts.map((r) => r.evidence_id)).toEqual([
+      "close",
+      "atr14",
+      "catalyst",
+      "catalyst_source",
+    ]);
   });
 });
 

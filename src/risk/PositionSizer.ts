@@ -59,13 +59,16 @@ export function sizePosition(i: SizingInput, d: Doctrine): SizingResult {
   if (reasons.length > 0) return { ok: false, reasons };
 
   const wRep = clamp(i.reputationWeight, d.sizing.reputation_weight.min, d.sizing.reputation_weight.max);
-  const rEff =
+  // Capped at the rung: reputation > 1 can lift a trade toward the cap, never past it.
+  const rEff = Math.min(
+    i.rung.per_trade_risk,
     i.rung.per_trade_risk *
-    (i.conviction / 10) *
-    (1 - bearPenalty(i.bearLethality, d)) *
-    wRep *
-    i.breakerMultiplier *
-    edgeGate(i.pWin, d);
+      (i.conviction / 10) *
+      (1 - bearPenalty(i.bearLethality, d)) *
+      wRep *
+      i.breakerMultiplier *
+      edgeGate(i.pWin, d),
+  );
   if (!(rEff > 0)) return { ok: false, reasons: ["effective risk is zero (no edge, breaker, or bear veto)"] };
 
   const dStop = (i.entry - i.stop) / i.entry + i.feeRt + i.spreadFrac / 2;

@@ -12,6 +12,7 @@ import {
   CONSTITUTION_SHA256,
   DOCTRINE,
   DOCTRINE_SHA256,
+  SCAR_TISSUE,
 } from "../generated/config.ts";
 import type { AccountId } from "../lib/ids.ts";
 import { Brain, type StatusView } from "./Brain.ts";
@@ -82,6 +83,7 @@ export class AgentCortexDO extends DurableObject<Env> {
       clef: new WorkersAiClef(env.AI),
       llm: new LlmRouter(llmProviders(env), DOCTRINE),
       calibration: CALIBRATION,
+      scar: SCAR_TISSUE,
       dispatcher:
         env.GITHUB_REPO && env.GH_DISPATCH_TOKEN
           ? new GitHubDispatcher(env.GITHUB_REPO, env.GH_DISPATCH_TOKEN, guard)

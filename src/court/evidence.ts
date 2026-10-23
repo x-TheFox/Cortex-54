@@ -1,5 +1,6 @@
 import type { Receipt } from "../contracts/decision-contract.ts";
 import type { Doctrine } from "../contracts/doctrine.ts";
+import { reputationKey } from "../risk/scar.ts";
 import { atr, type Bar, ema, rsi } from "../strategy/indicators.ts";
 
 /**
@@ -39,6 +40,8 @@ export interface Evidence {
   world: Record<string, unknown> | null;
   catalyst: Catalyst;
   portfolio: { held: string[] };
+  /** Operator-merged scar lessons and decayed Governor beliefs (data, not instructions). ADR-033. */
+  memory: { lessons: string[]; beliefs: string[] };
   receipts: Receipt[];
 }
 
@@ -72,6 +75,7 @@ export function buildEvidence(i: {
   world: Record<string, unknown> | null;
   catalyst: Catalyst;
   held: string[];
+  memory?: { lessons: string[]; beliefs: string[] };
 }): Evidence | null {
   const closes = i.bars.map((b) => b.c);
   const a = atr(i.bars, 14);
@@ -150,6 +154,13 @@ export function buildEvidence(i: {
       as_of: i.now,
       ...(i.catalyst.url ? { provenance_url: i.catalyst.url } : {}),
     },
+    {
+      evidence_id: "catalyst_source",
+      source_skill: "intake",
+      metric: "reputation_key",
+      metric_value: reputationKey(i.catalyst.kind, i.catalyst.source),
+      as_of: i.now,
+    },
   ];
   return {
     symbol: i.symbol,
@@ -161,6 +172,7 @@ export function buildEvidence(i: {
     world: i.world,
     catalyst: i.catalyst,
     portfolio: { held: i.held },
+    memory: i.memory ?? { lessons: [], beliefs: [] },
     receipts,
   };
 }

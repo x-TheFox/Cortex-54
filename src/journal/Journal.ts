@@ -32,6 +32,7 @@ const TABLES = {
   source_reputation: { ignoreDupes: false, upsert: true },
   skill_fitness: { ignoreDupes: false, upsert: true },
   options_shadow: { ignoreDupes: true },
+  beliefs: { ignoreDupes: false, upsert: true },
 } as const;
 export type OutboxTable = keyof typeof TABLES;
 

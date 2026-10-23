@@ -21,8 +21,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+import yaml
 
 from .. import payload as P
+from . import memory as MEM
 from . import metrics as M
 
 REPO = Path(__file__).resolve().parents[3]
@@ -133,6 +135,8 @@ def build_trades(journal: list[dict], contracts: dict[str, dict]) -> list[dict]:
                 "strategy_id": k["strategy_id"],
                 "origin": k.get("origin", "COURT"),
                 "symbol": k["symbol"],
+                "arena": k.get("arena"),
+                "source": MEM.contract_source(k),
                 "reason": p.get("reason", "EXIT"),
                 "r": round(r_mult, 4),
                 "ts": r["ts"],
@@ -312,9 +316,34 @@ def main() -> int:
     gate = gate_status(journal, trades, rejections, b_raw, len(pairs), now)
     gate += options_gate(options)
 
+    # memory: reputation (trades + graded court shadow outcomes), beliefs, scar proposals (ADR-033)
+    win_p = lambda k: ((jload(k.get("clef_probabilities"), {}) or {}).get("raw") or {}).get("win_prob")
+    outcomes = [{"source": t["source"], "r": t["r"], "ts": t["ts"], "p": t["win_prob_raw"], "win": t["reason"] == "TARGET"} for t in trades]
+    rej_by_id = {rj["id"]: rj for rj in rejections}
+    for g in graded_rows + new_grades:
+        rj = rej_by_id.get(g["rejection_id"])
+        k = contracts.get((rj or {}).get("contract_id") or "")
+        if g["horizon"] == "72h" and g.get("outcome_r") is not None and k and rj.get("stage") == "VALIDATOR":
+            outcomes.append({"source": MEM.contract_source(k), "r": float(g["outcome_r"]), "ts": rj["ts"],
+                             "p": win_p(k), "win": g.get("hit") == "TARGET"})
+    rep = MEM.reputation(outcomes, now)
+    bel = MEM.beliefs(trades, now)
+    facts = {r["ref_id"]: (jload(r["payload_json"], {}) or {}).get("facts", {}) for r in journal if r["kind"] == "ENTRY_FACTS" and r.get("ref_id")}
+    scar_path = REPO / "config" / "scar-tissue.yaml"
+    scar_doc = yaml.safe_load(scar_path.read_text()) or {}
+    new_scars = MEM.scar_proposals(trades, facts, scar_doc.get("rules") or [], datetime.now(timezone.utc).date())
+    if a.weekly and new_scars:
+        text = scar_path.read_text()
+        header = "".join(line + "\n" for line in text.splitlines() if line.startswith("#") and not line.startswith("# -") and not line.startswith("#   "))
+        scar_doc["rules"] = (scar_doc.get("rules") or []) + new_scars
+        scar_path.write_text(header + yaml.safe_dump(scar_doc, sort_keys=False, allow_unicode=True))
+        print(f"scar-tissue.yaml: proposed {len(new_scars)} rule(s)")
+
     sections = [
         {"name": "Trades", "value": f"{len(trades)} closed · " + (", ".join(f"{s}: n={st['n']} E[R]={st['expectancy_r']} PF={st['profit_factor']}" for s, st in stats.items()) or "none yet")},
         {"name": "Options shadow lab", "value": options_summary(options)},
+        {"name": "Memory", "value": ("reputation: " + ("; ".join(f"{r['source']} n={r['signals']} E[R] {r['expectancy_r_30d']:+.2f} w={r['weight']}" for r in rep) or "no attributed outcomes yet")
+                                    + f" · beliefs {len(bel)} · scar proposals {len(new_scars)}" + (" (PR)" if a.weekly and new_scars else ""))},
         {"name": "Funnel", "value": f"Tier 1 items {sum(len(jload(x['candidate_ids'], [])) for x in t1)} · Tier 2 {len(t2)} · court sessions {sum(1 for r in journal if r['kind'] == 'COURT')} · contracts {len(contracts)}"},
         {"name": "LLM providers (ok/fail)", "value": "; ".join(f"{k} {v[0]}/{v[1]}" for k, v in sorted(llm_ok.items())) or "no calls yet"},
         {"name": "Shadow ledger (72h, new grades)", "value": "; ".join(f"{s}: n={len(v)} avg R {sum(v) / len(v):+.2f}" for s, v in ledger.items()) or f"{len(new_grades)} new grade(s); none at 72h yet"},
@@ -342,6 +371,8 @@ def main() -> int:
         P.item("signal-postmortem", "gov-v1", now, P.dumps(postmortems).encode(), {"postmortems": postmortems}),
         P.item("skill-fitness-leaderboard", "gov-v1", now, P.dumps(fitness).encode(), {"fitness": fitness, "gate": gate}),
         P.item("weekly-performance-digest", "gov-v1", now, P.dumps(card).encode(), {"card": card}),
+        P.item("source-reputation", "gov-v1", now, P.dumps(rep).encode(), {"reputation": rep}),
+        P.item("belief-writer", "gov-v1", now, P.dumps(bel).encode(), {"beliefs": bel}),
     ]
     b = P.batch("governor", now, os.environ.get("RUN_URL") or None, items, None)
     body = P.dumps(b)
