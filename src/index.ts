@@ -15,6 +15,8 @@ import {
 import { verifyDiscordRequest } from "./discord/verify.ts";
 import type { Env } from "./env.ts";
 import { verifySignedBody } from "./lib/hmac.ts";
+import { handleWeb, loginLink } from "./web/api.ts";
+import { runCommand } from "./web/commands.ts";
 
 export { AgentCortexDO } from "./cortex/AgentCortexDO.ts";
 
@@ -52,52 +54,41 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
   const name = i.data?.name;
   const account = accountOption(i);
 
+  const args = {
+    account: account ?? undefined,
+    stop: option(i, "stop") === undefined ? undefined : Number(option(i, "stop")),
+    confirm: option(i, "confirm") === undefined ? undefined : String(option(i, "confirm")),
+    postmortem: option(i, "postmortem") === undefined ? undefined : String(option(i, "postmortem")),
+    symbol: option(i, "symbol") === undefined ? undefined : String(option(i, "symbol")),
+  };
+
   switch (name) {
     case "status": {
       const msg = hudMessage(await b.status());
       return Response.json({ type: 4, data: { ...msg, flags: 64 } });
     }
-    case "pause":
-      return ephemeral(account ? await b.pause(account, by) : "Pick an account.");
-    case "resume":
-      return ephemeral(account ? await b.resume(account, by) : "Pick an account.");
-    case "dial": {
-      const stop = Number(option(i, "stop"));
-      const ratified = option(i, "confirm") === "RATIFY";
-      return ephemeral(account ? await b.setDial(account, stop, by, ratified) : "Pick an account.");
-    }
-    case "unlock": {
-      const pm = String(option(i, "postmortem") ?? "");
-      return ephemeral(account ? await b.unlock(account, pm, by) : "Pick an account.");
-    }
-    case "court": {
-      const symbol = String(option(i, "symbol") ?? "");
-      if (!symbol || !i.token || !env.DISCORD_APP_ID)
-        return ephemeral("Give a symbol, e.g. BTC/USD or NVDA.");
-      const appId = env.DISCORD_APP_ID;
-      const token = i.token;
-      ctx.waitUntil(
-        b.court(symbol, by).then(
-          (msg) => followUp(appId, token, msg),
-          (e) => followUp(appId, token, `Error: ${String(e)}`),
-        ),
+    case "terminal": {
+      const link = await loginLink(env, new URL(request.url).origin);
+      return ephemeral(
+        link ? `🖥️ Web terminal (single use, expires in 10 min): ${link}` : "Web terminal not configured.",
       );
-      return deferredEphemeral();
     }
+    case "court":
     case "flatten": {
-      if (!account || !i.token || !env.DISCORD_APP_ID) return ephemeral("Pick an account.");
+      // Slow paths: answer within 3 s, finish in the background, follow up (ADR-008).
+      if (!i.token || !env.DISCORD_APP_ID) return ephemeral("Discord app not configured.");
       const appId = env.DISCORD_APP_ID;
       const token = i.token;
       ctx.waitUntil(
-        b.flatten(account, by).then(
-          (msg) => followUp(appId, token, msg),
+        runCommand(b, name, args, by).then(
+          (r) => followUp(appId, token, r.message),
           (e) => followUp(appId, token, `Error: ${String(e)}`),
         ),
       );
       return deferredEphemeral();
     }
     default:
-      return ephemeral(`Unknown command ${name ?? ""}`);
+      return ephemeral((await runCommand(b, name ?? "", args, by)).message);
   }
 }
 
@@ -189,6 +180,8 @@ export default {
     if (request.method === "POST" && url.pathname === "/discord/interactions") {
       return handleInteraction(request, env, ctx);
     }
+
+    if (url.pathname.startsWith("/api/")) return handleWeb(request, env, brain(env));
 
     return new Response("Not found", { status: 404 });
   },

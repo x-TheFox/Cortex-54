@@ -288,3 +288,20 @@ copy (hot schema v3). Tier 2 and the court get up to 3 with decayed confidence â
 **Safety:** scars and beliefs can only remove or inform trades; reputation is bounded and rung-capped. None of it
 can loosen a constitution or doctrine limit.
 
+## ADR-034 â€” Web terminal: static assets + `/terminal` login links instead of Discord OAuth; polling, not WebSockets (2026-10-23)
+**Context:** Phase 6 asks for a web terminal with parity to Discord. The spec planned Discord OAuth2 and a
+hibernatable WebSocket. OAuth needs a redirect URI registered by hand in the developer portal plus a client
+secret, and WebSocket messages count against the DO request budget (20:1).
+**Decision:** (1) The page is plain static files in `public/`, served by Workers static assets: free, outside the
+Worker bundle, no build step. It renders every value with `textContent` under a strict CSP (`_headers`).
+(2) **Login:** the operator-only, signature-verified `/terminal` slash command replies privately with a link
+`/#login=<token>`. The token is HMAC-signed with `WEB_SESSION_SECRET`, expires in 10 minutes, and is single use
+(nonce consumed in the DO). It travels in the URL fragment, so it never reaches server logs. The page exchanges
+it for an HttpOnly, Secure, SameSite=Strict session cookie (12 h). Mutations also need an `x-cortex-web: 1`
+header. (3) **Parity:** Discord and the web share one command runner (`src/web/commands.ts`); a test fails if a
+command exists on one side only. Web actions are journaled as `web:<operator id>` and count as operator
+interventions for the LIVE gate, like Discord ones. (4) **Live data:** the Command Deck polls `/api/state` every
+15 s while visible. That's one Worker request plus one DO request per poll, about 240/hour while open, well inside
+100k/day. (5) **Discord cockpit:** the HUD shows a QuickChart equity line from new hourly equity samples (hot
+schema v4). `#agent-terminal` gets one compact message per pulse with that pulse's notable journal events.
+

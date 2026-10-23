@@ -76,6 +76,8 @@ Remaining for the Phase 3 exit: ≥10 COURT contracts produced and executed/decl
 - Web terminal: static SPA on `cortex`, Discord OAuth, hibernatable WS; Command Deck, Clef Studio,
   Memory Vault first.
 - **Exit:** every control has parity between Discord and web.
+- Status 2026-10-23: built (ADR-034): HUD equity chart (QuickChart), all 8 channels wired (#agent-terminal
+  stream), web terminal with `/terminal` login and four workspaces, shared command runner + parity test.
 
 ## Phase 7 — Real money (only after everything above)
 - Precondition: Phases 0–6 complete, then a ≥30-day fully autonomous PAPER run passing `RISK_DOCTRINE.md` §7.

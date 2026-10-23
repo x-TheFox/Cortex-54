@@ -209,6 +209,8 @@ export interface StatusView {
   budget: ReturnType<FreeTierBudget["snapshot"]>;
   journalHead: { seq: number; sha: string };
   outboxPending: number;
+  /** Hourly equity samples (last 7 days) per account: [epoch ms, USD]. */
+  equity: Partial<Record<AccountId, number[][]>>;
   regimes: {
     arena: string;
     posture: string;
@@ -256,6 +258,8 @@ export class Brain {
   readonly budget: FreeTierBudget;
   /** Most recent risk-engine rejection reasons per contract (for the courtroom card). */
   private readonly lastRejections = new Map<string, string[]>();
+  /** Notable journal events waiting for the #agent-terminal stream (posted once per pulse). */
+  private readonly termBuffer: string[] = [];
   private readonly sql: SqlLike;
   private readonly d: Doctrine;
   private readonly c: Constitution;
@@ -265,6 +269,12 @@ export class Brain {
     this.d = deps.d;
     this.c = deps.c;
     this.journal = new Journal(deps.sql);
+    this.journal.onAppend = (r) => {
+      const line = terminalLine(r);
+      if (!line) return;
+      this.termBuffer.push(line);
+      if (this.termBuffer.length > 40) this.termBuffer.shift();
+    };
     this.budget = new FreeTierBudget(deps.sql, deps.d);
   }
 
@@ -434,8 +444,10 @@ export class Brain {
     await this.dispatchDue(started).catch(() => undefined);
 
     // 4. Persist, report, schedule.
+    this.sampleEquity(started);
     report.flushed = await this.flushJournal();
     await this.updateHud().catch(() => undefined);
+    await this.flushTerminal().catch(() => undefined);
     // Heartbeat stats for the day (reported in DAY_ROLL; the Governor's LIVE-gate heartbeat criterion).
     const prevPulse = Number(getKV(this.sql, "last_pulse_at") ?? 0);
     const gapS = prevPulse > 0 ? Math.round((started - prevPulse) / 1000) : 0;
@@ -542,6 +554,7 @@ export class Brain {
       this.sql.exec("DELETE FROM seen_activities WHERE at < ?", now - 7 * 86_400_000);
       this.sql.exec("DELETE FROM seen_items WHERE at < ?", now - 3 * 86_400_000);
       this.budget.prune(now);
+      this.sql.exec("DELETE FROM equity_history WHERE at < ?", now - 35 * 86_400_000);
     }
   }
 
@@ -2803,6 +2816,7 @@ ${postmortem}`,
       budget: this.budget.snapshot(now),
       journalHead: this.journal.head(),
       outboxPending: this.journal.pending(),
+      equity: this.equityHistory(now - 7 * 86_400_000),
       regimes: this.sql
         .exec<{
           arena: string;
@@ -2992,6 +3006,82 @@ ${postmortem}`,
     await this.deps.notifier.post("alarms", { content: text.slice(0, 1900) });
   }
 
+  /** One equity sample per account per UTC hour (HUD chart, web terminal). */
+  private sampleEquity(now: number): void {
+    const hour = Math.floor(now / 3_600_000);
+    if (getKV(this.sql, "equity_hour") === String(hour)) return;
+    for (const row of this.sql.exec<AccountRow>("SELECT * FROM accounts")) {
+      const eq = this.effectiveEquityCents(row);
+      if (eq === null) continue;
+      this.sql.exec(
+        "INSERT OR REPLACE INTO equity_history (account, at, equity_cents) VALUES (?, ?, ?)",
+        row.account,
+        hour * 3_600_000,
+        eq,
+      );
+    }
+    setKV(this.sql, "equity_hour", String(hour), now);
+  }
+
+  equityHistory(since: number): Partial<Record<AccountId, number[][]>> {
+    const out: Partial<Record<AccountId, number[][]>> = {};
+    for (const r of this.sql.exec<{ account: AccountId; at: number; equity_cents: number }>(
+      "SELECT account, at, equity_cents FROM equity_history WHERE at >= ? ORDER BY at",
+      since,
+    )) {
+      const list = out[r.account] ?? [];
+      list.push([r.at, r.equity_cents / 100]);
+      out[r.account] = list;
+    }
+    return out;
+  }
+
+  private async flushTerminal(): Promise<void> {
+    if (this.termBuffer.length === 0) return;
+    const lines = this.termBuffer.splice(0, this.termBuffer.length);
+    await this.deps.notifier.post("terminal", { content: lines.join("\n").slice(0, 1900) });
+  }
+
+  /** Single-use check for web-terminal login links (ADR-034). */
+  consumeOnce(id: string): boolean {
+    return this.markSeen(`web:${id}`, this.deps.now());
+  }
+
+  /** Memory Vault view: decayed beliefs, reputation weights, merged scar rules. */
+  memoryView(): {
+    beliefs: { subject: string; statement: string; confidence: number }[];
+    reputation: Record<string, { weight: number; signals: number }>;
+    scars: { id: string; kind: string; rule: string; expires: string | null }[];
+  } {
+    const now = this.deps.now();
+    const beliefs = this.sql
+      .exec<{ subject: string; statement: string; c0: number; half_life_days: number; validated_at: number }>(
+        "SELECT subject, statement, c0, half_life_days, validated_at FROM beliefs WHERE status != 'ARCHIVED'",
+      )
+      .map((b) => ({
+        subject: b.subject,
+        statement: b.statement,
+        confidence: Number(
+          (b.c0 * 0.5 ** ((now - b.validated_at) / 86_400_000 / b.half_life_days)).toFixed(3),
+        ),
+      }))
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 100);
+    let reputation: Record<string, { weight: number; signals: number }> = {};
+    try {
+      reputation = JSON.parse(getKV(this.sql, "reputation") ?? "{}");
+    } catch {
+      reputation = {};
+    }
+    const scars = this.scarRules().map((r) => ({
+      id: r.id,
+      kind: r.kind,
+      rule: r.rule,
+      expires: r.expires ?? null,
+    }));
+    return { beliefs, reputation, scars };
+  }
+
   private async updateHud(): Promise<void> {
     const now = this.deps.now();
     const last = Number(getKV(this.sql, "hud:last_at") ?? 0);
@@ -3006,6 +3096,75 @@ ${postmortem}`,
 }
 
 // ---------------------------------------------------------------------- helpers
+
+const TERMINAL_KINDS: Record<string, string> = {
+  ENTRY_FACTS: "🎯",
+  ORDER_SUBMITTED: "📨",
+  FILL: "💱",
+  EXIT: "🏁",
+  RED_LOCK: "🛑",
+  UNLOCK: "🔓",
+  MODE: "⚙️",
+  DIAL: "🎚️",
+  FLATTEN: "🧹",
+  KILL_SEEN: "☠️",
+  KILL_CLEARED: "✅",
+  COURT: "⚖️",
+  DISPATCH: "📤",
+  GOVERNOR: "🧬",
+  OPTIONS_LAB: "🧪",
+  INGEST_REJECTED: "⚠️",
+  DAY_ROLL: "🔗",
+};
+
+/** One compact line per notable journal event for #agent-terminal; null for the rest. */
+export function terminalLine(r: {
+  ts: number;
+  account: string;
+  kind: string;
+  refId: string | null;
+  payloadJson: string;
+}): string | null {
+  const icon = TERMINAL_KINDS[r.kind];
+  if (!icon) return null;
+  let p: Record<string, unknown> = {};
+  try {
+    p = JSON.parse(r.payloadJson) as Record<string, unknown>;
+  } catch {
+    p = {};
+  }
+  const f = (p.facts ?? {}) as Record<string, unknown>;
+  const detail =
+    r.kind === "ENTRY_FACTS"
+      ? `${f.symbol ?? ""} ${f.strategy_id ?? ""} w=${p.reputation_weight ?? 1}`
+      : r.kind === "DISPATCH"
+        ? String(p.job ?? "")
+        : r.kind === "EXIT"
+          ? `${p.symbol ?? ""} ${p.reason ?? ""} ${typeof p.pnl_cents === "number" ? `$${(p.pnl_cents / 100).toFixed(2)}` : ""}`
+          : r.kind === "FILL"
+            ? `${p.role ?? ""} ${p.qty ?? ""} @ ${p.price ?? ""}`
+            : JSON.stringify(p).slice(0, 120);
+  const hhmm = new Date(r.ts).toISOString().slice(11, 16);
+  const acct = r.account === "SYSTEM" ? "" : ` ${r.account}`;
+  return `\`${hhmm}\` ${icon} ${r.kind}${acct} ${detail}`.slice(0, 200);
+}
+
+/** QuickChart line image for the HUD (rendered off-platform: zero Worker CPU). */
+export function equityChartUrl(points: number[][] | undefined): string | null {
+  if (!points || points.length < 2) return null;
+  const pts = points.slice(-72);
+  const cfg = {
+    type: "line",
+    data: {
+      labels: pts.map(() => ""),
+      datasets: [
+        { data: pts.map((p) => p[1]), fill: false, pointRadius: 0, borderColor: "#38bdf8", borderWidth: 2 },
+      ],
+    },
+    options: { legend: { display: false }, scales: { xAxes: [{ display: false }] } },
+  };
+  return `https://quickchart.io/chart?w=500&h=140&bkg=%23111827&c=${encodeURIComponent(JSON.stringify(cfg))}`;
+}
 
 function errText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -3030,6 +3189,9 @@ const usd = (n: number | null) => (n === null ? "—" : `$${n.toFixed(2)}`);
 export function hudMessage(s: StatusView): DiscordMessage {
   const age = s.lastPulseAt === null ? "never" : `${Math.round((s.now - s.lastPulseAt) / 1000)}s ago`;
   const embeds = s.accounts.map((a) => ({
+    ...(equityChartUrl(s.equity[a.account])
+      ? { image: { url: equityChartUrl(s.equity[a.account]) as string } }
+      : {}),
     title: `${a.account} · ${a.rung} · Stop ${a.autonomyStop} · ${a.breaker}${a.locked ? " 🔒" : ""}`,
     color: bandColor(a.breaker),
     description: a.configured

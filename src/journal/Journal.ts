@@ -42,6 +42,16 @@ export interface D1Like {
 }
 
 export class Journal {
+  /** Optional observer (the brain's #agent-terminal stream). Never throws into append. */
+  onAppend?: (row: {
+    seq: number;
+    ts: number;
+    account: string;
+    kind: string;
+    refId: string | null;
+    payloadJson: string;
+  }) => void;
+
   constructor(private readonly sql: SqlLike) {}
 
   head(): { seq: number; sha: string } {
@@ -61,6 +71,7 @@ export class Journal {
     const prev = this.head();
     const seq = prev.seq + 1;
     const payloadJson = JSON.stringify(payload ?? {});
+    this.onAppend?.({ seq, ts: now, account, kind, refId, payloadJson });
     const sha = rowHash(prev.sha, seq, now, kind, payloadJson);
     this.sql.exec(
       "INSERT INTO journal_head (id, seq, row_sha256) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET seq = excluded.seq, row_sha256 = excluded.row_sha256",

@@ -247,6 +247,7 @@ src/
   clef/                    Clef client (real response format), Tier 1 triage, Tier 2 structure (pure)
   court/                   Tier 0 evidence, LLM router + providers, versioned prompts, bull/bear/synth/contract (pure)
   data/ workflows/         (later)
+public/                   web terminal (static assets, no build): index.html, app.js, app.css, _headers (CSP)
 workers/sentinel/         independent watchdog + kill-switch worker (own wrangler.jsonc, vendored verify.ts,
                           writes the KV kill flag the brain reads — ADR-015)
 research/                 Python (uv): cortex_research.run crypto|equity|world — runs pinned upstream skills, signs,
@@ -278,6 +279,7 @@ pnpm court:smoke BTC/USD ["headline"] [--post]   # real bull/bear/Clef run on li
 # Discord /court SYMBOL convenes a real session (PAPER, all gates apply); cards go to #bull-vs-bear-court
 pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
 gh workflow run governor -f weekly=true                     # governor now (report card + calibration proposal)
+# Discord /terminal → single-use link to the web terminal (https://cortex.samplayz2ks.workers.dev)
 gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATTEN ALL (ADR-022); action=rearm to clear
 ```
 
@@ -369,5 +371,9 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-23: PR #10 merged; `GH_DISPATCH_TOKEN` set (classic `repo` token; the operator accepted that).
 - 2026-10-23: Phase 4 memory built (branch `phase-4-memory`, ADR-033): reputation → W_rep (rung-capped), scar
   tissue veto + lessons with Governor PR proposals, beliefs (hot schema v3). Phase 4 code-complete.
+- 2026-10-23: PR #11 merged. Phase 6 cockpit built (branch `phase-6-cockpit`, ADR-034): HUD equity chart,
+  #agent-terminal stream, web terminal (`public/`, `/terminal` login link, Command Deck / Court / Memory Vault /
+  Options Lab), shared Discord/web command runner with a parity test. Deployed; WEB_SESSION_SECRET set.
+  All roadmap build phases (0–6) are now code-complete; LIVE still needs the 30-day autonomous PAPER run.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

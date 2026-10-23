@@ -197,6 +197,23 @@ export class AgentCortexDO extends DurableObject<Env> {
     this.begin();
     return this.brain.requestCourt(symbol, by);
   }
+
+  // ---- web terminal (ADR-034) ----
+
+  consumeOnce(id: string): boolean {
+    this.begin();
+    return this.brain.consumeOnce(id);
+  }
+
+  memory(): ReturnType<Brain["memoryView"]> {
+    this.begin();
+    return this.brain.memoryView();
+  }
+
+  equity(days: number): ReturnType<Brain["equityHistory"]> {
+    this.begin();
+    return this.brain.equityHistory(Date.now() - Math.min(35, Math.max(1, days)) * 86_400_000);
+  }
 }
 
 /** Adapts Durable Object SqlStorage to the brain's SqlLike (and counts rows for the free-tier meter). */

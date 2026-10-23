@@ -66,6 +66,10 @@ itself once it has a token:
 3. `pnpm wrangler secret put GH_DISPATCH_TOKEN` and paste it. The next pulse dispatches; each run appears in
    Actions as `research <job>` and in the journal as `DISPATCH`. Revoke the token to fall back to GitHub's crons.
 
+**Web terminal (ADR-034).** Run `/terminal` in Discord; open the link it returns (single use, 10 min). The session
+lasts 12 h. Rotate `WEB_SESSION_SECRET` (`openssl rand -hex 32 | pnpm wrangler secret put WEB_SESSION_SECRET`) to
+sign everyone out.
+
 ## B. Daily operator glance (Discord)
 - `command-center`: rung, dial, breaker band, budget mode, last pulse age.
 - `alarms-and-watchdog` should be quiet. Anything there is actionable.

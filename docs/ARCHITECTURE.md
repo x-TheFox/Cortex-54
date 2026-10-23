@@ -175,10 +175,12 @@ filter checks → opens a PR touching `config/doctrine.yaml`, `config/calibratio
 
 ## 11. Web terminal (Phase 6)
 
-Static assets on the same `cortex` worker (static asset requests are free). React SPA. Auth: Discord OAuth2,
-allow-list of the operator ID, HMAC-signed session cookie. Live state via a hibernatable inbound WebSocket
-to the DO (incoming messages billed 20:1, outgoing free). Workspaces built first: Command Deck,
-Cortex & Clef Studio, Memory Vault. Others later.
+Static assets on the same `cortex` worker (`public/`, free, no build step). Auth: `/terminal` in Discord
+returns a single-use, 10-minute login link; the page trades it for an HMAC-signed HttpOnly session cookie
+(ADR-034; replaces the OAuth plan). Live state by polling `/api/state` every 15 s while visible (replaces the
+WebSocket plan). Workspaces: Command Deck (accounts, positions, equity, regime, every control), Court (sessions,
+rejections), Memory Vault (scar tissue, reputation, beliefs, latest Governor report), Options Lab (shadow
+ledger). Discord and web share one command runner (parity test).
 
 ## 12. Sentinel
 

@@ -46,6 +46,7 @@ describe("interaction parsing", () => {
     const msg = hudMessage({
       now: 0,
       lastPulseAt: null,
+      equity: {},
       budget: { mode: "NORMAL", worst: { resource: "none", fraction: 0 }, fractions: {} },
       journalHead: { seq: 0, sha: "0".repeat(64) },
       outboxPending: 0,
