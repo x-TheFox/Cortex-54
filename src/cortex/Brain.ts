@@ -80,7 +80,7 @@ import {
   baselineSignal,
   regimeProxyRiskOn,
 } from "../strategy/CryptoBreakoutBaseline.ts";
-import type { Bar } from "../strategy/indicators.ts";
+import { atr, type Bar } from "../strategy/indicators.ts";
 import { dueJobs, type WorkflowDispatcher } from "./dispatch.ts";
 import { getKV, one, type SqlLike, setKV } from "./store.ts";
 
@@ -1587,12 +1587,65 @@ ${postmortem}`,
     return { groups: p.groups ?? null, tone: p.tone ?? null };
   }
 
+  /**
+   * Regime gate with the exception lane (ADR-039). Open when the arena's regime allows longs. When it doesn't,
+   * an exceptional catalyst (Tier 1 material/priority at the lane's bar) may still proceed, flagged, if the
+   * posture is a lane posture (never CASH_PRIORITY), the crypto score is above the floor, the regime data is
+   * fresh (stale fails closed, U6), and no other exception position is open.
+   */
+  private regimeGate(
+    arena: string,
+    t1: { material: number; escalate: number } | null,
+    now: number,
+  ): { open: true; exception: boolean } | { open: false; reason: string } {
+    const lane = this.d.regime_gates.exception_lane;
+    const exceptional = () =>
+      lane.enabled &&
+      t1 !== null &&
+      t1.material >= lane.min_tier1_material &&
+      t1.escalate >= lane.min_tier1_escalate &&
+      this.openExceptions() < lane.max_concurrent;
+    if (arena === "CRYPTO") {
+      if (this.cryptoLongsAllowed(now, false)) return { open: true, exception: false };
+      const c = this.freshRegime("CRYPTO", now);
+      if (!c || c.score === null) return { open: false, reason: "crypto regime gate closed (stale)" };
+      if (c.score >= lane.crypto_composite_floor && exceptional()) return { open: true, exception: true };
+      return { open: false, reason: `crypto regime gate closed (score ${c.score.toFixed(0)})` };
+    }
+    if (arena === "EQUITIES") {
+      const eq = this.freshRegime("EQUITIES", now);
+      if (!eq) return { open: false, reason: "equity posture stale" };
+      if (this.d.regime_gates.equity_postures_allowing_entries.includes(eq.posture))
+        return { open: true, exception: false };
+      if ((lane.equity_postures as string[]).includes(eq.posture) && exceptional())
+        return { open: true, exception: true };
+      return { open: false, reason: `equity posture ${eq.posture}` };
+    }
+    return { open: true, exception: false };
+  }
+
+  /** Exception-lane contracts currently held or working on any account. */
+  private openExceptions(): number {
+    const ids = new Set<string>();
+    for (const a of ACCOUNTS) {
+      for (const p of this.positions(a)) ids.add(p.contract_id);
+      for (const o of this.openOrders(a)) if (o.role === "ENTRY") ids.add(o.contract_id);
+    }
+    let n = 0;
+    for (const id of ids) {
+      const c = one<{ json: string }>(this.sql, "SELECT json FROM contracts WHERE contract_id = ?", id);
+      if (c?.json.includes('"regime_exception"')) n++;
+    }
+    return n;
+  }
+
   /** Tier 0: resolve a queue row into tradeable evidence, or a reason it can't be. */
   private async evidenceFor(
     row: { candidate_id: string; payload_json: string; enqueued_at: number },
     now: number,
   ): Promise<
-    { ok: true; evidence: Evidence } | { ok: false; reason: string; symbol: string; arena: string }
+    | { ok: true; evidence: Evidence }
+    | { ok: false; reason: string; symbol: string; arena: string; hypothetical?: Record<string, unknown> }
   > {
     const p = JSON.parse(row.payload_json) as Record<string, unknown>;
     const t1 = (p.tier1 ?? null) as { material: number; direction: string; escalate: number } | null;
@@ -1602,23 +1655,26 @@ ${postmortem}`,
     const { symbol, arena } = target;
     if (t1?.direction === "down") return { ok: false, reason: "bearish catalyst (long-only)", symbol, arena };
     if (this.symbolsInPlay().includes(symbol)) return { ok: false, reason: "already held", symbol, arena };
-    if (arena === "CRYPTO" && !this.cryptoLongsAllowed(now, false)) {
-      return { ok: false, reason: "crypto regime gate closed", symbol, arena };
-    }
-    if (arena === "EQUITIES") {
-      const eq = this.freshRegime("EQUITIES", now);
-      if (!eq || !this.d.regime_gates.equity_postures_allowing_entries.includes(eq.posture)) {
-        return { ok: false, reason: `equity posture ${eq?.posture ?? "stale"}`, symbol, arena };
-      }
-    }
+    const gate = this.regimeGate(arena, t1, now);
     const m = this.deps.market;
-    if (!m) return { ok: false, reason: "no market data", symbol, arena };
+    if (!m) return { ok: false, reason: gate.open ? "no market data" : gate.reason, symbol, arena };
     const [bars, quotes] = await Promise.all([
       arena === "CRYPTO" ? m.cryptoDailyBars([symbol], 70, now) : m.stockDailyBars([symbol], 70, now),
       this.quotesFor([symbol]),
     ]);
     const q = quotes[symbol];
     const b = bars[symbol];
+    if (!gate.open) {
+      // Gradeable refusal (ADR-039): bid + ATR let the Governor score what the gate saved or missed.
+      const a14 = b ? atr(b, 14) : null;
+      return {
+        ok: false,
+        reason: gate.reason,
+        symbol,
+        arena,
+        hypothetical: q && a14 ? { bid: q.bid, atr: a14, gate: true } : {},
+      };
+    }
     if (!q || !b) return { ok: false, reason: "no quote or bars", symbol, arena };
     const created = typeof p.createdAt === "number" ? p.createdAt : row.enqueued_at;
     const evidence = buildEvidence({
@@ -1641,6 +1697,7 @@ ${postmortem}`,
       },
       held: this.symbolsInPlay(),
       memory: this.memoryFor(symbol, arena, now),
+      regimeException: gate.exception,
     });
     return evidence ? { ok: true, evidence } : { ok: false, reason: "not enough bar history", symbol, arena };
   }
@@ -1664,7 +1721,7 @@ ${postmortem}`,
         { candidateId: row.candidate_id, symbol: ev.symbol, arena: ev.arena, source: "tier0" },
         "TIER0",
         [ev.reason],
-        {},
+        ev.hypothetical ?? {},
         now,
       );
       return 0;
@@ -1678,11 +1735,13 @@ ${postmortem}`,
     const est = estimateTokens(req.state, req.questions);
     if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) return 0;
     this.bumpDaily("tier2", now);
+    // One attempt per candidate (like the court): a failing Clef call must not block the queue behind it.
+    this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", row.candidate_id);
     const started = this.deps.now();
     const result = await clef.run("clef", req.state, req.questions);
     const neurons = neuronsFor("clef", result.usage.input_tokens ?? est, this.d);
     this.budget.add("neurons_tier2", neurons, now);
-    const dcs = interpretTier2(result, this.d);
+    const dcs = interpretTier2(result, this.d, { exception: ev.evidence.regimeException });
     this.journal.enqueue(
       "triage_log",
       {
@@ -1718,10 +1777,13 @@ ${postmortem}`,
       tier2: dcs,
       symbol: ev.evidence.symbol,
     };
+    // The row was consumed before the Clef call (one attempt); a pass re-queues it for the court.
     this.sql.exec(
-      "UPDATE triage_queue SET tier = 3, payload_json = ? WHERE candidate_id = ?",
-      JSON.stringify(payload),
+      "INSERT OR REPLACE INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 3, ?, ?, ?)",
       row.candidate_id,
+      ev.evidence.symbol,
+      JSON.stringify(payload),
+      row.enqueued_at,
     );
     this.journal.append(
       "SYSTEM",
@@ -1822,7 +1884,7 @@ ${postmortem}`,
         { candidateId: row.candidate_id, symbol: ev.symbol, arena: ev.arena, source: "court" },
         "TIER0",
         [ev.reason],
-        {},
+        ev.hypothetical ?? {},
         now,
       );
       return 0;
@@ -2600,6 +2662,18 @@ ${postmortem}`,
       this.reject(account, contract, "VALIDATOR", [guard], now);
       return false;
     }
+    const exception = contract.bull_case_receipts.some((r) => r.evidence_id === "regime_exception");
+    const lane = this.d.regime_gates.exception_lane;
+    if (exception && this.openExceptions() >= lane.max_concurrent) {
+      this.reject(
+        account,
+        contract,
+        "VALIDATOR",
+        ["exception lane full (one exceptional position at a time)"],
+        now,
+      );
+      return false;
+    }
     const repWeight = this.reputationWeight(sourceKey);
     this.journal.append(
       account,
@@ -2635,6 +2709,7 @@ ${postmortem}`,
         market: { bid: q.bid, ask: q.ask, quoteAt: q.at },
         asset,
         reputationWeight: repWeight,
+        regimeMultiplier: exception ? lane.size_multiplier : 1,
         now,
       },
       this.d,

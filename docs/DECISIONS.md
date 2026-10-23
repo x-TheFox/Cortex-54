@@ -373,3 +373,22 @@ records `RESET`, and the Governor counts RESET as an intervention, which restart
 Market data, budgets, memory and regime are kept. Keys rotate in four places: cortex secrets, sentinel secrets,
 GitHub secrets, local `.dev.vars` (RUNBOOK C).
 
+## ADR-039 — Exceptional-catalyst lane through a closed regime gate; gate refusals become measurable (2026-10-23)
+**Context:** The operator pointed out that a day-level REDUCE_ONLY posture blocks every equity long, so a huge
+same-day catalyst would be missed. The regime gate (FINSABER's lesson: unconstrained LLM traders over-buy in bear
+markets) refused at Tier 0 before prices were fetched, so the refusals carried no entry/stop and the Governor could
+never grade what the gate cost.
+**Decision:** (1) Exception lane (`regime_gates.exception_lane`): when the gate is closed for an ordinary reason
+(equities REDUCE_ONLY; crypto composite below 40 but ≥ 25), a catalyst may proceed if Tier 1 rated it exceptional
+(P(material) ≥ 0.85 and priority ≥ 2.2). It is flagged with a `regime_exception` receipt, must clear a stricter
+Tier 2 bar (long_favored ≥ 0.85; regime alignment waived because it is counter-regime by definition), then the
+normal court, and trades at half size (`regimeMultiplier` 0.5 in the sizer, which can only shrink risk) with at most
+one exception position open across accounts. (2) Never through the lane: CASH_PRIORITY, crypto below the floor, or
+stale regime data (fail closed, U6). (3) Every gate refusal now fetches prices first and records a bid/ATR
+hypothetical, so the rejection ledger grades it at 24h/72h/7d; the Governor reports the gate's 72h cost
+("positive avg R = the gate is costing money") as evidence for tightening or loosening it by PR. (4) Fix found on
+the way: a Tier 2 candidate whose Clef call threw was retried every pulse and blocked the queue; Tier 2 is now one
+attempt per candidate, like the court.
+**Honest limit:** no filter can both never miss a trade and never take a bad one; the lane trades a small, capped
+amount of risk for the big catalysts, and the ledger measures both sides.
+

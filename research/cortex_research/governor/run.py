@@ -232,6 +232,17 @@ def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict],
     ]
 
 
+def gate_cost(rejections: list[dict], grades: list[dict]) -> str:
+    """What the regime gate refused, graded at 72 h: positive average R means it is costing money."""
+    gated = {rj["id"] for rj in rejections if any(("regime gate closed" in str(c)) or str(c).startswith("equity posture")
+                                                   for c in (jload(rj.get("reason_codes"), []) or []))}
+    rs = [float(g["outcome_r"]) for g in grades if g["rejection_id"] in gated and g["horizon"] == "72h" and g.get("outcome_r") is not None]
+    if not rs:
+        return f"{len(gated)} refusal(s) recorded; none graded at 72 h yet"
+    wins = sum(1 for r in rs if r > 0)
+    return f"{len(rs)} graded at 72 h · avg R {sum(rs) / len(rs):+.2f} · {wins} would have won · positive avg R = the gate is costing money"
+
+
 def options_gate(events: list[dict]) -> list[dict]:
     """Phase 5 exit (≥30 shadow trades scored) and RISK_DOCTRINE 'options live' (positive post-fee expectancy)."""
     rs = [float(e["r"]) for e in events if e["kind"] == "CLOSE" and e.get("r") is not None]
@@ -356,6 +367,7 @@ def main() -> int:
     sections = [
         {"name": "Trades", "value": f"{len(trades)} closed · " + (", ".join(f"{s}: n={st['n']} E[R]={st['expectancy_r']} PF={st['profit_factor']}" for s, st in stats.items()) or "none yet")},
         {"name": "Options shadow lab", "value": options_summary(options)},
+        {"name": "Regime gate (ADR-039)", "value": gate_cost(rejections, graded_rows + new_grades)},
         {"name": "Memory", "value": ("reputation: " + ("; ".join(f"{r['source']} n={r['signals']} E[R] {r['expectancy_r_30d']:+.2f} w={r['weight']}" for r in rep) or "no attributed outcomes yet")
                                     + f" · beliefs {len(bel)} · scar proposals {len(new_scars)}" + (" (PR)" if a.weekly and new_scars else ""))},
         {"name": "Funnel", "value": f"Tier 1 items {sum(len(jload(x['candidate_ids'], [])) for x in t1)} · Tier 2 {len(t2)} · court sessions {sum(1 for r in journal if r['kind'] == 'COURT')} · contracts {len(contracts)}"},

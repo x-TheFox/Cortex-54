@@ -14,6 +14,7 @@ export interface SizingInput {
   bearLethality: number; // 0..1
   reputationWeight: number; // W_rep
   breakerMultiplier: number; // M_breaker
+  regimeMultiplier?: number; // ADR-039 exception lane (≤ 1; shrink only)
   entry: number;
   stop: number;
   atr: number;
@@ -67,6 +68,7 @@ export function sizePosition(i: SizingInput, d: Doctrine): SizingResult {
       (1 - bearPenalty(i.bearLethality, d)) *
       wRep *
       i.breakerMultiplier *
+      Math.min(1, Math.max(0, i.regimeMultiplier ?? 1)) *
       edgeGate(i.pWin, d),
   );
   if (!(rEff > 0)) return { ok: false, reasons: ["effective risk is zero (no edge, breaker, or bear veto)"] };

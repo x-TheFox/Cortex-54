@@ -63,7 +63,16 @@ export interface Tier2Decision {
 }
 
 /** Missing answers fail closed. */
-export function interpretTier2(r: ClefResult, d: Doctrine): Tier2Decision {
+export function interpretTier2(
+  r: ClefResult,
+  d: Doctrine,
+  opts: { exception?: boolean } = {},
+): Tier2Decision {
+  // ADR-039: an exception-lane candidate is counter-regime by definition, so regime alignment is waived and
+  // long_favored must clear the stricter exception bar instead.
+  const passAt = opts.exception
+    ? d.regime_gates.exception_lane.min_tier2_long_favored
+    : d.funnel.tier2.pass_threshold;
   const lf = noul(r.answers.long_favored);
   const ra = noul(r.answers.regime_alignment);
   const bl = noul(r.answers.bear_lethality);
@@ -73,9 +82,8 @@ export function interpretTier2(r: ClefResult, d: Doctrine): Tier2Decision {
   if (lf === null || ra === null || bl === null || sc === null || q === null)
     reasons.push("incomplete Clef answers");
   const quality100 = q === null ? 0 : (q / (QUALITY_LEVELS.length - 1)) * 100;
-  if ((lf ?? 0) < d.funnel.tier2.pass_threshold)
-    reasons.push(`long_favored ${(lf ?? 0).toFixed(2)} < ${d.funnel.tier2.pass_threshold}`);
-  if ((ra ?? 0) < 0.5) reasons.push(`regime_alignment ${(ra ?? 0).toFixed(2)} < 0.5`);
+  if ((lf ?? 0) < passAt) reasons.push(`long_favored ${(lf ?? 0).toFixed(2)} < ${passAt}`);
+  if (!opts.exception && (ra ?? 0) < 0.5) reasons.push(`regime_alignment ${(ra ?? 0).toFixed(2)} < 0.5`);
   if (sc === "no_trade" || sc === "news_fade") reasons.push(`setup ${sc}`);
   if (quality100 < d.funnel.tier3.min_structural_score) {
     reasons.push(`quality ${quality100.toFixed(0)} < ${d.funnel.tier3.min_structural_score}`);
