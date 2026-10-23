@@ -204,7 +204,7 @@ def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict],
     for r in journal:
         p = jload(r["payload_json"], {}) or {}
         k = r["kind"]
-        if k in ("KILL_SEEN", "COURT_REQUEST") or (k == "UNLOCK" and p.get("by") != "auto") or (k == "DIAL") or (
+        if k in ("KILL_SEEN", "COURT_REQUEST", "RESET") or (k == "UNLOCK" and p.get("by") != "auto") or (k == "DIAL") or (
             k == "MODE" and ("discord:" in str(p.get("reason", "")) or "web:" in str(p.get("reason", "")))
         ) or (k == "FLATTEN" and "operator" in str(p.get("why", ""))):
             interventions.append(r["ts"])

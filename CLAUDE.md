@@ -384,5 +384,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   `web/` → `public/` via `pnpm web:build` (deploy:cortex runs it); `pnpm web:dev` for synthetic-data design work.
 - 2026-10-23: ADR-037: Tier 1 bar 0.45/1.2, baseline on all 13 crypto pairs, HUD buttons (pause/resume/2-step
   flatten), in-panel plain-English guide. LIVE remains dormant pending the operator's decision.
+- 2026-10-23 13:18 UTC: fresh start (ADR-038). Old paper keys had returned 401 since 12:59; the operator's new
+  paper account ($54.00, no history) replaced them everywhere and `/admin/reset` cleared PAPER's hot state.
+  The 7-day and 30-day autonomous clocks restart from this RESET.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

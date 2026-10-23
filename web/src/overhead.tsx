@@ -155,7 +155,7 @@ export function AccountPanel({ a, run, busy }: { a: AccountView; run: Run; busy:
           <button
             type="button"
             className="pb"
-            disabled={busy || pm.trim().length < 20}
+            disabled={busy || pm.trim().length < 50}
             onClick={() => void run("unlock", { account: a.account, postmortem: pm })}
           >
             <span className="on-amber">LOCK</span>

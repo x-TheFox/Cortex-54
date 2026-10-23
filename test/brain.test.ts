@@ -1384,3 +1384,33 @@ describe("setup screeners (ADR-035)", () => {
     expect((await t.brain.ingestBatch(batch(T0))).ok).toBe(false);
   });
 });
+
+describe("fresh start (ADR-038)", () => {
+  it("refuses while the broker holds a position, then resets a flat account", async () => {
+    const t = setup();
+    await t.brain.pulse();
+    t.paper.positionsBySymbol.set("ETH/USD", { qty: 0.001, avg: 3000 });
+    const refused = await t.brain.resetAccount("PAPER", "test");
+    expect(refused.ok).toBe(false);
+    expect(refused.message).toContain("not flat");
+    t.paper.positionsBySymbol.delete("ETH/USD");
+    t.sql.exec("UPDATE accounts SET hwm_cents = 9999, breaker = 'YELLOW' WHERE account = 'PAPER'");
+    const r = await t.brain.resetAccount("PAPER", "test");
+    expect(r.ok).toBe(true);
+    const row = t.sql.exec<{ hwm_cents: number | null; breaker: string }>(
+      "SELECT hwm_cents, breaker FROM accounts WHERE account = 'PAPER'",
+    )[0];
+    expect(row?.hwm_cents).toBeNull();
+    expect(row?.breaker).toBe("GREEN");
+    expect(t.sql.exec("SELECT * FROM cursors WHERE name = 'activities:PAPER'")).toHaveLength(0);
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'RESET'").get()).toEqual({ n: 1 });
+    expect(
+      t.notifier.sent.some(
+        (m) => m.channel === "alarms" && m.msg.content?.includes("reset to a fresh start"),
+      ),
+    ).toBe(true);
+    // the next pulse re-baselines the activity cursor and works normally
+    const p = await t.brain.pulse();
+    expect(p.accounts.PAPER?.ok).toBe(true);
+  });
+});

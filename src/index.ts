@@ -166,6 +166,29 @@ const EXPORT_TABLES = new Set([
   "options_shadow",
 ]);
 
+/** Operator fresh start for one account (ADR-038): HMAC-signed like ingest; never exposed in Discord or the web. */
+async function adminReset(request: Request, env: Env): Promise<Response> {
+  if (!env.INGEST_HMAC_SECRET) return new Response("not configured", { status: 503 });
+  const body = await request.text();
+  if (body.length > 500) return new Response("too large", { status: 413 });
+  const ok = await verifySignedBody(
+    env.INGEST_HMAC_SECRET,
+    request.headers.get("x-cortex-signature"),
+    request.headers.get("x-cortex-timestamp"),
+    body,
+  );
+  if (!ok) return new Response("bad signature", { status: 401 });
+  let q: { account?: unknown };
+  try {
+    q = JSON.parse(body) as typeof q;
+  } catch {
+    return new Response("bad json", { status: 400 });
+  }
+  if (q.account !== "PAPER" && q.account !== "LIVE") return new Response("bad account", { status: 400 });
+  const r = await brain(env).resetAccount(q.account, "operator:admin-reset");
+  return Response.json(r, { status: r.ok ? 200 : 409 });
+}
+
 async function governorExport(request: Request, env: Env): Promise<Response> {
   if (!env.INGEST_HMAC_SECRET) return new Response("not configured", { status: 503 });
   const body = await request.text();
@@ -228,6 +251,10 @@ export default {
       }
       const receipt = await brain(env).ingest(parsed);
       return Response.json(receipt, { status: receipt.ok ? 200 : 422 });
+    }
+
+    if (request.method === "POST" && url.pathname === "/admin/reset") {
+      return adminReset(request, env);
     }
 
     if (request.method === "POST" && url.pathname === "/governor/export") {

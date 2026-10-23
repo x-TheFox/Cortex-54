@@ -3041,6 +3041,63 @@ ${postmortem}`,
     return `${account} autonomy dial → Stop ${stop}.`;
   }
 
+  /**
+   * Fresh start for one account (operator, signed admin route only — ADR-038): used after switching to a new
+   * broker account. Refuses unless the broker is flat with no open orders. Wipes that account's hot trading
+   * state and re-creates its row from the doctrine; the journal is append-only, so it records RESET and keeps
+   * its chain (the Governor counts RESET as the start of the autonomous clock).
+   */
+  async resetAccount(account: AccountId, by: string): Promise<{ ok: boolean; message: string }> {
+    const now = this.deps.now();
+    const broker = this.deps.brokers[account];
+    if (!broker) return { ok: false, message: `${account} has no broker keys` };
+    const [positions, orders, acct] = await Promise.all([
+      broker.positions(),
+      broker.openOrders(),
+      broker.account(),
+    ]);
+    if (positions.length > 0 || orders.length > 0) {
+      return {
+        ok: false,
+        message: `${account} is not flat at the broker (${positions.length} positions, ${orders.length} open orders)`,
+      };
+    }
+    for (const t of [
+      "positions",
+      "orders",
+      "risk_reservations",
+      "exits",
+      "unsettled",
+      "seen_activities",
+      "equity_history",
+    ]) {
+      this.sql.exec(`DELETE FROM ${t} WHERE account = ?`, account);
+    }
+    this.sql.exec("DELETE FROM cursors WHERE name = ?", `activities:${account}`);
+    this.sql.exec("DELETE FROM accounts WHERE account = ?", account);
+    const cfg = this.d.accounts[account];
+    this.sql.exec(
+      "INSERT INTO accounts (account, autonomy_stop, day) VALUES (?, ?, ?)",
+      account,
+      cfg?.autonomy_stop ?? 0,
+      utcDay(now),
+    );
+    this.sql.exec("DELETE FROM settings WHERE key IN ('equity_hour', 'day_pulses', 'day_max_gap_s')");
+    const equity = Number(acct.equity);
+    this.journal.append(
+      account,
+      "RESET",
+      null,
+      { by, broker_equity: equity, reason: "fresh start on a new broker account" },
+      now,
+    );
+    await this.flushJournal();
+    await this.deps.notifier.post("alarms", {
+      content: `🔄 ${account} reset to a fresh start by ${by}: broker equity $${equity.toFixed(2)}, history cleared, 30-day clock restarted.`,
+    });
+    return { ok: true, message: `${account} reset: broker equity $${equity.toFixed(2)}` };
+  }
+
   unlock(account: AccountId, postmortem: string, by: string): string {
     const now = this.deps.now();
     if (postmortem.trim().length < 50) return "Postmortem must be at least 50 characters.";

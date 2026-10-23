@@ -87,6 +87,13 @@ sign everyone out.
 
 Manual last resort: Alpaca dashboard → "Close all positions" + "Cancel all orders".
 
+### Switching to a new paper account (fresh start, ADR-038)
+1. Rotate `ALPACA_PAPER_KEY_ID` / `ALPACA_PAPER_SECRET` in: `pnpm wrangler secret put …` (cortex), the same with
+   `-c workers/sentinel/wrangler.jsonc`, `gh secret set …`, and local `.dev.vars`.
+2. With the new account flat, POST a signed `{"account":"PAPER"}` to `/admin/reset` (HMAC over `ts.body` with
+   `INGEST_HMAC_SECRET`, headers `x-cortex-timestamp` and `x-cortex-signature: sha256=…`). It returns the broker
+   equity and posts to #alarms; the 30-day clock restarts.
+
 ## D. Drills
 - Weekly (paper): `/kill` via SENTINEL, verify flat within 2 pulses, re-arm with `/dial`.
 - Monthly: revoke paper keys to simulate auth failure; verify REDUCE_ONLY + alarm.

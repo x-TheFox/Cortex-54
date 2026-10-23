@@ -198,6 +198,11 @@ export class AgentCortexDO extends DurableObject<Env> {
     return this.brain.requestCourt(symbol, by);
   }
 
+  async resetAccount(account: AccountId, by: string): Promise<{ ok: boolean; message: string }> {
+    this.begin();
+    return this.brain.resetAccount(account, by);
+  }
+
   // ---- web terminal (ADR-034) ----
 
   consumeOnce(id: string): boolean {
