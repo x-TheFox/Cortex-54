@@ -16,3 +16,10 @@ __pycache__/
 research/.cache/
 research/.venv/
 research/.vendor/
+
+# web terminal build output (pnpm web:build)
+public/
+# impeccable decision/review scratch
+.impeccable/decision/
+.impeccable/review/
+.impeccable/questions/

@@ -42,6 +42,46 @@ describe("interaction parsing", () => {
     expect(parseChannels("not json")).toEqual({});
   });
 
+  it("HUD offers pause and a two-step flatten only for a configured PAPER account", () => {
+    const base = {
+      now: 0,
+      lastPulseAt: null,
+      equity: {},
+      budget: { mode: "NORMAL" as const, worst: { resource: "x", fraction: 0 }, fractions: {} },
+      journalHead: { seq: 1, sha: "0".repeat(64) },
+      outboxPending: 0,
+      regimes: [],
+    };
+    expect(hudMessage({ ...base, accounts: [] } as never).components).toEqual([]);
+    const paper = {
+      account: "PAPER",
+      configured: true,
+      mode: "NORMAL",
+      modeReason: null,
+      positions: [],
+      openOrders: [],
+      breaker: "GREEN",
+      equityUsd: 54,
+      brokerEquityUsd: 54,
+      modeledCostUsd: 0,
+      hwmUsd: 54,
+      rung: "R1",
+      autonomyStop: 2,
+      locked: false,
+      ordersToday: 0,
+    };
+    const ids = (m: ReturnType<typeof hudMessage>) =>
+      (m.components ?? []).flatMap((r) => r.components.map((c) => c.custom_id));
+    expect(ids(hudMessage({ ...base, accounts: [paper] } as never))).toEqual([
+      "pause:PAPER",
+      "flatten:PAPER",
+    ]);
+    expect(ids(hudMessage({ ...base, accounts: [{ ...paper, mode: "PAUSED" }] } as never))).toEqual([
+      "resume:PAPER",
+      "flatten:PAPER",
+    ]);
+  });
+
   it("HUD renders without configured accounts", () => {
     const msg = hudMessage({
       now: 0,

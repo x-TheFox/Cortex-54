@@ -247,7 +247,8 @@ src/
   clef/                    Clef client (real response format), Tier 1 triage, Tier 2 structure (pure)
   court/                   Tier 0 evidence, LLM router + providers, versioned prompts, bull/bear/synth/contract (pure)
   data/ workflows/         (later)
-public/                   web terminal (static assets, no build): index.html, app.js, app.css, _headers (CSP)
+web/                      web terminal: React 19 + Vite (dark cockpit, ADR-036); builds into public/ (gitignored);
+                          mock-api.ts serves synthetic data for `pnpm web:dev` only. PRODUCT.md / DESIGN.md at root
 workers/sentinel/         independent watchdog + kill-switch worker (own wrangler.jsonc, vendored verify.ts,
                           writes the KV kill flag the brain reads — ADR-015)
 research/                 Python (uv): cortex_research.run crypto|equity|world — runs pinned upstream skills, signs,
@@ -271,7 +272,8 @@ pnpm lint                 # biome check (pnpm format to fix)
 pnpm dev                  # wrangler dev (local DO + D1; AI calls hit the real free quota)
 pnpm db:migrate:local     # apply migrations to local D1
 pnpm db:migrate:remote    # apply migrations to the real D1 (operator only)
-pnpm deploy:cortex        # wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists). NOT `pnpm deploy` (pnpm builtin)
+pnpm web:dev              # web terminal on localhost with synthetic data (/?alert, /?empty scenarios)
+pnpm deploy:cortex        # builds web/ then wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists). NOT `pnpm deploy` (pnpm builtin)
 pnpm deploy:sentinel      # deploy the independent watchdog/kill-switch worker
 pnpm discord:setup        # idempotent: CORTEX-54 category + 8 channels, sentinel webhook, guild slash commands
 gh workflow run research -f job=crypto    # or job=equity | world | options | screeners: run a research batch now
@@ -378,5 +380,9 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-23: PR #12 merged. Spec gap pass (ADR-035): correlation guard, 72 h earnings blackout (Nasdaq + FMP
   calendar, fail closed), Stockbee setup screeners → Tier 2 (`gh workflow run research -f job=screeners`),
   daily journal chain verification, shadow-twin divergence; unused re-peg setting removed. Hot schema v5.
+- 2026-10-23: PR #13 merged. Web terminal rebuilt in React as a dark cockpit (branch `web-react`, ADR-036):
+  `web/` → `public/` via `pnpm web:build` (deploy:cortex runs it); `pnpm web:dev` for synthetic-data design work.
+- 2026-10-23: ADR-037: Tier 1 bar 0.45/1.2, baseline on all 13 crypto pairs, HUD buttons (pause/resume/2-step
+  flatten), in-panel plain-English guide. LIVE remains dormant pending the operator's decision.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

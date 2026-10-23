@@ -113,8 +113,8 @@ funnel:
     batch_max_items: 1 # one item per Clef call: batching compresses scores (ADR-027)
     # Observed live: GDELT noise ≈ 0.15, borderline headlines ≈ 0.45, a real BTC crash headline 0.88. Tier 1 is
     # only a noise filter; Clef 27B (Tier 2) and the court are the strict gates (ADR-029).
-    escalate_threshold: 0.55 # P(material) needed to promote to Tier 2
-    min_escalate_score: 1.5 # probability-weighted 0 Reject … 3 Deep (1 Watchlist, 2 Shadow)
+    escalate_threshold: 0.45 # P(material) needed to promote to Tier 2 (ADR-037: 0.55 promoted 0 of 38/day)
+    min_escalate_score: 1.2 # probability-weighted 0 Reject … 3 Deep (1 Watchlist, 2 Shadow)
     max_batches_per_pulse: 8 # ≈1.2 neurons per call → ≤ ~10 neurons per pulse
   tier2:
     model: "@cf/cloudflare/clef"
@@ -181,7 +181,22 @@ strategies:
   - id: CRYPTO_BREAKOUT_BASELINE_V1
     arena: CRYPTO
     status: ACTIVE # Phase 1 plumbing strategy, deterministic, no LLM
-    universe: [BTC/USD, ETH/USD, SOL/USD]
+    universe: # ADR-037: every liquid pair the court can trade
+      [
+        BTC/USD,
+        ETH/USD,
+        SOL/USD,
+        XRP/USD,
+        LINK/USD,
+        AVAX/USD,
+        DOGE/USD,
+        LTC/USD,
+        BCH/USD,
+        DOT/USD,
+        UNI/USD,
+        AAVE/USD,
+        ADA/USD,
+      ]
     params:
       lookback_days: 20
       atr_period: 14
