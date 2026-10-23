@@ -115,6 +115,7 @@ const EXPORT_TABLES = new Set([
   "triage_log",
   "llm_calls",
   "postmortems",
+  "options_shadow",
 ]);
 
 async function governorExport(request: Request, env: Env): Promise<Response> {

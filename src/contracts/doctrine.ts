@@ -201,6 +201,12 @@ export function doctrineViolations(d: Doctrine, c: Constitution): string[] {
     if (s.accounts.includes("LIVE") && !c.allowed.live_arenas.includes(s.arena)) {
       v.push(`strategy ${s.id} trades ${s.arena} on LIVE, which the constitution forbids`);
     }
+    if (s.arena === "OPTIONS") {
+      const st = s.params?.structure;
+      if (typeof st !== "string" || !c.allowed.options_structures_paper.includes(st)) {
+        v.push(`strategy ${s.id}: options structure ${String(st)} is not allowed by the constitution`);
+      }
+    }
   }
 
   if (d.llm_routing.require_cross_family) {

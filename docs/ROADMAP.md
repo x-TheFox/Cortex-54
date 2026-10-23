@@ -67,6 +67,8 @@ Remaining for the Phase 3 exit: ≥10 COURT contracts produced and executed/decl
 - Greeks/IV, spread structurer, PMCC rubric (ts-hot); options chain via Alpaca indicative feed.
 - Separate paper account if Alpaca allows multiple; otherwise virtual ledger in D1 with pessimistic fills.
 - **Exit:** ≥30 shadow options trades logged and scored.
+- Status 2026-10-22: lab live as a Python batch (ADR-031): bull put / bull call debit / PMCC on a virtual D1
+  ledger with pessimistic fills, scored by the Governor. Greeks/spreads/PMCC run `py-batch`, not `ts-hot`.
 
 ## Phase 6 — Cockpit polish
 - Discord command-center HUD (embeds + QuickChart), all 8 channels wired.

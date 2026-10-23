@@ -233,3 +233,25 @@ violations, worst daily pulse gap (new DAY_ROLL fields), Brier. (5) The outbox i
 `EXISTS` guard on `rejections(id)`, so a bad foreign key is skipped instead of failing (and jamming) the batch.
 **Not yet:** source reputation, beliefs with decay, scar-tissue PRs, Monte Carlo beyond the bootstrap.
 
+## ADR-031 — Options shadow lab runs as a Python batch with a virtual D1 ledger (2026-10-22)
+**Context:** ROADMAP Phase 5 listed Greeks/spreads/PMCC as `ts-hot` (in the DO). The shadow lab isn't latency
+sensitive, a chain scan costs ~6 Alpaca requests per underlying (more than a pulse should spend), and the ported
+staskh code is Python. Alpaca allows one paper account per key set, and that one is the $54 PAPER account.
+**Decision:** (1) `research.yml` job `options` (14:50 and 19:40 UTC on weekdays) runs
+`cortex_research.options.lab`: it reads the ledger via `/governor/export`, marks open trades on the free
+**indicative** options feed, closes by rule (target / stop / time / expiry settle at intrinsic), and opens new
+structures only during market hours, with spot above SMA50 (all three are bullish), ≤1 open per
+strategy×underlying, ≤15 open, ≤6 opens per run. (2) Three SHADOW strategies in doctrine: bull put credit spread
+(`vertical_credit`), bull call debit spread (`vertical_debit`) and PMCC (`diagonal`, the ported staskh rubric,
+min score 7). `config:build` rejects an OPTIONS strategy whose structure isn't in
+`constitution.allowed.options_structures_paper`, and the brain re-checks this on ingest. (3) Fills are
+pessimistic: sell at the bid, buy at the ask on every leg, $0.05 per contract per fill. One contract per trade;
+results in R = P&L / max loss. Each OPEN records `sizer_permits_live` (max loss ≤ the R1 LIVE per-trade cap):
+today that is always false (one SPY spread risks hundreds of dollars against a $1.35 cap). (4) Ledger: D1
+`options_shadow` (migration 0003), one OPEN and at most one CLOSE per `trade_id`, append-only triggers. The
+brain stores events and posts a card; **nothing in this path can reach an order endpoint**. (5) The Governor
+scores lab closes as strategy fitness and tracks the Phase 5 exit (≥30 scored) and the "options live"
+criterion.
+**Known gaps:** no rolls (the PMCC closes before its short expires); no early assignment model; the indicative
+feed may differ from OPRA; no earnings filter (no free calendar we trust).
+

@@ -219,6 +219,51 @@ strategies:
     universe:
       [COIN, MSTR, IBIT, SPY, QQQ, IWM, AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA, AMD, AVGO, NFLX, JPM, XOM]
     accounts: [PAPER]
+  # Phase 5 options shadow lab (ADR-031): virtual ledger in D1, pessimistic fills, never sent to a broker.
+  # Runs in research.yml (job=options). `structure` must be in constitution.allowed.options_structures_paper.
+  - id: OPTIONS_BULL_PUT_SPREAD_V1
+    arena: OPTIONS
+    status: SHADOW
+    universe: [SPY, QQQ, IWM, AAPL, MSFT, NVDA, AMZN, META, GOOGL]
+    params:
+      structure: vertical_credit
+      dte: [21, 45]
+      short_delta: [0.20, 0.30] # |delta| of the short put
+      width_pct: 0.01 # long put ≈ 1% of spot below the short
+      min_credit_to_width: 0.18 # natural pricing (sell bid / buy ask) on a ~0.25-delta short
+      take_profit_pct: 0.5 # close when cost to close ≤ 50% of the credit
+      stop_multiple: 2.0 # close when cost to close ≥ 2× credit
+      exit_dte: 7
+    accounts: [PAPER]
+  - id: OPTIONS_BULL_CALL_DEBIT_V1
+    arena: OPTIONS
+    status: SHADOW
+    universe: [SPY, QQQ, IWM, AAPL, MSFT, NVDA, AMZN, META, GOOGL]
+    params:
+      structure: vertical_debit
+      dte: [30, 60]
+      long_delta: [0.50, 0.62]
+      width_pct: 0.04
+      max_debit_to_width: 0.6
+      take_profit_pct: 0.5 # of max profit
+      stop_pct: 0.5 # of the debit
+      exit_dte: 7
+    accounts: [PAPER]
+  - id: OPTIONS_PMCC_V1
+    arena: OPTIONS
+    status: SHADOW
+    universe: [SPY, QQQ, AAPL, MSFT, NVDA, AMZN, META, GOOGL]
+    params:
+      structure: diagonal
+      leaps_min_dte: 270
+      leaps_delta: 0.80
+      short_dte: [7, 21]
+      short_delta: 0.20
+      min_rubric_score: 7 # ported scanner-pmcc rubric (max 11 + trend/premium adjustments)
+      take_profit_pct: 0.25 # of the net debit
+      stop_pct: 0.4 # of the net debit
+      exit_short_dte: 2 # close the whole diagonal before the short expires (rolls not modeled)
+    accounts: [PAPER]
   - id: EQUITY_MOMENTUM_BURST_V1
     arena: EQUITIES
     status: SHADOW

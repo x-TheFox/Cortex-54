@@ -32,6 +32,14 @@ describe("config", () => {
     expect(doctrineViolations(d, constitution)).toContain("R1.per_trade_risk > constitution");
   });
 
+  it("rejects options strategies whose structure the constitution does not allow", () => {
+    const d = clone();
+    const s = d.strategies.find((x) => x.arena === "OPTIONS");
+    if (!s?.params) throw new Error("no options strategy in doctrine");
+    s.params.structure = "naked_put";
+    expect(doctrineViolations(d, constitution).some((v) => v.includes("naked_put"))).toBe(true);
+  });
+
   it("rejects LIVE autonomy above the unratified maximum", () => {
     const d = clone();
     const live = d.accounts.LIVE;
