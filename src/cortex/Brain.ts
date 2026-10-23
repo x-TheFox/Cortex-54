@@ -18,6 +18,7 @@ import {
 import {
   type Batch,
   BatchSchema,
+  BeliefSchema,
   FitnessSchema,
   GradeSchema,
   OptionsEventSchema,
@@ -39,6 +40,7 @@ import {
   BullSchema,
   buildCourtContract,
   buildSynth,
+  COURT_STRATEGY,
   calibrate,
   checkBull,
   interpretSynth,
@@ -69,6 +71,7 @@ import { type Band, evaluateBreaker } from "../risk/CircuitBreakerLadder.ts";
 import { type Arena, modeledPaperCostCents, roundTripFeeRate } from "../risk/fees.ts";
 import { type AccountView, type AssetView, validateEntry } from "../risk/PreTradeValidator.ts";
 import { effectiveRung, type RungName } from "../risk/rungs.ts";
+import { type Facts, type ScarTissue, scarLessons, scarVetoes } from "../risk/scar.ts";
 import {
   STRATEGY_ID as BASELINE_ID,
   baselineParams,
@@ -179,6 +182,8 @@ export interface BrainDeps {
   calibration?: Calibration | null;
   /** Starts the GitHub batch workflows on schedule (ADR-032). Null leaves scheduling to GitHub's own crons. */
   dispatcher?: WorkflowDispatcher | null;
+  /** Operator-merged scar tissue (config/scar-tissue.yaml). Hard filters veto entries; context rules are lessons. */
+  scar?: ScarTissue | null;
 }
 
 export interface PulseReport {
@@ -1428,6 +1433,79 @@ ${postmortem}`,
   }
 
   /** Context shared by Tier 2 and the court. */
+  private scarRules() {
+    return this.deps.scar?.rules ?? [];
+  }
+
+  private catalystKey(receipts: readonly { evidence_id: string; metric_value: unknown }[]): string | null {
+    const r = receipts.find((x) => x.evidence_id === "catalyst_source");
+    return r && typeof r.metric_value === "string" ? r.metric_value : null;
+  }
+
+  /** What a scar rule can see about an entry (ADR-033). Unknown facts never match a rule. */
+  facts(
+    arena: string,
+    strategyId: string,
+    origin: string,
+    symbol: string,
+    source: string | null,
+    now: number,
+  ): Facts {
+    const reg = arena === "CRYPTO" || arena === "EQUITIES" ? this.freshRegime(arena, now) : null;
+    const d = new Date(now);
+    return {
+      symbol,
+      arena,
+      strategy_id: strategyId,
+      origin,
+      posture: reg?.posture ?? null,
+      regime_score: reg?.score ?? null,
+      utc_hour: d.getUTCHours(),
+      utc_dow: d.getUTCDay(),
+      catalyst_source: source,
+    };
+  }
+
+  /** W_rep for a catalyst source; 1 until the Governor has enough signals for it (doctrine). */
+  reputationWeight(source: string | null): number {
+    if (!source) return 1;
+    try {
+      const map = JSON.parse(getKV(this.sql, "reputation") ?? "{}") as Record<
+        string,
+        { weight: number; signals: number }
+      >;
+      const r = map[source];
+      if (!r || r.signals < this.d.sizing.reputation_weight.min_signals_before_adjusting) return 1;
+      return r.weight;
+    } catch {
+      return 1;
+    }
+  }
+
+  /** Scar lessons + up to 3 beliefs about the symbol/arena whose decayed confidence is ≥ 0.35. */
+  private memoryFor(symbol: string, arena: string, now: number): { lessons: string[]; beliefs: string[] } {
+    const rows = this.sql.exec<{
+      statement: string;
+      c0: number;
+      half_life_days: number;
+      validated_at: number;
+    }>(
+      "SELECT statement, c0, half_life_days, validated_at FROM beliefs WHERE subject IN (?, ?) AND status != 'ARCHIVED'",
+      symbol,
+      arena,
+    );
+    const beliefs = rows
+      .map((b) => ({
+        s: b.statement,
+        c: b.c0 * 0.5 ** ((now - b.validated_at) / 86_400_000 / b.half_life_days),
+      }))
+      .filter((b) => b.c >= 0.35)
+      .sort((a, b) => b.c - a.c)
+      .slice(0, 3)
+      .map((b) => `${b.s} (confidence ${b.c.toFixed(2)})`);
+    return { lessons: scarLessons(this.scarRules(), arena, utcDay(now)).slice(0, 5), beliefs };
+  }
+
   private regimeContext(now: number): Record<string, unknown> {
     const c = this.freshRegime("CRYPTO", now);
     const e = this.freshRegime("EQUITIES", now);
@@ -1500,6 +1578,7 @@ ${postmortem}`,
         tier1: t1,
       },
       held: this.symbolsInPlay(),
+      memory: this.memoryFor(symbol, arena, now),
     });
     return evidence ? { ok: true, evidence } : { ok: false, reason: "not enough bar history", symbol, arena };
   }
@@ -1687,6 +1766,21 @@ ${postmortem}`,
       return 0;
     }
     const e = ev.evidence;
+    const vetoes = scarVetoes(
+      this.scarRules(),
+      this.facts(e.arena, COURT_STRATEGY[e.arena], "COURT", e.symbol, this.catalystKey(e.receipts), now),
+      utcDay(now),
+    );
+    if (vetoes.length > 0) {
+      this.rejectCandidate(
+        { candidateId: row.candidate_id, symbol: e.symbol, arena: e.arena, source: "court" },
+        "SCAR",
+        vetoes.map((r) => `${r.id}: ${r.rule}`),
+        {},
+        now,
+      );
+      return 0;
+    }
     this.bumpDaily("court", now);
     setKV(this.sql, `court_seen:${e.symbol}`, String(now), now);
     const sprintId = uuidv7(now);
@@ -2074,7 +2168,7 @@ ${postmortem}`,
 
   /** Governor results (Phase 4): append-only grades/postmortems, upserted reputation/fitness, optional report card. */
   private async ingestGovernor(b: Batch, now: number): Promise<{ ok: boolean; message: string }> {
-    const counts = { grades: 0, postmortems: 0, reputation: 0, fitness: 0, cards: 0 };
+    const counts = { grades: 0, postmortems: 0, reputation: 0, beliefs: 0, fitness: 0, cards: 0 };
     const list = (p: Record<string, unknown>, k: string) =>
       Array.isArray(p[k]) ? (p[k] as unknown[]).slice(0, 2000) : [];
     for (const item of b.items) {
@@ -2091,11 +2185,35 @@ ${postmortem}`,
         this.journal.enqueue("postmortems", { created_at: now, author: "governor", ...r.data }, now);
         counts.postmortems++;
       }
+      const rep: Record<string, { weight: number; signals: number }> = {};
       for (const s of list(p, "reputation")) {
         const r = ReputationSchema.safeParse(s);
         if (!r.success) continue;
         this.journal.enqueue("source_reputation", { ...r.data, updated_at: now }, now);
+        rep[r.data.source] = { weight: r.data.weight, signals: r.data.signals };
         counts.reputation++;
+      }
+      if (Object.keys(rep).length > 0) setKV(this.sql, "reputation", JSON.stringify(rep), now);
+      for (const raw of list(p, "beliefs")) {
+        const r = BeliefSchema.safeParse(raw);
+        if (!r.success) continue;
+        const b = r.data;
+        this.sql.exec(
+          "INSERT OR REPLACE INTO beliefs (belief_id, subject, statement, c0, half_life_days, validated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          b.belief_id,
+          b.subject,
+          b.statement,
+          b.c0,
+          b.half_life_days,
+          b.validated_at,
+          b.status,
+        );
+        this.journal.enqueue(
+          "beliefs",
+          { ...b, tags: JSON.stringify(b.tags), evidence: JSON.stringify(b.evidence) },
+          now,
+        );
+        counts.beliefs++;
       }
       for (const f of list(p, "fitness")) {
         const r = FitnessSchema.safeParse(f);
@@ -2332,6 +2450,34 @@ ${postmortem}`,
         return false;
       }
     }
+    const sourceKey = this.catalystKey(contract.bull_case_receipts);
+    const facts = this.facts(
+      contract.arena,
+      contract.strategy_id,
+      contract.origin,
+      contract.symbol,
+      sourceKey,
+      now,
+    );
+    const vetoes = scarVetoes(this.scarRules(), facts, utcDay(now));
+    if (vetoes.length > 0) {
+      this.reject(
+        account,
+        contract,
+        "SCAR",
+        vetoes.map((r) => `${r.id}: ${r.rule}`),
+        now,
+      );
+      return false;
+    }
+    const repWeight = this.reputationWeight(sourceKey);
+    this.journal.append(
+      account,
+      "ENTRY_FACTS",
+      contract.contract_id,
+      { facts, reputation_weight: repWeight },
+      now,
+    );
     const q = quote ?? (await this.quotesFor([contract.symbol]))[contract.symbol] ?? null;
     const meta = await this.assetMeta(contract.symbol, account);
     if (!q || !meta) {
@@ -2358,7 +2504,7 @@ ${postmortem}`,
         account: view,
         market: { bid: q.bid, ask: q.ask, quoteAt: q.at },
         asset,
-        reputationWeight: 1,
+        reputationWeight: repWeight,
         now,
       },
       this.d,

@@ -124,3 +124,18 @@ export const OptionsEventSchema = z.object({
   detail: z.record(z.string(), z.unknown()),
 });
 export type OptionsEvent = z.infer<typeof OptionsEventSchema>;
+
+/** Governor belief (docs/ARCHITECTURE.md §8): confidence decays as c0·0.5^(Δdays / half_life). */
+export const BeliefSchema = z.object({
+  belief_id: z.string().min(1).max(120),
+  subject: z.string().min(1).max(40),
+  tags: z.array(z.string().max(40)).max(10),
+  statement: z.string().min(10).max(300),
+  c0: z.number().min(0).max(1),
+  half_life_days: z.number().positive().max(720),
+  validated_at: z.number().int(),
+  validations: z.number().int().positive(),
+  status: z.enum(["ACTIVE", "STRUCTURAL", "ARCHIVED"]),
+  evidence: z.array(z.string().max(80)).max(50),
+});
+export type Belief = z.infer<typeof BeliefSchema>;

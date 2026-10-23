@@ -163,7 +163,10 @@ export function buildCourtContract(i: {
   const { evidence: e, bull, bear, synth } = i;
   const px = (x: number, mode: "down" | "up") => roundPrice(x, i.tick, mode);
   const cited = new Set(bull.receipts);
-  const receipts = e.receipts.filter((r) => cited.has(r.evidence_id));
+  // The catalyst and its source always travel with the contract (Governor attribution, scar facts — ADR-033).
+  const receipts = e.receipts.filter(
+    (r) => cited.has(r.evidence_id) || r.evidence_id === "catalyst" || r.evidence_id === "catalyst_source",
+  );
   const notional = 18;
   const entryFee = legFeeRate(e.arena, "buy", "maker", notional, i.d);
   const exitFee = legFeeRate(e.arena, "sell", "taker", notional, i.d);

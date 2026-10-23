@@ -9,6 +9,7 @@ import { type LlmProvider, LlmRouter } from "../src/court/llm.ts";
 import { NullNotifier } from "../src/discord/notifier.ts";
 import { verifyChain } from "../src/journal/Journal.ts";
 import type { AccountId } from "../src/lib/ids.ts";
+import { type ScarTissue, ScarTissueSchema } from "../src/risk/scar.ts";
 import type { Bar } from "../src/strategy/indicators.ts";
 import { constitution, doctrine, doctrineWith } from "./helpers.ts";
 import { FakeBroker, FakeMarketData, Market } from "./sim/FakeBroker.ts";
@@ -46,6 +47,7 @@ function setup(
     clef?: ClefApi;
     llm?: LlmRouter;
     dispatcher?: WorkflowDispatcher;
+    scar?: ScarTissue;
   } = {},
 ) {
   let now = T0;
@@ -76,6 +78,7 @@ function setup(
     clef: opts.clef ?? null,
     llm: opts.llm ?? null,
     dispatcher: opts.dispatcher ?? null,
+    scar: opts.scar ?? null,
   });
   brain.init({ test: true });
   return {
@@ -1135,5 +1138,89 @@ describe("batch dispatcher (ADR-032)", () => {
     expect(
       t.notifier.sent.filter((m) => m.msg.content?.includes("batch dispatch failed")).length,
     ).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("memory: scar tissue, reputation, beliefs (ADR-033)", () => {
+  it("a merged hard-filter scar vetoes a matching entry before any order", async () => {
+    const scar = ScarTissueSchema.parse({
+      version: 1,
+      rules: [
+        {
+          id: "SCAR-001",
+          kind: "hard_filter",
+          rule: "No SOL/USD baseline breakouts (three stops in a row).",
+          expression: { all: [{ field: "symbol", op: "==", value: "SOL/USD" }], action: "reject" },
+          evidence: ["k1", "k2", "k3"],
+          added: "2026-10-22",
+        },
+      ],
+    });
+    const t = setup({ scar });
+    breakout(t);
+    const r = await t.brain.pulse();
+    expect(r.entries).toBe(0);
+    expect(t.paper.orders.size).toBe(0);
+    const rej = t.d1.db.prepare("SELECT stage, reason_codes FROM rejections").all() as {
+      stage: string;
+      reason_codes: string;
+    }[];
+    expect(rej.some((x) => x.stage === "SCAR" && x.reason_codes.includes("SCAR-001"))).toBe(true);
+  });
+
+  it("entries journal their facts; reputation and beliefs arrive from the Governor", async () => {
+    const t = setup();
+    breakout(t);
+    await t.brain.pulse();
+    const facts = t.d1.db.prepare("SELECT payload_json FROM journal WHERE kind = 'ENTRY_FACTS'").get() as {
+      payload_json: string;
+    };
+    expect(JSON.parse(facts.payload_json)).toMatchObject({
+      facts: { symbol: "SOL/USD", strategy_id: "CRYPTO_BREAKOUT_BASELINE_V1" },
+      reputation_weight: 1,
+    });
+    const item = (payload: Record<string, unknown>) => ({
+      schema_version: 1,
+      job: "governor",
+      produced_at: T0,
+      run_url: null,
+      items: [
+        {
+          skill_id: "source-reputation",
+          version: "gov-v1",
+          as_of: T0,
+          inputs_sha256: "d".repeat(64),
+          payload,
+        },
+      ],
+      posture: null,
+    });
+    await t.brain.ingestBatch(
+      item({
+        reputation: [
+          { source: "news:benzinga", signals: 25, brier_30d: null, expectancy_r_30d: 0.4, weight: 1.1 },
+          { source: "filing", signals: 5, brier_30d: null, expectancy_r_30d: -1, weight: 0.6 },
+        ],
+        beliefs: [
+          {
+            belief_id: "sym:SOL/USD",
+            subject: "SOL/USD",
+            tags: ["CRYPTO"],
+            statement: "SOL/USD: 4 closed trades, E[R] +0.60 over 30 days.",
+            c0: 0.5,
+            half_life_days: 60,
+            validated_at: T0,
+            validations: 1,
+            status: "ACTIVE",
+            evidence: ["k1"],
+          },
+        ],
+      }),
+    );
+    expect(t.brain.reputationWeight("news:benzinga")).toBe(1.1);
+    expect(t.brain.reputationWeight("filing")).toBe(1); // below min_signals_before_adjusting
+    expect(t.brain.reputationWeight(null)).toBe(1);
+    expect(t.sql.exec("SELECT belief_id FROM beliefs")).toHaveLength(1);
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM beliefs").get()).toEqual({ n: 1 });
   });
 });

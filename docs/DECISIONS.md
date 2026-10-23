@@ -269,3 +269,22 @@ dispatched runs from the last 90 min (6 h for the governor) and skips if the bra
 job; `run-name` carries the job for that check. (4) The sentinel is untouched: the safety net keeps its own
 minute cron and the 30-min GitHub watchdog.
 
+## ADR-033 — Memory: source reputation → W_rep, scar tissue as a Tier 0 veto, decayed beliefs as context (2026-10-23)
+**Decision:** (1) Every court contract now always carries its `catalyst` and `catalyst_source` receipts. The
+source key is `news:<provider>` for news and the candidate kind otherwise. Each entry attempt journals
+`ENTRY_FACTS` (symbol, arena, strategy, origin, regime posture/score, UTC hour/day, catalyst source, W_rep).
+(2) **Reputation:** the Governor scores each source on 30 days of outcomes (closed trades plus 72h grades of
+validator-declined court contracts). Weight = 1 + 0.5·E[R]·n/(n+20), bounded to doctrine [0.5, 1.2], and 1.0
+until the source has 20 signals. The brain keeps the latest map and passes it to the sizer. The sizer now caps
+r_eff at the rung's per-trade risk, so a good reputation can lift a trade toward the cap but never past it.
+(3) **Scar tissue:** `config/scar-tissue.yaml` is schema-validated in `config:build` (≥3 cited contracts,
+`hard_filter` needs an expression, unique ids, optional `expires`). Hard filters veto before the court is convened
+and again before every entry (stage `SCAR`). Unknown facts never match. Context rules go to Tier 2 / the court as
+lessons. The weekly Governor proposes two kinds of rule, written to the file on a PR branch: a 30-day symbol
+cooldown after ≥3 losses in 14 days with ΣR ≤ −2, and strategy×posture after ≥3 losses with E[R] ≤ −0.5. It
+never duplicates an existing expression; the operator merges (U8). (4) **Beliefs:** per symbol and per
+strategy×arena with ≥3 closed trades in 30 days; c0 = n/(n+5) ≤ 0.9, 60-day half-life. D1 `beliefs` plus a hot
+copy (hot schema v3). Tier 2 and the court get up to 3 with decayed confidence ≥ 0.35, as data.
+**Safety:** scars and beliefs can only remove or inform trades; reputation is bounded and rung-capped. None of it
+can loosen a constitution or doctrine limit.
+
