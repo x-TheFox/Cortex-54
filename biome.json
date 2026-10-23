@@ -1,7 +1,17 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/.wrangler", "!src/generated", "!**/*.md", "!research"]
+    "includes": [
+      "**",
+      "!**/node_modules",
+      "!**/.wrangler",
+      "!src/generated",
+      "!**/*.md",
+      "!research",
+      "!.impeccable",
+      "!public",
+      "!pnpm-lock.yaml"
+    ]
   },
   "formatter": {
     "enabled": true,

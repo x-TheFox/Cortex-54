@@ -26,6 +26,7 @@ jobs:
       - run: pnpm typecheck # also validates config/ against the constitution
       - run: pnpm lint
       - run: pnpm test
+      - run: pnpm web:build # web terminal (React) builds into public/
 
   research:
     runs-on: ubuntu-latest

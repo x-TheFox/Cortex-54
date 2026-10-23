@@ -10,20 +10,22 @@
   },
   "scripts": {
     "config:build": "node scripts/build-config.ts",
-    "typecheck": "pnpm config:build && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "pnpm config:build && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p web/tsconfig.json",
     "lint": "biome check .",
     "format": "biome format --write .",
     "test": "pnpm config:build && vitest run",
     "test:watch": "vitest",
     "dev": "pnpm config:build && wrangler dev",
-    "deploy:cortex": "pnpm config:build && wrangler deploy",
+    "deploy:cortex": "pnpm config:build && pnpm web:build && wrangler deploy",
     "sentinel:dev": "wrangler dev -c workers/sentinel/wrangler.jsonc",
     "deploy:sentinel": "wrangler deploy -c workers/sentinel/wrangler.jsonc",
     "db:migrate:local": "wrangler d1 migrations apply cortex-journal --local",
     "db:migrate:remote": "wrangler d1 migrations apply cortex-journal --remote",
     "discord:register": "node scripts/register-commands.ts",
     "discord:setup": "node scripts/discord-setup.ts",
-    "court:smoke": "tsx scripts/court-smoke.ts"
+    "court:smoke": "tsx scripts/court-smoke.ts",
+    "web:dev": "vite --config web/vite.config.ts",
+    "web:build": "vite build --config web/vite.config.ts"
   },
   "dependencies": {
     "zod": "^4.6.7"
@@ -31,9 +33,17 @@
   "devDependencies": {
     "@biomejs/biome": "^2.6.2",
     "@cloudflare/workers-types": "^5.20261022.1",
+    "@fontsource/b612": "^5.3.0",
+    "@fontsource/b612-mono": "^5.3.0",
     "@types/node": "^24.0.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "tsx": "4.23.15",
     "typescript": "^5.9.3",
+    "vite": "^6.4.5",
     "vitest": "^4.1.12",
     "wrangler": "^4.152.0",
     "yaml": "^2.9.1"

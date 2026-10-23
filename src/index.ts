@@ -8,6 +8,7 @@ import {
   followUp,
   type Interaction,
   InteractionSchema,
+  MESSAGE_COMPONENT,
   option,
   PING,
   userId,
@@ -50,6 +51,7 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
   const by = `discord:${who}`;
   const b = brain(env);
 
+  if (i.type === MESSAGE_COMPONENT) return handleButton(i, env, ctx, b, by);
   if (i.type !== APPLICATION_COMMAND) return ephemeral("Unsupported interaction.");
   const name = i.data?.name;
   const account = accountOption(i);
@@ -89,6 +91,61 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
     }
     default:
       return ephemeral((await runCommand(b, name ?? "", args, by)).message);
+  }
+}
+
+/**
+ * HUD buttons (spec §7.3, ADR-037). Same command runner as slash commands and the web terminal.
+ * Flatten is two-step: the HUD button only offers a private confirm button (like the web panel's guard).
+ */
+async function handleButton(
+  i: Interaction,
+  env: Env,
+  ctx: ExecutionContext,
+  b: ReturnType<typeof brain>,
+  by: string,
+): Promise<Response> {
+  const [action, account] = (i.data?.custom_id ?? "").split(":");
+  if (account !== "PAPER" && account !== "LIVE") return ephemeral("Unknown control.");
+  switch (action) {
+    case "pause":
+    case "resume":
+      return ephemeral((await runCommand(b, action, { account }, by)).message);
+    case "flatten":
+      return Response.json({
+        type: 4,
+        data: {
+          flags: 64,
+          content: `⚠️ FLATTEN ALL on **${account}** sells every position at market and counts as an operator intervention (restarts the 30-day clock). Confirm?`,
+          components: [
+            {
+              type: 1,
+              components: [
+                {
+                  type: 2,
+                  style: 4,
+                  label: `Confirm flatten ${account}`,
+                  custom_id: `flatten-confirm:${account}`,
+                },
+              ],
+            },
+          ],
+        },
+      });
+    case "flatten-confirm": {
+      if (!i.token || !env.DISCORD_APP_ID) return ephemeral("Discord app not configured.");
+      const appId = env.DISCORD_APP_ID;
+      const token = i.token;
+      ctx.waitUntil(
+        runCommand(b, "flatten", { account }, by).then(
+          (r) => followUp(appId, token, r.message),
+          (e) => followUp(appId, token, `Error: ${String(e)}`),
+        ),
+      );
+      return deferredEphemeral();
+    }
+    default:
+      return ephemeral("Unknown control.");
   }
 }
 

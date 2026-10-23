@@ -327,3 +327,37 @@ the Governor measures live-vs-paper fill divergence per contract (bps, signed ag
 **Still open:** VCP/CANSLIM/COT/insider-cluster screeners (FMP-quota or data limits), macro event calendar
 (FOMC/CPI), implied-move extractor, IV-vs-RV routing, weekend crypto→Monday equity signals.
 
+## ADR-036 — Web terminal rebuilt in React as a dark cockpit (2026-10-23)
+**Context:** The operator asked for the web panel in React and to look really good (design skills invoked). The
+ADR-034 page was plain static HTML/JS.
+**Decision:** (1) `web/` is a React 19 + Vite app built into `public/` (`pnpm web:build`, run by
+`deploy:cortex` and CI); still free static assets outside the Worker bundle (~80 KB gzip JS, fonts self-hosted
+for the CSP). (2) Visual direction: the operator chose the **dark cockpit (Airbus ECAM)** over the rolled signal-box
+direction. Nothing is lit when CORTEX is normal; MASTER WARN/CAUT annunciators light only for real conditions
+(`web/src/ecam.ts`, unit-tested): red for RED lock or a lost pulse, amber for breaker bands, reduce-only, pauses,
+stale regimes, budget limits, broker faults. Colour is a fixed vocabulary (green normal, amber caution, red warning,
+cyan actionable, white labels, magenta targets); B612 / B612 Mono (the Airbus cockpit faces, OFL). (3) Layout:
+upper display (equity readouts, drawdown and heat dials, equity trend, memo/alert column), lower display with
+six system pages (ACCT, FUNNEL, MEM, OPT, GOV, STS; keys 1–6), ECP key row, and an overhead panel of lit
+pushbuttons that stay dark in their normal state. FLATTEN sits under a lift-to-arm guard; the autonomy dial
+needs a separate SET, and LIVE ratification needs typed RATIFY. The panel states that every control restarts
+the 30-day autonomous clock. (4) `pnpm web:dev` serves synthetic data from `web/mock-api.ts` (`/?empty`,
+`/?alert` scenarios); it is never built or deployed. Product truth lives in `PRODUCT.md`; the visual system in
+`DESIGN.md`.
+
+## ADR-037 — More opportunity inside the same rails; Discord HUD buttons; in-panel guide (2026-10-23)
+**Context:** The operator asked to make the system fully autonomous and enable everything that would make money.
+A 24 h production audit showed a working but starved funnel: Tier 1 screened 38 items and promoted none, the
+court ran once (a manual `/court`), the baseline watched only BTC/ETH/SOL, and equity entries were correctly
+blocked by a REDUCE_ONLY market posture. PAPER was already fully autonomous (Stop 2 and Stop 4 behave the same
+in code).
+**Decision:** (1) Tier 1 promotes at P(material) ≥ 0.45 and priority ≥ 1.2 (was 0.55 / 1.5). Clef 27B (≤40/day)
+and the court (≤12/day) remain the strict gates, and sizing is unchanged. (2) The deterministic crypto breakout
+baseline scans all 13 liquid pairs instead of 3. (3) Unchanged, on purpose: every constitution cap, the regime
+gate (no equity longs in REDUCE_ONLY markets), options as shadow-only, and LIVE dormant until the gate and the
+operator's RATIFY; enabling real money is an operator decision recorded in chat, not a config default.
+(4) The Discord HUD carries Pause/Resume PAPER and a two-step Flatten (private confirm button), through the same
+command runner as slash commands and the web. (5) The web terminal has an in-panel guide (GUIDE key or "?"): a
+spotlight walkthrough of every part of the cockpit in plain English for someone new to trading, offered once on
+first visit.
+

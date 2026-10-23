@@ -3347,7 +3347,22 @@ export function hudMessage(s: StatusView): DiscordMessage {
         `${r.arena} **${r.posture}**${r.score !== null ? ` ${r.score.toFixed(0)}` : ""}${r.ceiling !== null ? ` · ceiling ${(r.ceiling * 100).toFixed(0)}%` : ""} · ${r.ageMinutes}m${r.fresh ? "" : " ⚠️stale"}`,
     )
     .join("  |  ");
+  const paper = s.accounts.find((a) => a.account === "PAPER" && a.configured);
+  const components: DiscordMessage["components"] = paper
+    ? [
+        {
+          type: 1,
+          components: [
+            paper.mode === "PAUSED"
+              ? { type: 2, style: 3, label: "Resume PAPER entries", custom_id: "resume:PAPER" }
+              : { type: 2, style: 2, label: "Pause PAPER entries", custom_id: "pause:PAPER" },
+            { type: 2, style: 4, label: "Flatten PAPER…", custom_id: "flatten:PAPER" },
+          ],
+        },
+      ]
+    : [];
   return {
+    components,
     content:
       `🧠 **CORTEX-54** · pulse ${age} · budget **${s.budget.mode}** (${s.budget.worst.resource} ${(s.budget.worst.fraction * 100).toFixed(0)}%) · journal #${s.journalHead.seq}${s.outboxPending > 0 ? ` (${s.outboxPending} unflushed)` : ""}` +
       (regimeLine ? `\n🌐 ${regimeLine}` : ""),
