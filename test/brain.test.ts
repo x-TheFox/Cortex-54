@@ -1010,9 +1010,9 @@ describe("court end-to-end (Phase 3)", () => {
     const users: string[] = [];
     const base = provider(bullJson, calls);
     const spy: LlmProvider = {
-      async complete(model, req) {
+      async complete(model, req, timeoutMs) {
         users.push(req.user);
-        return base.complete(model, req);
+        return base.complete(model, req, timeoutMs);
       },
     };
     const llm = new LlmRouter({ gemini: spy, groq: spy }, doctrine, () => T0);
