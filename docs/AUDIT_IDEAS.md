@@ -23,7 +23,7 @@ free tiers only, LIVE dormant, one operator.
 | W1-09 | Per-account kill payload | Build | ADR-053: JSON kill payload with accounts + kill id; old string flag still read as global |
 | W1-10 | Sentinel flatten retry | Done | ADR-048 #8 |
 | W1-11 | External dead-man pings | Later | needs an operator-created Healthchecks.io account (Claude can't create accounts); RUNBOOK step |
-| W1-12 | Provenance-tainted contract fields | Build | ADR-054: contracts carry a field provenance map; validator rejects LLM-sourced prices |
+| W1-12 | Provenance-tainted contract fields | Done (by construction) | checked in ADR-054: the entry price is always the live bid (code), stops/targets an LLM proposes are repaired or rejected by `checkBull` against the evidence, and contracts have no size field. The new injection suite (W3-30) pins all three; a type-level taint layer would add nothing on top |
 | W1-13 | Pulse stage trace | Build | ADR-053: per-stage daily failure counts in `/health` + one structured log line per pulse |
 | W1-14 | Heartbeat v2 / alarm probe | Build | ADR-053: sentinel also checks `next_alarm_at` (the start-of-pulse claim was false, ADR-048 (a)) |
 | W1-15 | Alarm-loss telemetry + backoff | Build | backoff Done (ADR-048 #9); ADR-053 adds `ALARM_LOST` journaling |
@@ -39,7 +39,7 @@ free tiers only, LIVE dormant, one operator.
 | W1-25 | Per-capability HMAC + nonce | Build | ADR-053: single-use nonce on `/admin/reset`; secret split Later (rotation across GitHub + 2 workers; trigger: before RATIFY) |
 | W1-26 | Step-up auth + session epoch | Build | LIVE controls are Discord-only already (ADR-048 #11); ADR-053 adds server-side logout via a session epoch |
 | W1-27 | Per-origin rate limiting | No | login tokens are single-use 256-bit; commands need a valid session; Cloudflare already absorbs floods |
-| W1-28 | Policy SHA stamp on contracts | Build | ADR-054 |
+| W1-28 | Policy SHA stamp on contracts | Build | ADR-054: every COURT journal row carries the running doctrine and constitution hashes (no D1 migration needed) |
 | W1-29 | Strategy capability manifests | Later | param schemas Done (ADR-050); trigger: a strategy that trades outside one arena |
 | W1-30 | Env-binding drift CI | Build | ADR-053: `scripts/check-env.ts` in CI |
 | W1-31 | CSP report + verify.ts pin | Build | font-src Done (ADR-048 #1); ADR-053 adds the vendored-copy diff check in CI |
@@ -89,10 +89,10 @@ free tiers only, LIVE dormant, one operator.
 | W2-30 | Funding-rate crowding | Build | ADR-055: extreme funding shrinks risk (×0.5, shrink-only) and shows in evidence |
 | W2-31 | Kronos challenger + pinning | Done/Later | revision pin Done (ADR-049 #4); challenger after the LAB has graded Kronos alone (2026-11-24) |
 | W2-32 | Kronos grading + cadence | Done/Later | cadence Done (ADR-048 #13); grading = the LAB forward test |
-| W2-33 | Meta-labeling | Later | needs ≥ 100 labelled contracts; ADR-054 starts logging the features |
+| W2-33 | Meta-labeling | Later | needs ≥ 100 labelled contracts; ADR-054 logs the features with every COURT ruling |
 | W2-34 | Options realism pack | Build | ADR-055: per-contract fees, options tick, short-leg DTE < 7 blackout (lab only) |
 | W2-35 | Locked-window replay | Later | trigger: one month of journaled court decisions (2026-11-24) |
-| W2-36 | Realized slippage feedback | Build | ADR-054: quote at submit vs fill, journaled; Governor reports drift |
+| W2-36 | Realized slippage feedback | Build | ADR-054: fill vs order price journaled (`slip_bps`); Governor reports drift (ADR-055) |
 | W2-37 | Trend strategy + completed bars | Done | ADR-045/046/050 (backtest says LOSES → LAB only) |
 | W2-38 | Injection canaries | No | one item per Clef call and per court hearing: a canary can never share a context with real items, so it can't detect cross-contamination |
 | W2-39 | Cost per decision | Build | ADR-054 |
@@ -111,15 +111,15 @@ free tiers only, LIVE dormant, one operator.
 | W3-06 | p90 spread in stops | Build | ADR-054: rolling spread high-water per symbol feeds the stop distance |
 | W3-07 | Honest options friction | Build | with W2-34 |
 | W3-08 | Scar coalescer + market facts | Build | ADR-055: schema-valid scar drafts; funding and regime join FACT_FIELDS |
-| W3-09 | Price collars + bad-print flags | Build | ADR-054 |
+| W3-09 | Price collars + bad-print flags | Done/Build | collar Done (entries always price at the bid inside the zone; the daily order cap throttles storms); ADR-054 adds BAD_PRINT for fills > 75 bps through the order price |
 | W3-10 | Twin divergence → breaker | Later | LIVE dormant; trigger: RATIFY |
 | W3-11 | 429-aware broker client | Build | ADR-054 |
 | W3-12 | Passive-entry ladder | Later | needs fill data first (W2-36); trigger: ≥ 30 entries with unfilled-rate known |
-| W3-13 | Slippage loop + twin ledger | Build | with W2-36 (measurement; no auto-override yet) |
+| W3-13 | Slippage loop + twin ledger | Build | ADR-054: every FILL journals realized slippage vs the order price; Governor report in ADR-055; no auto-override until 30 fills |
 | W3-14 | Square-root impact | No | same as W3-05 |
 | W3-15 | Orphan adoption attribution | Build | ADR-054: re-match by symbol/side/qty before falling back to zero risk |
 | W3-16 | Cash-settlement ledger | Done | `unsettled` table (Phase 1) |
-| W3-17 | IEX data-quality score | Build | ADR-054: crossed/stale/zero-volume checks block entries |
+| W3-17 | IEX data-quality score | Done/Build | crossed or empty quotes were already refused; ADR-054 stops the court before any LLM call on a stale quote and labels input freshness |
 | W3-18 | Deflation-gated replay lab | Done/Build | lab Done; DSR/PBO in ADR-055 |
 | W3-19 | HMM + funding | Build | = W2-29/W2-30 |
 | W3-20 | One label space | Build | = W2-22/W2-24 |
@@ -136,7 +136,7 @@ free tiers only, LIVE dormant, one operator.
 | W3-31 | ADR linter | Build | with W1-36 |
 | W3-32 | Governor CI closure | Done | ADR-049 #1 (validation runs before the PR exists) |
 | W3-33 | Constitution as theorems | Build | ADR-054: properties P5 (RED ⇒ no entries) and P6 (exits never gated) |
-| W3-34 | Capability taint | Build | = W1-12 |
+| W3-34 | Capability taint | Done (by construction) | = W1-12 |
 | W3-35 | Shadow fleet | Done (partly) | the LAB brain (ADR-045) is a one-overlay fleet; more overlays after it proves itself |
 | W3-36 | Federated scar tissue | No | single instance |
 | W3-37 | RTS 6 controls | No | W3-09 supplies the mechanics; the regulatory vocabulary adds nothing for a $54 cash account |
@@ -144,4 +144,4 @@ free tiers only, LIVE dormant, one operator.
 | W3-39 | Publishable microstructure dataset | Later | after 30 days of fills; operator decision (public repo) |
 | W3-40 | Signed-intent execution | No | single venue; `client_order_id` already makes submits idempotent |
 
-**Tally (121 ideas):** Build 68 · Done 13 · Later 17 · No 14 · split verdicts 9 (Done/Build 4, Done/Later 3, Build/Later 1, Done partly 1).
+**Tally (121 ideas):** Build 63 · Done 14 (+2 by construction) · Later 17 · No 14 · split verdicts 11 (Done/Build 6, Done/Later 3, Build/Later 1, Done partly 1).

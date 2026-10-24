@@ -165,3 +165,71 @@ describe("journal re-anchor (audit W1-03)", () => {
     expect(await b.j.reanchor(async () => ({ seq: 500, sha }))).toBe("kept");
   });
 });
+
+describe("constitution as properties (audit W3-33)", () => {
+  it("P5: a KILLED account, a RED/ORANGE band, or a REDUCE_ONLY/PAUSED mode never gets an entry through", async () => {
+    const { validateEntry } = await import("../src/risk/PreTradeValidator.ts");
+    const { contract, account, input } = await import("./fixtures/validator.ts");
+    fc.assert(
+      fc.property(
+        fc.record({
+          killed: fc.boolean(),
+          band: fc.constantFrom("GREEN", "YELLOW", "ORANGE", "RED"),
+          mode: fc.constantFrom("NORMAL", "THRIFT", "REDUCE_ONLY", "PAUSED"),
+          equity: fc.double({ min: 20, max: 500, noNaN: true }),
+        }),
+        (x) => {
+          const blocked =
+            x.killed ||
+            x.band === "RED" ||
+            x.band === "ORANGE" ||
+            x.mode === "REDUCE_ONLY" ||
+            x.mode === "PAUSED";
+          const r = validateEntry(
+            {
+              ...input,
+              contract,
+              account: {
+                ...account,
+                killed: x.killed,
+                band: x.band as "GREEN",
+                breakerMultiplier: doctrine.breakers.multipliers[x.band as "GREEN"],
+                mode: x.mode as "NORMAL",
+                equityUsd: x.equity,
+                availableCashUsd: x.equity,
+              },
+            },
+            doctrine,
+            constitution,
+          );
+          return !blocked || !r.ok;
+        },
+      ),
+      RUNS,
+    );
+  });
+});
+
+describe("breaker hysteresis (audit W3-01)", () => {
+  it("worse bands apply at once; recovery needs the margin for recovery_pulses evaluations in a row", async () => {
+    const { withHysteresis, evaluateBreaker } = await import("../src/risk/CircuitBreakerLadder.ts");
+    const at = (equityCents: number) =>
+      evaluateBreaker(
+        { equityCents, hwmCents: 10_000, dayStartEquityCents: equityCents, stopouts24h: 0, locked: false },
+        doctrine,
+      );
+    expect(withHysteresis("GREEN", at(9_600), 0, doctrine).state.band).toBe("YELLOW"); // 4% → YELLOW at once
+    let streak = 0;
+    let band: "GREEN" | "YELLOW" | "ORANGE" | "RED" = "YELLOW";
+    for (const eq of [9_710, 9_760, 9_760, 9_760]) {
+      // 2.9% is under 3% but inside the 0.5% margin → no credit; 2.4% earns credit
+      const h = withHysteresis(band, at(eq), streak, doctrine);
+      band = h.state.band;
+      streak = h.streak;
+    }
+    expect(band).toBe("GREEN"); // after 3 clear evaluations
+    const flicker = withHysteresis("YELLOW", at(9_760), 1, doctrine);
+    expect(flicker.state.band).toBe("YELLOW");
+    expect(withHysteresis("YELLOW", at(9_710), 2, doctrine).streak).toBe(0); // inside the margin resets
+  });
+});

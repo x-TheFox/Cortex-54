@@ -68,6 +68,8 @@ export interface Evidence {
   } | null;
   /** Deep-research dossier from the web research desk (ADR-051), or null. Sourced but unverified external text. */
   research: ResearchView | null;
+  /** Audit W2-40: how old each input is (FRESH / STALE / OLD) so arguments can weigh time, not just content. */
+  freshness: Record<string, { age_minutes: number | null; class: "FRESH" | "STALE" | "OLD" | "NONE" }>;
   receipts: Receipt[];
 }
 
@@ -166,6 +168,8 @@ export function buildEvidence(i: {
   forecast?: Omit<NonNullable<Evidence["forecast"]>, "about" | "confidence" | "view"> | null;
   facts?: CatalystFacts | null;
   research?: ResearchView | null;
+  /** epoch ms of the quote (Alpaca's own timestamp) */
+  quoteAt?: number;
 }): Evidence | null {
   const closes = i.bars.map((b) => b.c);
   const a = atr(i.bars, 14);
@@ -303,8 +307,29 @@ export function buildEvidence(i: {
     facts: i.facts ?? null,
     forecast: i.forecast ? { ...kronosContext(i.forecast), ...i.forecast } : null,
     research: i.research ?? null,
+    freshness: {
+      quote: grade(i.quoteAt === undefined ? null : (i.now - i.quoteAt) / 60_000, 5, 30),
+      last_daily_bar: grade(
+        i.bars.at(-1)?.t === undefined ? null : (i.now - (i.bars.at(-1)?.t ?? i.now)) / 60_000,
+        36 * 60,
+        96 * 60,
+      ),
+      catalyst: grade(i.catalyst.ageMinutes, 120, 24 * 60),
+      research: grade(i.research ? i.research.age_minutes : null, 6 * 60, 12 * 60),
+      kronos: grade(i.forecast ? i.forecast.age_minutes : null, 4 * 60, 5 * 60),
+    },
     receipts,
   };
+}
+
+function grade(
+  ageMinutes: number | null,
+  freshMax: number,
+  staleMax: number,
+): { age_minutes: number | null; class: "FRESH" | "STALE" | "OLD" | "NONE" } {
+  if (ageMinutes === null || !Number.isFinite(ageMinutes)) return { age_minutes: null, class: "NONE" };
+  const a = Math.max(0, Math.round(ageMinutes));
+  return { age_minutes: a, class: a <= freshMax ? "FRESH" : a <= staleMax ? "STALE" : "OLD" };
 }
 
 export const KRONOS_ABOUT =

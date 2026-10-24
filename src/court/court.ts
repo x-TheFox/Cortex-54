@@ -272,3 +272,29 @@ export function buildCourtContract(i: {
     ],
   };
 }
+
+/**
+ * Audit W2-03: numbers an argument states that appear nowhere in the evidence JSON. Model-computed arithmetic is what
+ * Tier 0 exists to prevent; these are counted per role and graded later (never blocking, never repaired).
+ * Ignores small integers (counts, conviction, "2 days") and years.
+ */
+export function uncitedNumbers(texts: string[], evidenceJson: string): string[] {
+  const known = new Set(
+    [...evidenceJson.matchAll(/-?\d+(?:\.\d+)?/g)].flatMap((m) => {
+      const x = Number(m[0]);
+      return [m[0], String(x), x.toFixed(2), x.toFixed(1), (x * 100).toFixed(1), (x * 100).toFixed(0)];
+    }),
+  );
+  const out: string[] = [];
+  for (const t of texts)
+    for (const m of t.matchAll(/(?<![\w.])(\d+(?:\.\d+)?)(?![\w.]*\d)/g)) {
+      const raw = m[1] as string;
+      const x = Number(raw);
+      if (!raw.includes(".") && x < 100) continue;
+      if (!raw.includes(".") && x >= 1990 && x <= 2100) continue;
+      if (known.has(raw) || known.has(String(x)) || known.has(x.toFixed(2)) || known.has(x.toFixed(1)))
+        continue;
+      out.push(raw);
+    }
+  return out;
+}

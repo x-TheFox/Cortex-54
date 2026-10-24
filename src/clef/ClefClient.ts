@@ -84,8 +84,27 @@ export class WorkersAiClef implements ClefApi {
       CLEF_TIMEOUT_MS,
       model,
     );
-    return ClefResultSchema.parse(raw);
+    return conformAnswers(ClefResultSchema.parse(raw), questions);
   }
+}
+
+/**
+ * Audit W2-09: hold each answer to the question it answers. A score is clamped to its scale (0 … criteria−1); a
+ * choice that is not one of the offered options, or an answer of the wrong type, is dropped — the interpreters treat
+ * a missing answer as a failure, so a malformed reply fails closed instead of feeding a decision.
+ */
+export function conformAnswers(r: ClefResult, questions: Record<string, ClefQuestion>): ClefResult {
+  const answers: ClefResult["answers"] = {};
+  for (const [id, a] of Object.entries(r.answers)) {
+    const q = questions[id];
+    if (!q || q.type !== a.type) continue;
+    if (a.type === "score" && q.type === "score") {
+      answers[id] = { ...a, score: Math.min(Math.max(a.score, 0), q.criteria.length - 1) };
+    } else if (a.type === "choice" && q.type === "choice") {
+      if (Object.hasOwn(q.criteria, a.choice)) answers[id] = a;
+    } else answers[id] = a;
+  }
+  return { ...r, answers };
 }
 
 export const noul = (a: ClefAnswer | undefined): number | null => (a?.type === "noul" ? a.noul : null);

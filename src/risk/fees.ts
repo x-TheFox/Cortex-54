@@ -52,7 +52,7 @@ export function modeledPaperCostCents(
   d: Doctrine,
 ): { feeCents: number; slippageCents: number; slippageBps: number } {
   const fee = notionalUsd * legFeeRate(arena, side, liquidity, notionalUsd, d);
-  const slippageBps = d.fees.paper_slippage_bps[arena] ?? 0;
+  const slippageBps = d.fees.paper_slippage_bps[arena] ?? 25; // audit W3-02: an unknown arena never models zero cost
   const slip = (notionalUsd * slippageBps) / 10_000;
   return { feeCents: Math.ceil(fee * 100), slippageCents: Math.ceil(slip * 100), slippageBps };
 }

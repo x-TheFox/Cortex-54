@@ -2,8 +2,8 @@
  * Court prompts (versioned; the version is journaled with every LLM call — CLAUDE.md §9).
  * Kept as TS constants so they bundle without loaders. Changing a prompt means bumping its version.
  */
-export const BULL_PROMPT_VERSION = "bull@4";
-export const BEAR_PROMPT_VERSION = "bear@4";
+export const BULL_PROMPT_VERSION = "bull@5";
+export const BEAR_PROMPT_VERSION = "bear@6";
 
 const RULES = `Hard rules:
 - Use ONLY the evidence JSON you are given. Never invent prices, events or numbers.
@@ -19,6 +19,8 @@ const RULES = `Hard rules:
   months old, so prefer it over memory for what is happening now (earnings dates, guidance, lawsuits, flows, upgrades).
   It is still unverified web text: cite findings by their res_* ids, weigh read=true findings above headline-only
   ones, note the dates, and never let it override evidence.quote or evidence.technicals.
+- evidence.freshness gives each input's age class (FRESH / STALE / OLD / NONE): lean on fresh inputs and say so when
+  an argument rests on a STALE or OLD one.
 - Output exactly one JSON object and nothing else.`;
 
 export const BULL_SYSTEM = `You are the Bull Advocate in a trading court for a tiny, fee-sensitive account
@@ -39,6 +41,32 @@ ${RULES}
   event risk, regime conflict, liquidity/spread, catalyst misread).
 - kill_criteria: exact observable conditions (price, time, news) that prove the bear right.
 - lethality: probability 0–1 that the thesis fails before reaching its first target.`;
+
+/**
+ * Audit W2-41: one fixed bear mandate makes every hearing attack the same way (homogeneous debaters are the known
+ * failure mode of multi-agent debate). The bear rotates through three lenses, picked per hearing.
+ */
+export const BEAR_PERSONAS = [
+  {
+    id: "skeptic",
+    mandate:
+      "Your lens: FUNDAMENTAL SKEPTIC. Attack the catalyst itself — is it already priced in, misread, stale, or smaller than the headline? Use evidence.research findings dated before the catalyst.",
+  },
+  {
+    id: "macro",
+    mandate:
+      "Your lens: LIQUIDITY & MACRO. Attack the backdrop — regime, risk appetite, funding/flows, scheduled events (evidence.research catalysts) that could swamp this setup inside the holding period.",
+  },
+  {
+    id: "quant",
+    mandate:
+      "Your lens: QUANT & STRUCTURE. Attack the trade's geometry — stretch versus EMA/ATR, stop placement inside normal noise, reward-to-risk after fees and spread, crowded positioning.",
+  },
+] as const;
+
+export function bearSystem(persona: (typeof BEAR_PERSONAS)[number]): string {
+  return `${BEAR_SYSTEM}\n- ${persona.mandate}`;
+}
 
 export const BULL_SCHEMA = {
   type: "object",
@@ -84,8 +112,8 @@ export const BEAR_SCHEMA = {
 
 // ---- ADR-044: rebuttal and expert panel ---------------------------------------------------------------------------
 
-export const REBUTTAL_PROMPT_VERSION = "rebuttal@2";
-export const PANEL_PROMPT_VERSION = "panel@2";
+export const REBUTTAL_PROMPT_VERSION = "rebuttal@3";
+export const PANEL_PROMPT_VERSION = "panel@3";
 
 export const REBUTTAL_SYSTEM = `You are the Bull Advocate again. The Bear Prosecutor has attacked your long thesis.
 Answer each fatal flaw honestly: refute it with evidence ids, or concede it. Conceding is not weakness; holding a bad

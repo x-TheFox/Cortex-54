@@ -45,3 +45,35 @@ export function evaluateBreaker(i: BreakerInput, d: Doctrine): BreakerState {
 
   return { band, multiplier: b.multipliers[band], drawdown, dailyLoss, reasons };
 }
+
+const ORDER: Record<Band, number> = { GREEN: 0, YELLOW: 1, ORANGE: 2, RED: 3 };
+
+/**
+ * Audit W3-01: hysteresis. A worse band applies at once; a better band only after the drawdown has sat below the
+ * better band's threshold minus `recovery_margin` for `recovery_pulses` evaluations in a row, so a band can't flicker
+ * on every tick around a boundary. RED (and the lock) keep their own rules. Pure: the caller stores `streak`.
+ */
+export function withHysteresis(
+  prev: Band,
+  next: BreakerState,
+  streak: number,
+  d: Doctrine,
+): { state: BreakerState; streak: number } {
+  if (ORDER[next.band] >= ORDER[prev] || prev === "RED") return { state: next, streak: 0 };
+  const b = d.breakers;
+  const margin = b.recovery_margin;
+  // threshold the drawdown must clear to enter the better band
+  const gate = next.band === "GREEN" ? b.yellow_drawdown : b.orange_drawdown;
+  const clear = next.drawdown <= gate - margin;
+  const n = clear ? streak + 1 : 0;
+  if (n >= b.recovery_pulses) return { state: next, streak: 0 };
+  return {
+    state: {
+      ...next,
+      band: prev,
+      multiplier: b.multipliers[prev],
+      reasons: [...next.reasons, `recovering to ${next.band} (${n}/${b.recovery_pulses})`],
+    },
+    streak: n,
+  };
+}

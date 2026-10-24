@@ -169,6 +169,9 @@ export interface ChainResult<T> {
  * (cross-family rule) or whose provider has no key are skipped. Returns null if every hop fails.
  */
 export class LlmRouter {
+  /** Audit W2-06: optional per-provider quota gate (the brain plugs in its daily counters). */
+  gate: { allow(provider: string): boolean; used(provider: string): void } | null = null;
+
   constructor(
     private readonly providers: Partial<Record<string, LlmProvider>>,
     private readonly d: Doctrine,
@@ -203,12 +206,13 @@ export class LlmRouter {
         continue;
       }
       const p = this.providers[hop.provider];
-      if (!p) {
+      if (!p || (this.gate && !this.gate.allow(hop.provider))) {
         log({ ...base, latencyMs: 0, outcome: "UNAVAILABLE" });
         continue;
       }
       for (let attempt = 0; attempt <= r.max_retries_per_provider; attempt++) {
         const t0 = this.now();
+        this.gate?.used(hop.provider);
         try {
           const res = await p.complete(hop.model, req, timeoutMs ?? r.timeout_ms);
           let value: T;
