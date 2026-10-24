@@ -142,6 +142,8 @@ neurons/M, no output billing (ADR-043). **Jev** (TypeSafe AI) is not in our Work
 - Paper: market buys fill at ask / sells at bid; limit fills when touched (no queue); ~10% random partial
   fills; no fees, no slippage model. **We apply our own fee + slippage model to paper fills.**
 - Paper equity can be reset to a custom amount (dashboard "Reset" → new API keys).
+- A second $54 paper account (LAB, verified 2026-10-24: cash, crypto enabled) backs the LAB brain (ADR-045). Its keys
+  are `ALPACA_LAB_KEY_ID/SECRET` (cortex + GitHub secrets).
 - Free data plan: equities IEX-only; options "indicative" feed; 200 REST calls/min; latest 15 min of
   historical bars not queryable; WebSocket symbol cap (historically 30). Crypto data is free.
 - PDT rule removed by FINRA effective 2026-06-04 (broker phase-in to 2027-10-20). For a $54 cash account the
@@ -237,7 +239,7 @@ migrations/               D1 migrations (wrangler d1 migrations apply)
 src/
   index.ts                fetch router + cron + exports
   env.ts                  Env bindings type
-  cortex/AgentCortexDO.ts the brain (pulse, accounts, hot state)
+  cortex/AgentCortexDO.ts the brain (pulse, accounts, hot state); LabCortexDO = the LAB brain (ADR-045, cortex/lab.ts)
   cortex/hot-schema.ts    DO SQLite schema (applied in constructor via blockConcurrencyWhile)
   contracts/              zod schemas: DecisionContract, constitution, doctrine (validated at boot)
   cortex/Brain.ts          ALL trading logic (pulse, reconcile, fills, stops, exits, entries, operator RPC)
@@ -403,5 +405,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-24: first buy attempts (Kronos BTC/DOT) refused by Alpaca's $10 crypto minimum → ADR-042 min-ticket rule.
 - 2026-10-24: ADR-043: Clairic extracts typed catalyst facts (once per promoted candidate) into Tier 2/court evidence.
 - 2026-10-24: ADR-044: the court is a full hearing (rebuttal + 3-seat panel) and posts a six-part transcript to Discord.
+- 2026-10-24: ADR-045: LAB brain (`LabCortexDO`, D1 `cortex-lab`, LAB paper account) forward-tests Kronos and the
+  research strategies (trend, RSI(2) pullback, turn-of-month); PAPER only runs strategies that graduate by PR.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

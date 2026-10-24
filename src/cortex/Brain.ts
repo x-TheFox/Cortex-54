@@ -95,6 +95,17 @@ import {
   inverseSignal,
 } from "../strategy/BearAndBounce.ts";
 import {
+  RSI2_ID,
+  rsi2Params,
+  rsi2Signal,
+  TOM_ID,
+  TREND_ID,
+  tomParams,
+  tomSignal,
+  trendParams,
+  trendSignal,
+} from "../strategy/Classics.ts";
+import {
   STRATEGY_ID as BASELINE_ID,
   baselineParams,
   baselineSignal,
@@ -466,6 +477,9 @@ export class Brain {
           () => this.runBounce(quotes),
           () => this.runInverse(),
           () => this.runKronos(quotes),
+          () => this.runTrend(quotes),
+          () => this.runTom(quotes),
+          () => this.runRsi2(),
         ]) {
           const r = await run();
           report.contracts += r.contracts;
@@ -1623,6 +1637,115 @@ ${postmortem}`,
       if (!contract) continue;
       contracts++;
       entries += await this.emitRule(KRONOS_ID, contract, due.accounts, fresh, now);
+    }
+    return { contracts, entries };
+  }
+
+  /** CRYPTO_TREND_V1 (ADR-045): time-series momentum; the strongest trends get the slots. */
+  private async runTrend(quotes: Record<string, Quote>): Promise<{ contracts: number; entries: number }> {
+    const now = this.deps.now();
+    const p = trendParams(this.d);
+    const m = this.deps.market;
+    const due = p ? this.ruleStrategyDue(TREND_ID, now) : null;
+    if (!p || !m || !due) return { contracts: 0, entries: 0 };
+    const bars = await m.cryptoDailyBars(due.universe, Math.max(...p.lookbacks) + 30, now);
+    const missing = due.universe.filter((s) => !quotes[s]);
+    const fresh = missing.length > 0 ? { ...quotes, ...(await m.cryptoQuotes(missing)) } : quotes;
+    const picks: { symbol: string; strength: number; contract: DecisionContract }[] = [];
+    for (const symbol of due.universe) {
+      if (getKV(this.sql, `${TREND_ID}:${symbol}:${utcDay(now)}`)) continue;
+      const q = fresh[symbol];
+      const b = bars[symbol];
+      if (!q || !b) continue;
+      const asset = await this.assetMeta(symbol, due.accounts[0] as AccountId);
+      const tick = asset?.price_increment ? Number(asset.price_increment) : defaultTick(q.bid, "CRYPTO");
+      const r = trendSignal(
+        { symbol, bars: b, bid: q.bid, ask: q.ask, now, contractId: uuidv7(now), tick },
+        p,
+      );
+      if (r.contract) picks.push({ symbol, strength: r.strength ?? 0, contract: r.contract });
+    }
+    picks.sort((a, b) => b.strength - a.strength);
+    let entries = 0;
+    for (const x of picks.slice(0, p.max_new_per_run))
+      entries += await this.emitRule(TREND_ID, x.contract, due.accounts, fresh, now);
+    return { contracts: Math.min(picks.length, p.max_new_per_run), entries };
+  }
+
+  /** CRYPTO_TURN_OF_MONTH_V1 (ADR-045): one entry per symbol per month inside the window. */
+  private async runTom(quotes: Record<string, Quote>): Promise<{ contracts: number; entries: number }> {
+    const now = this.deps.now();
+    const p = tomParams(this.d);
+    const m = this.deps.market;
+    const due = p ? this.ruleStrategyDue(TOM_ID, now) : null;
+    if (!p || !m || !due) return { contracts: 0, entries: 0 };
+    const month = utcDay(now).slice(0, 7);
+    const todo = due.universe.filter((s) => !getKV(this.sql, `${TOM_ID}:${s}:month:${month}`));
+    if (todo.length === 0) return { contracts: 0, entries: 0 };
+    const bars = await m.cryptoDailyBars(todo, 30, now);
+    const missing = todo.filter((s) => !quotes[s]);
+    const fresh = missing.length > 0 ? { ...quotes, ...(await m.cryptoQuotes(missing)) } : quotes;
+    let contracts = 0;
+    let entries = 0;
+    for (const symbol of todo) {
+      const q = fresh[symbol];
+      const b = bars[symbol];
+      if (!q || !b) continue;
+      const tick = defaultTick(q.bid, "CRYPTO");
+      const { contract } = tomSignal(
+        { symbol, bars: b, bid: q.bid, ask: q.ask, now, contractId: uuidv7(now), tick },
+        p,
+      );
+      if (!contract) continue;
+      setKV(this.sql, `${TOM_ID}:${symbol}:month:${month}`, contract.contract_id, now);
+      contracts++;
+      entries += await this.emitRule(TOM_ID, contract, due.accounts, fresh, now);
+    }
+    return { contracts, entries };
+  }
+
+  /** EQUITY_RSI2_PULLBACK_V1 (ADR-045): regular session only, like the inverse strategy. */
+  private async runRsi2(): Promise<{ contracts: number; entries: number }> {
+    const now = this.deps.now();
+    const p = rsi2Params(this.d);
+    const s = this.d.strategies.find((x) => x.id === RSI2_ID);
+    const via = s?.accounts.find((a) => this.deps.brokers[a]);
+    const m = this.deps.market;
+    if (!p || !s || s.status !== "ACTIVE" || !via || !m) return { contracts: 0, entries: 0 };
+    if (now - Number(getKV(this.sql, `${RSI2_ID}:last_run`) ?? 0) < 3_600_000)
+      return { contracts: 0, entries: 0 };
+    const clock = await (this.deps.brokers[via] as BrokerApi).clock();
+    const minsToClose = (Date.parse(clock.next_close) - now) / 60_000;
+    if (!clock.is_open || minsToClose < this.d.execution.no_entry_last_minutes_of_session + 20)
+      return { contracts: 0, entries: 0 };
+    const due = this.ruleStrategyDue(RSI2_ID, now);
+    if (!due) return { contracts: 0, entries: 0 };
+    const [bars, quotes] = await Promise.all([
+      m.stockDailyBars(due.universe, p.sma_trend + 40, now),
+      m.stockQuotes(due.universe),
+    ]);
+    let contracts = 0;
+    let entries = 0;
+    for (const symbol of due.universe) {
+      if (getKV(this.sql, `${RSI2_ID}:${symbol}:${utcDay(now)}`)) continue;
+      const q = quotes[symbol];
+      const b = bars[symbol];
+      if (!q || !b) continue;
+      const { contract } = rsi2Signal(
+        {
+          symbol,
+          bars: b,
+          bid: q.bid,
+          ask: q.ask,
+          now,
+          contractId: uuidv7(now),
+          tick: defaultTick(q.bid, "EQUITIES"),
+        },
+        p,
+      );
+      if (!contract) continue;
+      contracts++;
+      entries += await this.emitRule(RSI2_ID, contract, due.accounts, quotes, now);
     }
     return { contracts, entries };
   }

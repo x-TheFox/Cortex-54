@@ -209,6 +209,16 @@ regime_gates:
     size_multiplier: 0.5
     max_concurrent: 1
 
+# ADR-045: LAB brain (CORTEX-54-LAB) — second paper account + journal `cortex-lab`. Strategies listed here run ONLY
+# there, as ACTIVE, with no AI calls (no Clef, court or Clairic). A strategy graduates to PAPER by PR once its LAB
+# record and backtest agree.
+lab:
+  strategies:
+    - CRYPTO_KRONOS_FORECAST_V1 # operator: Kronos never trades on PAPER; LAB measures whether it should
+    - CRYPTO_TREND_V1
+    - EQUITY_RSI2_PULLBACK_V1
+    - CRYPTO_TURN_OF_MONTH_V1
+
 strategies:
   - id: CRYPTO_BREAKOUT_BASELINE_V1
     arena: CRYPTO
@@ -328,6 +338,50 @@ strategies:
       max_price_drift: 0.0075 # skip when the bid moved this far from the forecast's last price
       conviction: 5
       crash_floor: 15
+    accounts: [PAPER]
+  # ADR-045: strategies from docs/STRATEGY_RESEARCH.md. SHADOW on PAPER; they run only in the LAB brain (lab: above).
+  - id: CRYPTO_TREND_V1
+    arena: CRYPTO
+    status: SHADOW
+    universe: [BTC/USD, ETH/USD, SOL/USD, XRP/USD, LINK/USD, AVAX/USD, DOGE/USD, LTC/USD, BCH/USD, DOT/USD, UNI/USD, AAVE/USD, ADA/USD]
+    params:
+      lookbacks: [20, 50, 100] # all three returns positive = time-series up-trend
+      ema_fast: 20
+      ema_slow: 50
+      breakout_days: 20
+      pullback_atr: 1.0 # entry while the bid sits within 1 ATR above the EMA20 …
+      atr_stop_multiple: 2.5 # … or on a new 20-day high
+      atr_target_multiple: 5.0 # trends pay through the occasional long run
+      max_hold_hours: 336 # 14 days
+      max_new_per_run: 2 # strongest trends first
+      prior_win_prob: 0.6
+      conviction: 5
+    accounts: [PAPER]
+  - id: EQUITY_RSI2_PULLBACK_V1
+    arena: EQUITIES
+    status: SHADOW
+    universe: [SPY, QQQ, IWM, DIA]
+    params:
+      sma_trend: 200
+      sma_exit: 5
+      rsi_max: 10
+      atr_stop_multiple: 2.0
+      min_target_atr: 0.6
+      max_hold_hours: 168 # ~5 sessions
+      prior_win_prob: 0.6
+      conviction: 5
+    accounts: [PAPER]
+  - id: CRYPTO_TURN_OF_MONTH_V1
+    arena: CRYPTO
+    status: SHADOW
+    universe: [BTC/USD, ETH/USD]
+    params:
+      last_days: 2
+      exit_day: 3 # out by 00:00 UTC on the 3rd
+      atr_stop_multiple: 2.0
+      atr_target_multiple: 3.0
+      prior_win_prob: 0.6
+      conviction: 5
     accounts: [PAPER]
   - id: CRYPTO_CATALYST_COURT_V1
     arena: CRYPTO

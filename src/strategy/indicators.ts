@@ -56,3 +56,9 @@ export function rsi(closes: number[], period = 14): number | null {
   if (loss === 0) return 100;
   return 100 - 100 / (1 + gain / loss);
 }
+
+/** Simple moving average of the last `period` values; null without enough data. */
+export function sma(values: number[], period: number): number | null {
+  if (values.length < period || period <= 0) return null;
+  return values.slice(-period).reduce((s, x) => s + x, 0) / period;
+}

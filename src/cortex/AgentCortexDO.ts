@@ -19,6 +19,7 @@ import type { AccountId } from "../lib/ids.ts";
 import { Brain, type StatusView } from "./Brain.ts";
 import { GitHubDispatcher } from "./dispatch.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "./hot-schema.ts";
+import { LabNotifier, labDoctrine } from "./lab.ts";
 import { getKV, type Row, type SqlLike, type SqlValue } from "./store.ts";
 
 export interface Health {
@@ -41,10 +42,19 @@ export class AgentCortexDO extends DurableObject<Env> {
   private readonly meter = { current: new InvocationMeter(DOCTRINE.budgets.per_invocation.subrequests - 5) };
   private readonly brain: Brain;
 
+  /** LabCortexDO sets this (ADR-045): a second brain on the LAB paper account, journal and doctrine view. */
+  static readonly lab: boolean = false;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = fromDurable(ctx.storage.sql);
     const guard = () => this.meter.current.guard();
+    const lab = (this.constructor as typeof AgentCortexDO).lab;
+    if (lab) {
+      this.brain = labBrain(this.sql, env, guard);
+      this.bootBrain(ctx, lab ? ["PAPER"] : []);
+      return;
+    }
 
     const brokers: Partial<Record<AccountId, BrokerApi>> = {};
     const paper = DOCTRINE.accounts.PAPER;
@@ -93,6 +103,10 @@ export class AgentCortexDO extends DurableObject<Env> {
       now: () => Date.now(),
     });
 
+    this.bootBrain(ctx, Object.keys(brokers));
+  }
+
+  private bootBrain(ctx: DurableObjectState, accounts: string[]): void {
     ctx.blockConcurrencyWhile(async () => {
       for (const stmt of HOT_SCHEMA) this.sql.exec(stmt);
       this.sql.exec(
@@ -103,7 +117,8 @@ export class AgentCortexDO extends DurableObject<Env> {
         constitution_sha256: CONSTITUTION_SHA256,
         doctrine_sha256: DOCTRINE_SHA256,
         hot_schema_version: HOT_SCHEMA_VERSION,
-        accounts: Object.keys(brokers),
+        accounts,
+        ...((this.constructor as typeof AgentCortexDO).lab ? { lab: true } : {}),
       });
       // Self-starting heart: no cron needed (ADR-021).
       if ((await ctx.storage.getAlarm()) === null) await ctx.storage.setAlarm(Date.now() + 1_000);
@@ -264,4 +279,42 @@ function llmProviders(env: Env): Partial<Record<string, LlmProvider>> {
     );
   }
   return p;
+}
+
+/** ADR-045: LAB brain wiring — LAB paper keys, LAB journal, LAB doctrine view, no AI and no dispatching. */
+function labBrain(sql: SqlLike, env: Env, guard: () => void): Brain {
+  const paper = DOCTRINE.accounts.PAPER;
+  const brokers: Partial<Record<AccountId, BrokerApi>> = {};
+  const key =
+    env.ALPACA_LAB_KEY_ID && env.ALPACA_LAB_SECRET
+      ? { keyId: env.ALPACA_LAB_KEY_ID, secret: env.ALPACA_LAB_SECRET }
+      : null;
+  if (paper && key) brokers.PAPER = new AlpacaClient(paper.alpaca_base_url, key, guard);
+  const d = labDoctrine(DOCTRINE);
+  return new Brain({
+    sql,
+    d,
+    c: CONSTITUTION,
+    brokers,
+    market: key ? new AlpacaMarketData(key, guard) : null,
+    notifier: env.DISCORD_BOT_TOKEN
+      ? new LabNotifier(
+          new DiscordNotifier(env.DISCORD_BOT_TOKEN, parseChannels(env.DISCORD_CHANNELS), guard),
+        )
+      : new NullNotifier(),
+    d1: env.DB_LAB,
+    readKillFlag: async () => (await env.FLAGS.get("killed")) !== null,
+    clef: null,
+    clairic: null,
+    llm: null,
+    calibration: CALIBRATION,
+    scar: SCAR_TISSUE,
+    dispatcher: null,
+    now: () => Date.now(),
+  });
+}
+
+/** The LAB brain's Durable Object class (ADR-045): same code, different wiring. */
+export class LabCortexDO extends AgentCortexDO {
+  static override readonly lab = true;
 }

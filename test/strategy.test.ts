@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { contractViolations, DecisionContractSchema } from "../src/contracts/decision-contract.ts";
+import { LabNotifier, labDoctrine } from "../src/cortex/lab.ts";
+import { NullNotifier } from "../src/discord/notifier.ts";
 import { bounceParams, bounceSignal, inverseParams, inverseSignal } from "../src/strategy/BearAndBounce.ts";
+import { rsi2Params, rsi2Signal, tomWindow, trendParams, trendSignal } from "../src/strategy/Classics.ts";
 import { baselineParams, baselineSignal, regimeProxyRiskOn } from "../src/strategy/CryptoBreakoutBaseline.ts";
 import { atr, type Bar, ema, priorHigh } from "../src/strategy/indicators.ts";
 import { kronosParams, kronosSignal } from "../src/strategy/KronosForecast.ts";
@@ -202,5 +205,93 @@ describe("CRYPTO_KRONOS_FORECAST_V1", () => {
       /stop more likely/,
     );
     expect(kronosSignal({ ...base, regimeScore: 10 }, p).reason).toMatch(/capitulation/);
+  });
+});
+
+describe("Research strategies (ADR-045)", () => {
+  it("trend: buys a pullback to the EMA20 inside a rising time-series trend, ranks by strength", () => {
+    const p = trendParams(doctrine);
+    if (!p) throw new Error("trend params missing");
+    const bars = line(130, 50, 120); // steady up-trend
+    const fast = ema(
+      bars.map((b) => b.c),
+      p.ema_fast,
+    ) as number;
+    const { contract, strength } = trendSignal(
+      {
+        symbol: "SOL/USD",
+        bars,
+        bid: fast + 0.3,
+        ask: fast + 0.32,
+        now: 130 * DAY + 3_600_000,
+        contractId: "01928f4e-7b2a-7c3d-8e4f-5a6b7c8d9e0f",
+        tick: 0.01,
+      },
+      p,
+    );
+    if (!contract) throw new Error("no contract");
+    expect(DecisionContractSchema.parse(contract)).toBeTruthy();
+    expect(strength).toBeGreaterThan(0);
+    const down = line(130, 120, 50);
+    expect(
+      trendSignal(
+        {
+          symbol: "SOL/USD",
+          bars: down,
+          bid: 50,
+          ask: 50.02,
+          now: 130 * DAY + 1,
+          contractId: "x",
+          tick: 0.01,
+        },
+        p,
+      ).reason,
+    ).toMatch(/up-trend/);
+  });
+
+  it("rsi2: buys a sharp dip only above the 200-day average", () => {
+    const p = rsi2Params(doctrine);
+    if (!p) throw new Error("rsi2 params missing");
+    const up = line(260, 300, 500);
+    const dip = {
+      symbol: "SPY",
+      bars: up,
+      ask: 470.05,
+      now: 260 * DAY + 3_600_000,
+      contractId: "01928f4e-7b2a-7c3d-8e4f-5a6b7c8d9e0f",
+      tick: 0.01,
+    };
+    const { contract } = rsi2Signal({ ...dip, bid: 470 }, p); // a hard drop under yesterday's 500
+    if (!contract) throw new Error("no contract");
+    expect(Number(contract.entry_plan.targets[0])).toBeGreaterThan(470);
+    expect(rsi2Signal({ ...dip, bid: 501 }, p).reason).toMatch(/RSI\(2\)/);
+    expect(rsi2Signal({ ...dip, bars: line(260, 500, 300), bid: 290 }, p).reason).toMatch(/200-day/);
+  });
+
+  it("turn of month: open only on the last two UTC days, held until the 3rd", () => {
+    expect(tomWindow(Date.UTC(2026, 9, 30, 12), 2, 3)).toEqual({ open: true, holdHours: 3 * 24 + 12 });
+    expect(tomWindow(Date.UTC(2026, 9, 29, 23), 2, 3).open).toBe(false);
+    expect(tomWindow(Date.UTC(2026, 1, 27, 0), 2, 3).open).toBe(true); // February 2026 has 28 days
+  });
+});
+
+describe("LAB brain (ADR-045)", () => {
+  it("activates exactly the lab strategies and switches every other ACTIVE one off", () => {
+    const d = labDoctrine(doctrine);
+    const active = d.strategies
+      .filter((s) => s.status === "ACTIVE")
+      .map((s) => s.id)
+      .sort();
+    expect(active).toEqual([...doctrine.lab.strategies].sort());
+    expect(d.strategies.find((s) => s.id === "CRYPTO_KRONOS_FORECAST_V1")?.accounts).toEqual(["PAPER"]);
+  });
+
+  it("tags LAB messages and keeps them out of the HUD and briefing channels", async () => {
+    const inner = new NullNotifier();
+    const n = new LabNotifier(inner);
+    await n.post("command_center", { content: "hud" });
+    await n.post("briefs", { content: "brief" });
+    await n.post("executions", { embeds: [{ title: "Filled" }] });
+    expect(inner.sent).toEqual([{ channel: "terminal", msg: { embeds: [{ title: "🧪 LAB · Filled" }] } }]);
   });
 });

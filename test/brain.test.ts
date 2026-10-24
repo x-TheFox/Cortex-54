@@ -6,6 +6,7 @@ import type { Doctrine } from "../src/contracts/doctrine.ts";
 import { Brain, courtSessionCard, equityChartUrl, terminalLine } from "../src/cortex/Brain.ts";
 import type { WorkflowDispatcher } from "../src/cortex/dispatch.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
+import { labDoctrine } from "../src/cortex/lab.ts";
 import { buildEvidence } from "../src/court/evidence.ts";
 import { type LlmProvider, LlmRouter } from "../src/court/llm.ts";
 import { NullNotifier } from "../src/discord/notifier.ts";
@@ -1798,5 +1799,26 @@ describe("Clairic in the funnel (ADR-043)", () => {
     const bb = broken.brain as unknown as typeof b;
     await expect(bb.catalystFacts("c3", text, T0, T0)).rejects.toThrow("503");
     expect(await bb.catalystFacts("c3", text, T0, T0)).toBeNull(); // cached as "none", never retried
+  });
+});
+
+describe("LAB pulse (ADR-045)", () => {
+  it("runs the lab strategies and places a paper order from the trend rule", async () => {
+    const t = setup({ d: labDoctrine(doctrine) });
+    const up = Array.from({ length: 130 }, (_, i) => {
+      const c = 50 + (70 * i) / 129;
+      return { t: T0 - (130 - i) * 86_400_000, o: c, h: c + 1, l: c - 1, c, v: 1 };
+    });
+    t.market.bars["SOL/USD"] = up;
+    t.market.bars["BTC/USD"] = up;
+    const lastClose = up.at(-1)?.c as number;
+    t.market.set("SOL/USD", lastClose + 1.5, lastClose + 1.52); // above the 20-day high (last high = close + 1)
+    const r = await t.brain.pulse();
+    expect(r.entries).toBeGreaterThanOrEqual(1);
+    const ids = (
+      t.d1.db.prepare("SELECT strategy_id FROM decision_contracts").all() as { strategy_id: string }[]
+    ).map((x) => x.strategy_id);
+    expect(ids).toContain("CRYPTO_TREND_V1");
+    expect(ids).not.toContain("CRYPTO_BREAKOUT_BASELINE_V1"); // PAPER strategies never run in LAB
   });
 });

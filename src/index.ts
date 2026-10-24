@@ -19,7 +19,7 @@ import { verifySignedBody } from "./lib/hmac.ts";
 import { handleWeb, loginLink } from "./web/api.ts";
 import { runCommand } from "./web/commands.ts";
 
-export { AgentCortexDO } from "./cortex/AgentCortexDO.ts";
+export { AgentCortexDO, LabCortexDO } from "./cortex/AgentCortexDO.ts";
 
 /**
  * Stateless edge router. Workers Free gives 10 ms CPU per request/cron: route only, never compute here.
@@ -27,6 +27,14 @@ export { AgentCortexDO } from "./cortex/AgentCortexDO.ts";
  */
 function brain(env: Env) {
   return env.CORTEX.get(env.CORTEX.idFromName(env.CORTEX_DO_NAME));
+}
+
+/** ADR-045: batch jobs the LAB brain also receives. */
+const LAB_JOBS = new Set(["crypto-regime", "equity-posture", "kronos"]);
+
+function labBrain(env: Env) {
+  if (!env.CORTEX_LAB || !env.ALPACA_LAB_KEY_ID) return null;
+  return env.CORTEX_LAB.get(env.CORTEX_LAB.idFromName(env.CORTEX_LAB_DO_NAME ?? "CORTEX-54-LAB"));
 }
 
 async function handleInteraction(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -227,6 +235,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/health") {
       const b = brain(env);
       await b.ensureAlarm(); // sentinel ticks keep the heart armed even without a cron (ADR-021)
+      await labBrain(env)?.ensureAlarm();
       const health = await b.health();
       const stale = health.last_pulse_at === null || Date.now() - health.last_pulse_at > 15 * 60_000;
       return Response.json(health, { status: stale ? 503 : 200 });
@@ -250,6 +259,11 @@ export default {
         return new Response("bad json", { status: 400 });
       }
       const receipt = await brain(env).ingest(parsed);
+      // ADR-045: the LAB brain needs the same regime and Kronos data; it never sees world-intel or Governor batches.
+      const job = (parsed as { job?: unknown } | null)?.job;
+      const lab = labBrain(env);
+      if (lab && receipt.ok && typeof job === "string" && LAB_JOBS.has(job))
+        ctx.waitUntil(lab.ingest(parsed).catch(() => undefined));
       return Response.json(receipt, { status: receipt.ok ? 200 : 422 });
     }
 
@@ -272,5 +286,6 @@ export default {
 
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     await brain(env).ensureAlarm();
+    await labBrain(env)?.ensureAlarm();
   },
 } satisfies ExportedHandler<Env>;

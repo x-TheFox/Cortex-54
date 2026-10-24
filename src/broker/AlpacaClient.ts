@@ -225,42 +225,47 @@ export class AlpacaMarketData implements MarketDataApi {
     if (symbols.length === 0) return {};
     // Calendar days ≈ 1.5× trading days; IEX feed (free plan).
     const start = new Date(now - Math.ceil(days * 1.6 + 5) * 86_400_000).toISOString();
-    const url =
+    return this.pagedBars(
       `${DATA_BASE}/v2/stocks/bars?timeframe=1Day&feed=iex&adjustment=split&limit=1000&sort=asc` +
-      `&start=${encodeURIComponent(start)}&symbols=${encodeURIComponent(symbols.join(","))}`;
-    const body = await call(
-      this.fetcher,
-      this.guard,
-      this.creds,
-      url,
-      z.object({ bars: z.record(z.string(), z.array(BarRow)).nullable() }),
-    );
-    return Object.fromEntries(
-      Object.entries(body.bars ?? {}).map(([s, rows]) => [
-        s,
-        rows.map((b) => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })),
-      ]),
+        `&start=${encodeURIComponent(start)}&symbols=${encodeURIComponent(symbols.join(","))}`,
     );
   }
 
   async cryptoDailyBars(symbols: string[], days: number, now: number): Promise<Record<string, Bar[]>> {
     if (symbols.length === 0) return {};
     const start = new Date(now - (days + 2) * 86_400_000).toISOString();
-    const url =
+    return this.pagedBars(
       `${DATA_BASE}/v1beta3/crypto/us/bars?timeframe=1Day&limit=1000&sort=asc` +
-      `&start=${encodeURIComponent(start)}&symbols=${encodeURIComponent(symbols.join(","))}`;
-    const body = await call(
-      this.fetcher,
-      this.guard,
-      this.creds,
-      url,
-      z.object({ bars: z.record(z.string(), z.array(BarRow)) }),
+        `&start=${encodeURIComponent(start)}&symbols=${encodeURIComponent(symbols.join(","))}`,
     );
-    return Object.fromEntries(
-      Object.entries(body.bars).map(([s, rows]) => [
-        s,
-        rows.map((b) => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })),
-      ]),
-    );
+  }
+
+  /**
+   * Multi-symbol bars come back 1,000 rows per page across all symbols; without paging, later symbols are silently
+   * cut short (the Kronos job lost six pairs this way, 2026-10-24). Each page is one subrequest; at most 6 pages.
+   */
+  private async pagedBars(url: string): Promise<Record<string, Bar[]>> {
+    const out: Record<string, Bar[]> = {};
+    const Page = z.object({
+      bars: z.record(z.string(), z.array(BarRow)).nullable(),
+      next_page_token: z.string().nullable().optional(),
+    });
+    let token: string | null = null;
+    for (let page = 0; page < 6; page++) {
+      const body: z.infer<typeof Page> = await call(
+        this.fetcher,
+        this.guard,
+        this.creds,
+        token ? `${url}&page_token=${encodeURIComponent(token)}` : url,
+        Page,
+      );
+      for (const [sym, rows] of Object.entries(body.bars ?? {}))
+        (out[sym] ??= []).push(
+          ...rows.map((b) => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })),
+        );
+      token = body.next_page_token ?? null;
+      if (!token) break;
+    }
+    return out;
   }
 }
