@@ -91,7 +91,7 @@ Full detail: `docs/ARCHITECTURE.md`. Budget math: `docs/FREE_TIER_BUDGET.md`.
 | 0 Reflex | TypeScript | DO pulse | free | stops, breakers, staleness, spread/fee gates, dedupe, watchlist relevance, ALL arithmetic |
 | 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | one item per call (~1.2 neurons), ≤8 per pulse; promote P(material) ≥ 0.55 and priority ≥ 1.5 (ADR-029) |
 | 2 Structure | `@cf/cloudflare/clef` (27B) | DO | ~4,000 neurons/day | Tier 0 evidence (code) → long_favored, regime fit, bear-lethality, setup, quality; ≤1/pulse, ≤40/day |
-| 3 Court | free LLM chains + Clef 27B synth | DO pulse (ADR-028) | free-tier RPD | bull → **cross-family** bear → Clef synth → calibrated COURT contract; ≤1/pulse, ≤12/day |
+| 3 Court | free LLM chains + Clef 27B synth | DO pulse (ADR-028) | free-tier RPD | bull → **cross-family** bear → bull rebuttal → expert panel (quant, risk, macro) → Clef synth → calibrated COURT contract; ≤1/pulse, ≤12/day (ADR-044) |
 
 Clef probabilities are **not** win rates. They pass through our own calibration map
 (`config/calibration.json`, produced by the Governor from logged outcomes) before the sizer sees them.
@@ -402,5 +402,6 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   CRYPTO_KRONOS_FORECAST_V1 is SHADOW).
 - 2026-10-24: first buy attempts (Kronos BTC/DOT) refused by Alpaca's $10 crypto minimum → ADR-042 min-ticket rule.
 - 2026-10-24: ADR-043: Clairic extracts typed catalyst facts (once per promoted candidate) into Tier 2/court evidence.
+- 2026-10-24: ADR-044: the court is a full hearing (rebuttal + 3-seat panel) and posts a six-part transcript to Discord.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

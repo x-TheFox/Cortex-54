@@ -38,6 +38,25 @@ export const BearSchema = z.object({
 });
 export type Bear = z.infer<typeof BearSchema>;
 
+/** ADR-044: the bull answers the bear; withdrawing ends the session. */
+export const RebuttalSchema = z.object({
+  rebuttal: z.string().min(10).max(1500),
+  concessions: z.array(z.string().max(400)).max(6),
+  still_long: z.boolean(),
+  revised_conviction: z.number().int().min(1).max(10),
+});
+export type Rebuttal = z.infer<typeof RebuttalSchema>;
+
+/** ADR-044: one expert-panel opinion (advisory: it reaches the decision only through the Clef synth's state). */
+export const PanelOpinionSchema = z.object({
+  stance: z.enum(["support", "oppose", "abstain"]),
+  confidence: z.number().min(0).max(1),
+  headline: z.string().min(3).max(300),
+  points: z.array(z.string().min(3).max(400)).min(1).max(3),
+});
+export type PanelOpinion = z.infer<typeof PanelOpinionSchema>;
+export type SeatOpinion = PanelOpinion & { seat: string; title: string; emoji: string; by: string };
+
 export type BullCheck = { ok: true; bull: Bull; notes: string[] } | { ok: false; reasons: string[] };
 
 /** Code wins: reject or repair a bull brief whose numbers don't fit the evidence (CLAUDE.md §5 errata). */
@@ -63,17 +82,18 @@ export function checkBull(b: Bull, e: Evidence, d: Doctrine): BullCheck {
   return { ok: true, bull: { ...b, targets: [...new Set(clipped)].slice(0, 3) }, notes };
 }
 
-export const SYNTH_PROMPT_VERSION = "synth@3";
+export const SYNTH_PROMPT_VERSION = "synth@4";
 export const SUITABILITY = ["Very low", "Low", "Moderate", "High", "Very high"] as const;
 
 export function buildSynth(
   e: Evidence,
   bull: Bull,
   bear: Bear,
+  debate: { rebuttal?: Rebuttal | null; panel?: SeatOpinion[] } = {},
 ): { state: unknown; questions: Record<string, ClefQuestion> } {
   return {
     state: {
-      task: "Judge a long trade after a bull/bear debate. Prices in the bull brief were checked against the evidence by code. evidence.forecast (Kronos), if present, is LOW-confidence pattern-model context: weigh it lightly and never let it decide.",
+      task: "Judge a long trade after a full court debate (bull, bear, bull rebuttal, expert panel). Weigh arguments by their evidence, not by headcount. Prices in the bull brief were checked against the evidence by code. evidence.forecast (Kronos), if present, is LOW-confidence pattern-model context: weigh it lightly and never let it decide.",
       evidence: evidenceForModels(e),
       bull: {
         thesis: bull.thesis,
@@ -88,6 +108,26 @@ export function buildSynth(
         kill_criteria: bear.kill_criteria,
         brief: bear.brief.slice(0, 1200),
       },
+      ...(debate.rebuttal
+        ? {
+            bull_rebuttal: {
+              rebuttal: debate.rebuttal.rebuttal.slice(0, 1200),
+              concessions: debate.rebuttal.concessions,
+              revised_conviction: debate.rebuttal.revised_conviction,
+            },
+          }
+        : {}),
+      ...(debate.panel && debate.panel.length > 0
+        ? {
+            expert_panel: debate.panel.map((p) => ({
+              seat: p.title,
+              stance: p.stance,
+              confidence: p.confidence,
+              headline: p.headline,
+              points: p.points,
+            })),
+          }
+        : {}),
     },
     questions: {
       win_prob: {

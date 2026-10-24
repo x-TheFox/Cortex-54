@@ -166,6 +166,7 @@ llm_routing:
     gemini: google
     groq/openai/gpt-oss-120b: openai-oss
     groq/qwen/qwen3.8-27b: qwen
+    groq/openai/gpt-oss-20b: openai-oss
     nim/deepseek-ai/deepseek-v4.1-flash: deepseek
     nim/nvidia/nemotron-3-ultra-550b-a55b: nvidia
     openrouter/google/gemma-4-31b-it:free: google
@@ -179,6 +180,16 @@ llm_routing:
     - { provider: nim, model: nvidia/nemotron-3-ultra-550b-a55b }
     - { provider: nim, model: deepseek-ai/deepseek-v4.1-flash }
     - { provider: groq, model: qwen/qwen3.8-27b }
+  panel: # ADR-044: the bull answers the bear, then three experts weigh in (in parallel) before the Clef judge
+    rebuttal: true
+    seats: [quant, risk, macro]
+    timeout_ms: 25000 # advisory seats: a slow seat is dropped, never waited on for a minute
+    # live run 2026-10-24: nemotron returned no JSON, deepseek timed out at 60 s, qwen failed Groq's JSON validation.
+    # Seats rotate through this chain, so each starts on a different model.
+    chain:
+      - { provider: groq, model: openai/gpt-oss-120b }
+      - { provider: groq, model: openai/gpt-oss-20b }
+      - { provider: gemini, model: gemini-3.5-flash }
   require_cross_family: true
   max_retries_per_provider: 1
   timeout_ms: 60000

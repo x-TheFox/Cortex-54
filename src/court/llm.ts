@@ -186,6 +186,7 @@ export class LlmRouter {
     parse: (json: unknown) => T,
     excludeFamilies: string[],
     log: (a: HopAttempt) => void,
+    timeoutMs?: number,
   ): Promise<ChainResult<T> | null> {
     const r = this.d.llm_routing;
     for (const hop of chain) {
@@ -209,7 +210,7 @@ export class LlmRouter {
       for (let attempt = 0; attempt <= r.max_retries_per_provider; attempt++) {
         const t0 = this.now();
         try {
-          const res = await p.complete(hop.model, req, r.timeout_ms);
+          const res = await p.complete(hop.model, req, timeoutMs ?? r.timeout_ms);
           let value: T;
           try {
             value = parse(extractJson(res.text));
