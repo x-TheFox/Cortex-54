@@ -709,3 +709,46 @@ builds the runtime and operations ones.
   (W1-30); the sentinel's vendored `verify.ts` equals the brain's (W1-31); retired doc claims stay retired, CLAUDE.md
   names the latest ADR, and ADR headings are numbered and dated (W1-36, W3-31). The schema comment claiming per-pulse
   journal verification was corrected.
+
+## ADR-054 — Audit ideas, round 2: the court, the risk engine, execution (2026-10-24)
+**Court:**
+- each provider has a daily call cap under its free RPD, and an exhausted provider is skipped (W2-06);
+- a hearing has a 150 s budget: past 40% the rebuttal is skipped, past 60% the panel, journaled `HEARING_DEGRADED`
+  (W2-05);
+- the bear rotates through three lenses (fundamental skeptic, liquidity & macro, quant & structure) per hearing
+  (W2-41, bear@6);
+- the judge reads the panel seats in a per-hearing order (W2-02);
+- a contested ruling (lethal bear, or a bull who retreated ≥ 2 conviction points) is flagged. Its win-probability
+  tax is a doctrine key left at 1.0 (log only) until the Governor shows contested rulings do worse (W2-07);
+- numbers an argument states that appear nowhere in the evidence (or in the code-checked trade) are counted per role
+  (W2-03);
+- every COURT row also carries the decision's cost (LLM calls, Clef tokens, ms) (W1-38/W2-39), the running doctrine
+  and constitution hashes (W1-28), and the features a later size model needs (W2-33);
+- Clef answers are held to their questions: scores clamped to the scale, unknown choices and wrong types dropped,
+  failing closed (W2-09);
+- evidence carries FRESH / STALE / OLD for quote, bars, catalyst, research and Kronos, and the court stops before any
+  LLM call on a stale quote (W2-40; prompts bull@5, bear@6, rebuttal@3, panel@3).
+
+**Risk:**
+- breaker hysteresis: worse bands at once, recovery only after 3 evaluations 0.5% clear of the threshold (W3-01);
+- the correlation guard no longer passes silently without bars (it refuses). Unknown correlations, and other
+  fail-open branches, are counted in `/health.slo.policy_vacuums_today`. An unknown arena's paper slippage is
+  25 bps, never 0 (W3-02);
+- costs (fee hurdle, stop distance) use max(current spread, p90 of the last ~40 samples) per symbol (W3-06).
+
+**Execution:**
+- broker reads retry twice on 429 / 5xx / timeouts (Retry-After honoured, ≤ 2 s); writes never blind-retry;
+- after a timeout or 5xx on submit the brain looks the order up by client_order_id before declaring failure (the
+  orphan factory); a 429 on submit is journaled `ORDER_THROTTLED`, not alarmed (W3-11);
+- adopted orders re-derive risk from their contract's stop, or count the full notional when no contract matches, so
+  heat is never under-counted (W3-15);
+- every fill journals realized slippage against its order price; a fill > 75 bps through it journals `BAD_PRINT` and
+  alerts (W2-36, W3-09, W3-13).
+
+**Verification:**
+- property P5: a KILLED account, a RED/ORANGE band or a REDUCE_ONLY/PAUSED mode never gets an entry through (W3-33);
+- an injection regression suite: hostile bull prices are repaired or rejected, contracts never carry a size, and a
+  dossier full of instructions is just text (W3-30).
+
+**Found already done while building:** price collars (entries always price at the bid inside the zone) and
+crossed-quote rejection. W1-12/W3-34 (field taint) hold by construction, and the injection suite now pins them.

@@ -37,6 +37,10 @@ export const DoctrineSchema = z.object({
     red_consecutive_stopouts_24h: z.number().int().positive(),
     paper_auto_unlock_hours: z.number().positive(),
     multipliers: z.object({ GREEN: Fraction, YELLOW: Fraction, ORANGE: Fraction, RED: z.literal(0) }),
+    /** Audit W3-01: recovery to a better band needs the drawdown this far under its threshold … */
+    recovery_margin: Fraction.default(0.005),
+    /** … for this many evaluations (pulses) in a row. Only slows recovery; never delays a worse band. */
+    recovery_pulses: z.number().int().min(1).max(60).default(3),
   }),
   sizing: z.object({
     min_stop_atr_multiple: z.number().positive(),
@@ -111,6 +115,8 @@ export const DoctrineSchema = z.object({
     tier3: z.object({
       max_sprints_per_day: z.number().int().nonnegative(),
       min_structural_score: z.number().min(0).max(100),
+      /** Audit W2-07: multiplier on win_prob for contested rulings; 1.0 = measured and journaled but not applied. */
+      disagreement_tax: z.number().gt(0).max(1).default(1),
     }),
     calibration: z.object({
       min_outcomes_before_trusting: z.number().int().positive(),
@@ -152,6 +158,10 @@ export const DoctrineSchema = z.object({
     require_cross_family: z.boolean(),
     max_retries_per_provider: z.number().int().min(0).max(3),
     timeout_ms: z.number().int().positive(),
+    /** Audit W2-05: a whole hearing's wall-clock budget; the panel is dropped first, then the rebuttal. */
+    hearing_deadline_ms: z.number().int().positive().default(150_000),
+    /** Audit W2-06: calls per provider per UTC day (free-tier RPD with margin); an exhausted provider is skipped. */
+    daily_call_caps: z.record(z.string(), z.number().int().nonnegative()).default({}),
   }),
   regime_gates: z.object({
     crypto_composite_min_for_longs: z.number().min(0).max(100),

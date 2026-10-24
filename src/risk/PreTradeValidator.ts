@@ -30,6 +30,8 @@ export interface MarketView {
   bid: number;
   ask: number;
   quoteAt: number;
+  /** Audit W3-06: p90 of recent spreads; costs use max(now, typical) so a calm moment can't understate them. */
+  typicalSpreadFrac?: number | null;
 }
 
 export interface AssetView {
@@ -93,6 +95,7 @@ export function validateEntry(i: ValidateInput, d: Doctrine, c: Constitution): V
   const spreadFrac = mid > 0 ? (m.ask - m.bid) / mid : 1;
   const maxSpread = (d.execution.max_spread_bps[k.arena] ?? 0) / 10_000;
   if (spreadFrac > maxSpread) r.push(`spread ${(spreadFrac * 10_000).toFixed(1)} bps > max`);
+  const costSpread = Math.max(spreadFrac, m.typicalSpreadFrac ?? 0);
 
   const low = Number(k.entry_plan.zone_low);
   const high = Number(k.entry_plan.zone_high);
@@ -114,7 +117,7 @@ export function validateEntry(i: ValidateInput, d: Doctrine, c: Constitution): V
   const target = Number(k.entry_plan.targets[0]);
   const provisionalNotional = a.equityUsd * rung.max_position_notional;
   const feeRt = roundTripFeeRate(k.arena, provisionalNotional, d);
-  const hurdle = clearsFeeHurdle((target - entryPrice) / entryPrice, feeRt, spreadFrac, d);
+  const hurdle = clearsFeeHurdle((target - entryPrice) / entryPrice, feeRt, costSpread, d);
   if (!hurdle.ok) {
     return {
       ok: false,
@@ -137,7 +140,7 @@ export function validateEntry(i: ValidateInput, d: Doctrine, c: Constitution): V
       stop,
       atr: k.atr,
       feeRt,
-      spreadFrac,
+      spreadFrac: costSpread,
       availableCashUsd: a.availableCashUsd,
       heatRoomUsd,
       minNotionalUsd: Math.max(1, i.asset.minNotionalUsd),

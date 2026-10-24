@@ -53,6 +53,7 @@ import {
   type Rebuttal,
   RebuttalSchema,
   type SeatOpinion,
+  uncitedNumbers,
 } from "../court/court.ts";
 import {
   buildEvidence,
@@ -64,12 +65,13 @@ import {
 } from "../court/evidence.ts";
 import type { HopAttempt, LlmRouter } from "../court/llm.ts";
 import {
+  BEAR_PERSONAS,
   BEAR_PROMPT_VERSION,
   BEAR_SCHEMA,
-  BEAR_SYSTEM,
   BULL_PROMPT_VERSION,
   BULL_SCHEMA,
   BULL_SYSTEM,
+  bearSystem,
   PANEL_PROMPT_VERSION,
   PANEL_SCHEMA,
   PANEL_SEATS,
@@ -90,8 +92,8 @@ import {
 } from "../lib/ids.ts";
 import { dec, defaultTick, roundPrice, toCents } from "../lib/num.ts";
 import { sha256Hex } from "../lib/sha256.ts";
-import { type Band, evaluateBreaker } from "../risk/CircuitBreakerLadder.ts";
-import { correlationVeto } from "../risk/correlation.ts";
+import { type Band, evaluateBreaker, withHysteresis } from "../risk/CircuitBreakerLadder.ts";
+import { correlation, correlationVeto } from "../risk/correlation.ts";
 import { type Arena, modeledPaperCostCents, roundTripFeeRate } from "../risk/fees.ts";
 import { type AccountView, type AssetView, validateEntry } from "../risk/PreTradeValidator.ts";
 import { effectiveRung, type RungName } from "../risk/rungs.ts";
@@ -224,6 +226,7 @@ export interface SloView {
   budget_projected: { resource: string; fraction: number };
   alarm_lost_total: number;
   stage_failures_today: Record<string, number>;
+  policy_vacuums_today: Record<string, number>;
   court_waiting: number;
 }
 
@@ -363,6 +366,17 @@ export class Brain {
       if (this.termBuffer.length > 40) this.termBuffer.shift();
     };
     this.budget = new FreeTierBudget(deps.sql, deps.d);
+    // Audit W2-06: court providers respect per-provider daily call caps (free-tier RPD with margin).
+    if (deps.llm) {
+      const key = (p: string) => `llm_calls:${p}:${utcDay(deps.now())}`;
+      deps.llm.gate = {
+        allow: (p) => {
+          const cap = deps.d.llm_routing.daily_call_caps[p];
+          return cap === undefined || Number(getKV(deps.sql, key(p)) ?? 0) < cap;
+        },
+        used: (p) => setKV(deps.sql, key(p), String(Number(getKV(deps.sql, key(p)) ?? 0) + 1), deps.now()),
+      };
+    }
   }
 
   // ------------------------------------------------------------------ setup
@@ -757,7 +771,8 @@ export class Brain {
     const day = 86_400_000;
     this.sql.exec(
       `DELETE FROM settings WHERE updated_at < ? AND (
-         key LIKE 'count:%' OR key LIKE 'alert:%' OR key LIKE 'court_seen:%'
+         key LIKE 'count:%' OR key LIKE 'alert:%' OR key LIKE 'court_seen:%' OR key LIKE 'spreads:%'
+         OR key LIKE 't1_fail:%' OR key LIKE 'dispatch_stale:%' OR key LIKE 'ratify_request:%'
          OR key GLOB '*:20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' OR key GLOB '*:month:20[0-9][0-9]-[0-9][0-9]')`,
       now - 14 * day,
     );
@@ -1000,7 +1015,7 @@ export class Brain {
     const parts = coid.split("-"); // c54-P-xxxxxxxx-E-1
     const short = parts[2] ?? "";
     const contract = this.sql
-      .exec<{ contract_id: string }>("SELECT contract_id FROM contracts")
+      .exec<{ contract_id: string; json: string }>("SELECT contract_id, json FROM contracts")
       .find((r) => r.contract_id.replace(/-/g, "").endsWith(short));
     const role: OrderRole = parts[3] === "S" ? "STOP" : parts[3] === "X" ? "EXIT" : "ENTRY";
     const symbol = canonicalSymbol(o.symbol, o.asset_class);
@@ -1012,6 +1027,24 @@ export class Brain {
           account,
         )
       : null;
+    // Audit W3-15: with the reservation gone, re-derive risk from the contract (qty × distance to its stop); with no
+    // contract at all, count the whole notional as risk — over-counting heat blocks entries, under-counting allows
+    // too many (fail closed).
+    const qtyN = Number(o.qty ?? 0);
+    const px = Number(o.limit_price ?? o.stop_price ?? 0);
+    const notionalCents = reservation?.notional_cents ?? Math.ceil(qtyN * px * 100);
+    let riskCents = reservation?.risk_cents ?? 0;
+    if (!reservation && role === "ENTRY") {
+      let stop = 0;
+      try {
+        stop = Number(
+          (JSON.parse(contract?.json ?? "{}") as DecisionContract).invalidation_criteria?.stop_price ?? 0,
+        );
+      } catch {
+        stop = 0;
+      }
+      riskCents = stop > 0 && px > stop ? Math.ceil(qtyN * (px - stop) * 100) : notionalCents;
+    }
     this.sql.exec(
       `INSERT OR IGNORE INTO orders (client_order_id, account, contract_id, role, attempt, broker_order_id, state, side, symbol, arena,
          order_type, tif, qty, limit_price, stop_price, filled_qty, risk_cents, notional_cents, created_at, updated_at)
@@ -1032,8 +1065,8 @@ export class Brain {
       o.limit_price ?? null,
       o.stop_price ?? null,
       o.filled_qty,
-      reservation?.risk_cents ?? 0,
-      reservation?.notional_cents ?? 0,
+      riskCents,
+      notionalCents,
       now,
       now,
     );
@@ -1043,7 +1076,13 @@ export class Brain {
         contract.contract_id,
         account,
       );
-    this.journal.append(account, "ORDER_ADOPTED", coid, { broker_order_id: o.id, status: o.status }, now);
+    this.journal.append(
+      account,
+      "ORDER_ADOPTED",
+      coid,
+      { broker_order_id: o.id, status: o.status, risk_cents: riskCents, matched_contract: Boolean(contract) },
+      now,
+    );
   }
 
   private applyFill(
@@ -1105,13 +1144,41 @@ export class Brain {
       },
       now,
     );
+    // Audit W2-36/W3-13: realized slippage against the order's own price (positive = worse for us).
+    const expected = Number(order.limit_price ?? order.stop_price ?? 0);
+    const realizedBps =
+      expected > 0
+        ? Math.round(((order.side === "buy" ? price - expected : expected - price) / expected) * 10_000)
+        : null;
     this.journal.append(
       account,
       "FILL",
       order.client_order_id,
-      { symbol: order.symbol, side: order.side, qty, price, role: order.role, fee_cents: feeCents },
+      {
+        symbol: order.symbol,
+        side: order.side,
+        qty,
+        price,
+        role: order.role,
+        fee_cents: feeCents,
+        ...(realizedBps === null ? {} : { slip_bps: realizedBps }),
+      },
       now,
     );
+    // Audit W3-09: a fill far through the order's price is a bad print or a venue problem, never normal.
+    if (realizedBps !== null && realizedBps > this.d.execution.exit_collar_bps) {
+      this.journal.append(
+        account,
+        "BAD_PRINT",
+        order.client_order_id,
+        { symbol: order.symbol, price, expected, bps: realizedBps },
+        now,
+      );
+      void this.alertOnce(
+        `bad-print:${order.symbol}`,
+        `🧾 ${account}: ${order.symbol} ${order.side} filled ${realizedBps} bps through its order price (${price} vs ${expected}).`,
+      );
+    }
 
     const prevFilled = Number(order.filled_qty);
     const prevAvg = order.avg_fill_price ? Number(order.avg_fill_price) : 0;
@@ -1456,7 +1523,7 @@ export class Brain {
         account,
         now - 86_400_000,
       )?.n ?? 0;
-    const state = evaluateBreaker(
+    const raw = evaluateBreaker(
       {
         equityCents: eq,
         hwmCents: row.hwm_cents,
@@ -1466,6 +1533,11 @@ export class Brain {
       },
       this.d,
     );
+    const streakKey = `breaker_recover:${account}`;
+    const h = withHysteresis(row.breaker, raw, Number(getKV(this.sql, streakKey) ?? 0), this.d);
+    if (String(h.streak) !== (getKV(this.sql, streakKey) ?? "0"))
+      setKV(this.sql, streakKey, String(h.streak), now);
+    const state = h.state;
     const rung = effectiveRung(row.rung, eq / 100, this.d);
     if (state.band !== row.breaker || rung !== row.rung) {
       this.sql.exec("UPDATE accounts SET breaker = ?, rung = ? WHERE account = ?", state.band, rung, account);
@@ -2257,9 +2329,17 @@ ${postmortem}`,
     ]);
     const bars: Record<string, Bar[]> = { ...cb, ...sb };
     const cand = bars[contract.symbol];
-    if (!cand) return null;
+    // Audit W3-02: no bars used to pass the guard silently (fail-open). Now it refuses; unknowns are counted.
+    if (!cand) {
+      this.vacuum("correlation_no_bars", now);
+      return "correlation check impossible (no daily bars for the candidate)";
+    }
+    const since = now - g.lookback_days * 86_400_000;
+    for (const h of held)
+      if (!bars[h] || correlation(cand, bars[h] as Bar[], since) === null)
+        this.vacuum("correlation_unknown", now);
     const heldBars = Object.fromEntries(held.filter((h) => bars[h]).map((h) => [h, bars[h] as Bar[]]));
-    const hit = correlationVeto(cand, heldBars, g.max_corr, now - g.lookback_days * 86_400_000);
+    const hit = correlationVeto(cand, heldBars, g.max_corr, since);
     return hit ? `correlated with ${hit.symbol} (ρ=${hit.corr} > ${g.max_corr})` : null;
   }
 
@@ -2478,6 +2558,9 @@ ${postmortem}`,
       };
     }
     if (!q || !b) return { ok: false, reason: "no quote or bars", symbol, arena };
+    // Audit W2-40: never convene a court on an old quote (the validator would refuse the order anyway).
+    if (q.at && now - q.at > this.d.staleness.quote_seconds * 1000)
+      return { ok: false, reason: "quote is stale", symbol, arena };
     const created = typeof p.createdAt === "number" ? p.createdAt : row.enqueued_at;
     const facts = await this.catalystFacts(
       row.candidate_id,
@@ -2491,6 +2574,7 @@ ${postmortem}`,
       bars: b,
       bid: q.bid,
       ask: q.ask,
+      quoteAt: q.at,
       now,
       regime: this.regimeContext(now),
       world: this.worldContext(now),
@@ -2831,6 +2915,13 @@ ${postmortem}`,
     setKV(this.sql, `court_seen:${e.symbol}`, String(now), now);
     const sprintId = uuidv7(now);
     const cand = { candidateId: row.candidate_id, symbol: e.symbol, arena: e.arena, source: "court" };
+    const hearingStart = this.deps.now();
+    const deadline = this.d.llm_routing.hearing_deadline_ms;
+    const elapsed = () => this.deps.now() - hearingStart;
+    const degraded: string[] = [];
+    let llmCalls = 0;
+    const seed = Number.parseInt(sprintId.replace(/-/g, "").slice(-8), 16) >>> 0;
+    const persona = BEAR_PERSONAS[seed % BEAR_PERSONAS.length] ?? BEAR_PERSONAS[0];
     const evidenceJson = JSON.stringify(evidenceForModels(e));
     const session: CourtSession = {
       symbol: e.symbol,
@@ -2858,7 +2949,10 @@ ${postmortem}`,
       },
       (j) => BullSchema.parse(j),
       [],
-      (a) => this.logLlm(sprintId, "BULL", BULL_PROMPT_VERSION, a, this.deps.now()),
+      (a) => {
+        llmCalls += a.outcome === "UNAVAILABLE" || a.outcome === "SKIPPED_FAMILY" ? 0 : 1;
+        this.logLlm(sprintId, "BULL", BULL_PROMPT_VERSION, a, this.deps.now());
+      },
     );
     if (!bull) {
       this.rejectCandidate(cand, "BULL", ["no bull provider produced valid output"], {}, now);
@@ -2876,14 +2970,17 @@ ${postmortem}`,
     const bear = await llm.run(
       this.d.llm_routing.bear_chain,
       {
-        system: BEAR_SYSTEM,
+        system: bearSystem(persona),
         user: `Evidence JSON:\n${evidenceJson}\n\nBull brief JSON:\n${JSON.stringify(checked.bull)}`,
         maxOutputTokens: 1500,
         schema: BEAR_SCHEMA as unknown as Record<string, unknown>,
       },
       (j) => BearSchema.parse(j),
       this.d.llm_routing.require_cross_family ? [bull.family] : [],
-      (a) => this.logLlm(sprintId, "BEAR", BEAR_PROMPT_VERSION, a, this.deps.now()),
+      (a) => {
+        llmCalls += a.outcome === "UNAVAILABLE" || a.outcome === "SKIPPED_FAMILY" ? 0 : 1;
+        this.logLlm(sprintId, "BEAR", BEAR_PROMPT_VERSION, a, this.deps.now());
+      },
     );
     if (!bear) {
       this.rejectCandidate(cand, "BEAR", ["no cross-family bear available"], { ...checked.bull }, now);
@@ -2895,7 +2992,8 @@ ${postmortem}`,
     // ADR-044: the bull answers the bear (withdrawing ends the session), then the expert panel weighs in.
     const panelCfg = this.d.llm_routing.panel;
     let rebuttal: Rebuttal | null = null;
-    if (panelCfg.rebuttal) {
+    if (panelCfg.rebuttal && elapsed() > deadline * 0.4) degraded.push("rebuttal");
+    if (panelCfg.rebuttal && elapsed() <= deadline * 0.4) {
       const r = await llm.run(
         [{ provider: bull.provider, model: bull.model }, ...this.d.llm_routing.bull_chain],
         {
@@ -2906,7 +3004,10 @@ ${postmortem}`,
         },
         (j) => RebuttalSchema.parse(j),
         this.d.llm_routing.require_cross_family ? [bear.family] : [],
-        (a) => this.logLlm(sprintId, "REBUTTAL", REBUTTAL_PROMPT_VERSION, a, this.deps.now()),
+        (a) => {
+          llmCalls += a.outcome === "UNAVAILABLE" || a.outcome === "SKIPPED_FAMILY" ? 0 : 1;
+          this.logLlm(sprintId, "REBUTTAL", REBUTTAL_PROMPT_VERSION, a, this.deps.now());
+        },
       );
       if (r) {
         rebuttal = {
@@ -2927,9 +3028,20 @@ ${postmortem}`,
         }
       }
     }
+    // Audit W2-05: the advisory panel is the first thing dropped when the hearing runs long.
+    const seats = elapsed() > deadline * 0.6 ? [] : panelCfg.seats;
+    if (seats.length < panelCfg.seats.length) degraded.push("panel");
+    if (degraded.length > 0)
+      this.journal.append(
+        "SYSTEM",
+        "HEARING_DEGRADED",
+        row.candidate_id,
+        { sprint: sprintId, dropped: degraded, ms: elapsed() },
+        now,
+      );
     const panel = (
       await Promise.all(
-        panelCfg.seats.map(async (id, i) => {
+        seats.map(async (id, i) => {
           const seat = PANEL_SEATS.find((s) => s.id === id);
           if (!seat || panelCfg.chain.length === 0) return null;
           // rotate the chain so seats spread across providers; prefer families not yet heard, else any
@@ -2940,8 +3052,10 @@ ${postmortem}`,
             maxOutputTokens: 800,
             schema: PANEL_SCHEMA as unknown as Record<string, unknown>,
           };
-          const log = (a: HopAttempt) =>
+          const log = (a: HopAttempt) => {
+            llmCalls += a.outcome === "UNAVAILABLE" || a.outcome === "SKIPPED_FAMILY" ? 0 : 1;
             this.logLlm(sprintId, `PANEL_${id.toUpperCase()}`, PANEL_PROMPT_VERSION, a, this.deps.now());
+          };
           const parse = (j: unknown) => PanelOpinionSchema.parse(j);
           const r = await llm.run(chain, req, parse, [], log, panelCfg.timeout_ms);
           return r
@@ -2958,7 +3072,13 @@ ${postmortem}`,
     ).filter((x): x is SeatOpinion => x !== null);
     session.panel = panel;
 
-    const synthReq = buildSynth(e, checked.bull, bear.value, { rebuttal, panel });
+    // Audit W2-02: the judge reads the seats in a per-hearing order so no seat always speaks first.
+    const shuffled = [...panel].sort(
+      (a, b) =>
+        ((seed ^ (a.seat.charCodeAt(0) * 2654435761)) >>> 0) -
+        ((seed ^ (b.seat.charCodeAt(0) * 2654435761)) >>> 0),
+    );
+    const synthReq = buildSynth(e, checked.bull, bear.value, { rebuttal, panel: shuffled });
     const est = estimateTokens(synthReq.state, synthReq.questions);
     if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) {
       this.rejectCandidate(
@@ -2998,7 +3118,13 @@ ${postmortem}`,
       this.d,
       this.deps.calibration?.maps["court.win_prob"] ?? null,
     );
-    session.synth = { ...synth, calibrated };
+    // Audit W2-07: a contested ruling (lethal bear, or a bull who retreated ≥ 2 conviction points) may be taxed.
+    const contested =
+      synth.bearLethality >= 0.5 ||
+      (rebuttal !== null && checked.bull.conviction - rebuttal.revised_conviction >= 2);
+    const tax = contested ? this.d.funnel.tier3.disagreement_tax : 1;
+    const winUsed = Math.min(calibrated, calibrated * tax);
+    session.synth = { ...synth, calibrated: winUsed };
     const viaAccount = (this.d.strategies.find((s) => s.arena === e.arena && s.status === "ACTIVE")
       ?.accounts[0] ?? "PAPER") as AccountId;
     const meta = await this.assetMeta(e.symbol, viaAccount).catch(() => null);
@@ -3010,7 +3136,7 @@ ${postmortem}`,
       bull: rebuttal ? { ...checked.bull, conviction: rebuttal.revised_conviction } : checked.bull,
       bear: bear.value,
       synth,
-      calibratedWin: calibrated,
+      calibratedWin: winUsed,
       tick,
       models: {
         bull: { provider: bull.provider, model: bull.model, family: bull.family },
@@ -3041,6 +3167,39 @@ ${postmortem}`,
         notes: checked.notes,
         // audit W2-01: keep each seat's independent view so the Governor can grade panel vs plain votes vs judge
         panel: panel.map((p) => ({ seat: p.seat, stance: p.stance, confidence: p.confidence, by: p.by })),
+        bear_persona: persona.id,
+        // audit W2-33: features for a later meta-label (size) model, logged from day one
+        features: {
+          spread_bps: e.quote.spread_bps,
+          atr_pct: e.technicals.atr_pct,
+          dist_ema20_pct: e.technicals.dist_ema20_pct,
+          rsi14: e.technicals.rsi14,
+          change_5d_pct: e.technicals.change_5d_pct,
+          catalyst_age_min: e.catalyst.ageMinutes,
+          catalyst_kind: e.catalyst.kind,
+          tier1_material: e.catalyst.tier1?.material ?? null,
+          research_findings: e.research?.findings.length ?? 0,
+          kronos_p_up: e.forecast?.p_up ?? null,
+        },
+        contested,
+        win_used: winUsed,
+        degraded,
+        // audit W2-03: numbers each side stated that appear nowhere in the evidence (graded later, never blocking)
+        // the proposed trade's own prices are code-checked, so they count as known
+        uncited: ((known: string) => ({
+          bull: uncitedNumbers([checked.bull.thesis], known).length,
+          bear: uncitedNumbers([...bear.value.fatal_flaws, ...bear.value.kill_criteria], known).length,
+          panel: uncitedNumbers(
+            panel.flatMap((p) => [p.headline, ...p.points]),
+            known,
+          ).length,
+        }))(`${evidenceJson}${JSON.stringify(checked.bull)}`),
+        // audit W1-38/W2-39: what this decision cost; W1-28: which policy generation authorized it
+        cost: { llm_calls: llmCalls, clef_tokens: synthRes.usage.input_tokens ?? est, ms: elapsed() },
+        policy: {
+          doctrine_sha256: getKV(this.sql, "running_doctrine"),
+          constitution: getKV(this.sql, "running_constitution"),
+        },
         rebuttal: rebuttal
           ? {
               held: rebuttal.still_long,
@@ -3746,7 +3905,12 @@ ${postmortem}`,
       {
         contract,
         account: view,
-        market: { bid: q.bid, ask: q.ask, quoteAt: q.at },
+        market: {
+          bid: q.bid,
+          ask: q.ask,
+          quoteAt: q.at,
+          typicalSpreadFrac: this.typicalSpread(contract.symbol),
+        },
         asset,
         reputationWeight: repWeight,
         regimeMultiplier: exception ? lane.size_multiplier : 1,
@@ -3869,6 +4033,13 @@ ${postmortem}`,
     } catch (e) {
       if (e instanceof BrokerError && e.status === 422 && /client_order_id/i.test(e.body)) {
         res = await broker.orderByClientId(coid); // duplicate: our earlier attempt landed
+      } else if (e instanceof BrokerError && (e.status === 408 || e.status >= 500)) {
+        // Audit W3-11: the request may have landed even though the response didn't — ask before declaring failure.
+        res = await broker.orderByClientId(coid).catch(() => null);
+      }
+      if (!res && e instanceof BrokerError && e.status === 429) {
+        this.journal.append(account, "ORDER_THROTTLED", coid, { symbol: o.symbol, role: o.role }, now);
+        return false; // Alpaca throttled us: try again next pulse, no alarm
       }
       if (!res) {
         this.journal.append(account, "ORDER_FAILED", coid, { req, error: errText(e).slice(0, 500) }, now);
@@ -4036,7 +4207,43 @@ ${postmortem}`,
     const crypto = symbols.filter(isCryptoSymbol);
     const stocks = symbols.filter((s) => !isCryptoSymbol(s));
     const [a, b] = await Promise.all([m.cryptoQuotes(crypto), m.stockQuotes(stocks)]);
-    return { ...a, ...b };
+    const all = { ...a, ...b };
+    this.sampleSpreads(all, this.deps.now());
+    return all;
+  }
+
+  /** Audit W3-06: ≤ 1 spread sample per symbol per 5 min, last 40 kept (≈ the recent few hours of quotes). */
+  private sampleSpreads(quotes: Record<string, Quote>, now: number): void {
+    for (const [sym, q] of Object.entries(quotes)) {
+      if (!(q.bid > 0 && q.ask >= q.bid)) continue;
+      const key = `spreads:${sym}`;
+      let v: { at: number; s: number[] } = { at: 0, s: [] };
+      try {
+        v = JSON.parse(getKV(this.sql, key) ?? '{"at":0,"s":[]}');
+      } catch {
+        /* reset */
+      }
+      if (now - v.at < 5 * 60_000) continue;
+      const frac = (q.ask - q.bid) / ((q.ask + q.bid) / 2);
+      setKV(
+        this.sql,
+        key,
+        JSON.stringify({ at: now, s: [...v.s, Math.round(frac * 1e6) / 1e6].slice(-40) }),
+        now,
+      );
+    }
+  }
+
+  /** p90 of the recent spread samples, or null with fewer than 10. */
+  typicalSpread(symbol: string): number | null {
+    try {
+      const v = JSON.parse(getKV(this.sql, `spreads:${symbol}`) ?? "null") as { s: number[] } | null;
+      if (!v || v.s.length < 10) return null;
+      const sorted = [...v.s].sort((x, y) => x - y);
+      return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))] ?? null;
+    } catch {
+      return null;
+    }
   }
 
   status(): StatusView {
@@ -4388,9 +4595,23 @@ ${postmortem}`,
       },
       alarm_lost_total: Number(getKV(this.sql, "alarm_lost_total") ?? 0),
       stage_failures_today: failures,
+      policy_vacuums_today: Object.fromEntries(
+        this.sql
+          .exec<{ key: string; value: string }>(
+            "SELECT key, value FROM settings WHERE key LIKE 'vacuum:%' AND key LIKE ?",
+            `%:${day}`,
+          )
+          .map((r) => [r.key.split(":")[1], Number(r.value)]),
+      ),
       court_waiting:
         one<{ n: number }>(this.sql, "SELECT COUNT(*) AS n FROM court_waits WHERE until_at > ?", now)?.n ?? 0,
     };
+  }
+
+  /** Audit W3-02: count a fail-open branch that fired (a guard that could not decide), per site per day. */
+  private vacuum(site: string, now: number): void {
+    const k = `vacuum:${site}:${utcDay(now)}`;
+    setKV(this.sql, k, String(Number(getKV(this.sql, k) ?? 0) + 1), now);
   }
 
   /** Audit W1-15: the cron self-heal found no alarm armed and restored it. Journaled so drops are countable. */

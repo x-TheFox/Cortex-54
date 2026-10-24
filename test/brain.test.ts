@@ -1147,6 +1147,68 @@ describe("court end-to-end (Phase 3)", () => {
     expect((await t.brain.ingestBatch(junk)).ok).toBe(false);
   });
 
+  it("audit W2-06/W2-41/W1-38: provider caps skip a spent provider; bear persona and cost are journaled", async () => {
+    const calls: string[] = [];
+    const llm = new LlmRouter(
+      { gemini: provider(bullJson, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => T0,
+    );
+    const t = setup({ clef: new ScriptedClef(answers), llm });
+    t.sql.exec(
+      "INSERT INTO settings (key, value, updated_at) VALUES (?, '900', ?)",
+      `llm_calls:groq:${new Date(T0).toISOString().slice(0, 10)}`,
+      T0,
+    );
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    const r = await t.brain.pulse();
+    expect(r.courtContracts).toBe(0); // the only cross-family bear (Groq) is out of calls today
+    expect(calls.some((m) => m.includes("gpt-oss"))).toBe(false);
+
+    const u = setup({
+      clef: new ScriptedClef(answers),
+      llm: new LlmRouter(
+        { gemini: provider(bullJson, []), groq: provider(bearJson, []) },
+        doctrine,
+        () => T0,
+      ),
+    });
+    await u.brain.ingestBatch(cryptoBatch);
+    u.market.set("BTC/USD", 130, 130.02);
+    u.market.news.push(btcNews);
+    expect((await u.brain.pulse()).courtContracts).toBe(1);
+    const row = u.d1.db.prepare("SELECT payload_json FROM journal WHERE kind = 'COURT'").get() as {
+      payload_json: string;
+    };
+    const j = JSON.parse(row.payload_json);
+    expect(["skeptic", "macro", "quant"]).toContain(j.bear_persona);
+    expect(j.cost.llm_calls).toBe(6);
+    expect(j.contested).toBe(false);
+    expect(j.uncited.bull).toBe(0);
+  });
+
+  it("audit W2-05: a slow hearing drops the panel and journals HEARING_DEGRADED", async () => {
+    let t!: ReturnType<typeof setup>;
+    const slow = (text: string): LlmProvider => ({
+      async complete(model, req, timeoutMs) {
+        t.advance(60_000); // each call takes a minute
+        return provider(text, []).complete(model, req, timeoutMs);
+      },
+    });
+    const llm = new LlmRouter({ gemini: slow(bullJson), groq: slow(bearJson) }, doctrine, () => T0);
+    t = setup({ clef: new ScriptedClef(answers), llm });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    await t.brain.pulse();
+    const row = t.d1.db.prepare("SELECT payload_json FROM journal WHERE kind = 'HEARING_DEGRADED'").get() as
+      | { payload_json: string }
+      | undefined;
+    expect(JSON.parse(row?.payload_json ?? "{}").dropped).toContain("panel");
+  });
+
   it("no cross-family bear → the candidate is rejected, never traded single-family", async () => {
     const calls: string[] = [];
     const llm = new LlmRouter({ gemini: provider(bullJson, calls) }, doctrine, () => T0);

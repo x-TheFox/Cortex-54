@@ -70,6 +70,8 @@ breakers:
   red_consecutive_stopouts_24h: 3
   paper_auto_unlock_hours: 24 # PAPER self-recovers after RED once flat (ADR-025); LIVE never does
   multipliers: { GREEN: 1.0, YELLOW: 0.5, ORANGE: 0.0, RED: 0.0 }
+  recovery_margin: 0.005 # audit W3-01: recover only once 0.5% clear of the threshold …
+  recovery_pulses: 3 # … for 3 pulses in a row (worse bands still apply at once)
 
 sizing:
   min_stop_atr_multiple: 1.2
@@ -137,6 +139,7 @@ funnel:
   tier3:
     max_sprints_per_day: 12
     min_structural_score: 78
+    disagreement_tax: 1.0 # audit W2-07: 0.85 once the Governor shows contested rulings do worse; 1.0 = log only
   calibration:
     min_outcomes_before_trusting: 50
     shrink_to: 0.5
@@ -196,6 +199,8 @@ llm_routing:
       - { provider: groq, model: openai/gpt-oss-20b }
       - { provider: gemini, model: gemini-3.5-flash }
   require_cross_family: true
+  hearing_deadline_ms: 150000 # audit W2-05: past 60% skip the panel, past 40% skip the rebuttal
+  daily_call_caps: { gemini: 250, groq: 900, nim: 800, openrouter: 45 } # audit W2-06: under each free RPD
   max_retries_per_provider: 1
   timeout_ms: 60000
 

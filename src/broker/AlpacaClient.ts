@@ -40,23 +40,47 @@ async function call<T>(
   url: string,
   schema: z.ZodType<T> | null,
   init: RequestInit = {},
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
 ): Promise<T> {
-  guard();
-  const res = await fetcher(url, {
-    ...init,
-    headers: {
-      "APCA-API-KEY-ID": creds.keyId,
-      "APCA-API-SECRET-KEY": creds.secret,
-      accept: "application/json",
-      ...(init.body ? { "content-type": "application/json" } : {}),
-    },
-    signal: AbortSignal.timeout(8_000),
-  });
-  const text = await res.text();
   const path = new URL(url).pathname;
-  if (!res.ok) throw new BrokerError(res.status, text, path);
-  if (schema === null) return undefined as T;
-  return schema.parse(text ? JSON.parse(text) : null);
+  // Audit W3-11: reads retry twice on throttling, timeouts and 5xx (short, jittered); writes never blind-retry —
+  // the caller checks by client_order_id instead, so a lost response can't double an order.
+  const idempotent = (init.method ?? "GET") === "GET";
+  for (let attempt = 0; ; attempt++) {
+    guard();
+    let res: Response;
+    try {
+      res = await fetcher(url, {
+        ...init,
+        headers: {
+          "APCA-API-KEY-ID": creds.keyId,
+          "APCA-API-SECRET-KEY": creds.secret,
+          accept: "application/json",
+          ...(init.body ? { "content-type": "application/json" } : {}),
+        },
+        signal: AbortSignal.timeout(8_000),
+      });
+    } catch (e) {
+      const err = new BrokerError(408, `timeout or network error: ${String(e).slice(0, 120)}`, path);
+      if (idempotent && attempt < 2) {
+        await sleep(300 * (attempt + 1) + Math.random() * 200);
+        continue;
+      }
+      throw err;
+    }
+    const text = await res.text();
+    if (res.ok) {
+      if (schema === null) return undefined as T;
+      return schema.parse(text ? JSON.parse(text) : null);
+    }
+    const retryable = res.status === 429 || res.status >= 500;
+    if (idempotent && retryable && attempt < 2) {
+      const after = Number(res.headers.get("retry-after"));
+      await sleep(Number.isFinite(after) && after > 0 ? Math.min(after, 2) * 1000 : 400 * (attempt + 1));
+      continue;
+    }
+    throw new BrokerError(res.status, text, path);
+  }
 }
 
 /** Trading API for one Alpaca account (paper or live). */
