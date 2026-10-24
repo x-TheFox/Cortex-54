@@ -25,7 +25,7 @@ skills:
       runtime: py-batch,
       phase: 6,
       status: ACTIVE,
-      consumer: CRYPTO_KRONOS_FORECAST_V1 + court evidence,
+      consumer: court evidence (LOW confidence; CRYPTO_KRONOS_FORECAST_V1 is SHADOW),
     }
   # ---------- RSK (ts-hot, Phase 1) ----------
   - {

@@ -394,7 +394,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   EQUITY_INVERSE_BREAKOUT_V1 and CRYPTO_OVERSOLD_BOUNCE_V1 trade falling markets. True shorting needs a margin
   account (≥ $2,000), so it stays impossible at $54.
 - 2026-10-24: ADR-041: Kronos-small forecasts (research job `kronos`, every 4 h on GitHub CPU, vol-rescaled sampled
-  paths) → CRYPTO_KRONOS_FORECAST_V1 on PAPER + a `forecast` block in court evidence.
+  paths) → a LOW-confidence `forecast` block in court evidence only (operator: Kronos never trades by itself;
+  CRYPTO_KRONOS_FORECAST_V1 is SHADOW).
 - 2026-10-24: first buy attempts (Kronos BTC/DOT) refused by Alpaca's $10 crypto minimum → ADR-042 min-ticket rule.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.
