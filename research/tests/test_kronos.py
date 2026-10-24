@@ -41,3 +41,13 @@ def test_job_reads_its_levels_from_the_doctrine():
     p = s["params"]
     assert s["arena"] == "CRYPTO" and p["horizon_hours"] % p["candle_hours"] == 0
     assert p["lookback_hours"] // p["candle_hours"] <= K.MAX_CONTEXT
+
+
+def test_fan_chart_bands_are_ordered_and_sized():
+    rng = np.random.default_rng(3)
+    paths = 100 * (1 + np.cumsum(rng.normal(0, 0.01, (24, 12)), axis=1))
+    out = K.fan_chart([{"c": 100.0 + i} for i in range(60)], paths)
+    assert len(out["hist"]) == 42 and out["hist"][-1] == 159.0
+    f = out["fan"]
+    assert len(f["p10"]) == len(f["p50"]) == len(f["p90"]) == 12
+    assert all(a <= b <= c for a, b, c in zip(f["p10"], f["p50"], f["p90"]))

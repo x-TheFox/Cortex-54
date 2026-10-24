@@ -25,12 +25,22 @@ export const KronosForecastSchema = z.object({
   exp_ret: z.number().min(-1).max(10),
   q10_ret: z.number().optional(),
   q90_ret: z.number().optional(),
+  /** ADR-047 panel: recent candle closes and the 10/50/90% band of sampled future closes. */
+  hist: z.array(z.number().positive()).max(120).optional(),
+  fan: z
+    .object({
+      p10: z.array(z.number()).max(48),
+      p50: z.array(z.number()).max(48),
+      p90: z.array(z.number()).max(48),
+    })
+    .optional(),
 });
 export type KronosForecast = z.infer<typeof KronosForecastSchema>;
 
 export const KronosPayloadSchema = z.object({
   model: z.string().max(80),
   horizon_hours: z.number().positive(),
+  candle_hours: z.number().positive().optional(),
   forecasts: z.array(KronosForecastSchema).max(40),
 });
 

@@ -1763,6 +1763,19 @@ describe("Kronos forecasts (ADR-041)", () => {
     expect(e?.receipts.some((r) => r.evidence_id === "kronos")).toBe(true);
   });
 
+  it("serves the panel's forecast view: Kronos fan beside the robot's own plan (ADR-047)", async () => {
+    const t = setup();
+    const fan = { p10: [98, 97], p50: [100.5, 101], p90: [103, 105] };
+    await t.brain.ingestBatch(kronosBatch([{ ...fc("BTC/USD", 100), hist: [99, 100], fan }]));
+    const v = t.brain.forecastView("BTC/USD", T0);
+    expect(v.symbols).toEqual(["BTC/USD"]);
+    expect(v.kronos?.fan).toEqual(fan);
+    expect(v.kronos?.confidence).toBe("LOW");
+    expect(v.robot.position).toBeNull();
+    expect(t.brain.forecastView("ETH/USD", T0).kronos).toBeNull();
+    expect(t.brain.forecastView("BTC/USD", T0 + 6 * HOUR).kronos?.stale).toBe(true);
+  });
+
   it("rejects stale or malformed batches and feeds fresh forecasts to the court evidence", async () => {
     const t = setup();
     expect((await t.brain.ingestBatch(kronosBatch([fc("BTC/USD", 100)], T0 - 6 * HOUR))).ok).toBe(false);

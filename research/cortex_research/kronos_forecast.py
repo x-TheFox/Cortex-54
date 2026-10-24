@@ -67,6 +67,16 @@ def rescale(a: np.ndarray, last: float, k: float) -> np.ndarray:
     return last * (1 + (a / last - 1) * k)
 
 
+def fan_chart(hist_bars: list[dict], closes: np.ndarray, hist_n: int = 42) -> dict:
+    """For the panel (ADR-047): the last `hist_n` candle closes and the 10/50/90% band of the sampled future closes."""
+    q = np.quantile(closes, [0.1, 0.5, 0.9], axis=0)
+    sig = lambda xs: [float(f"{x:.6g}") for x in xs]  # noqa: E731
+    return {
+        "hist": sig([b["c"] for b in hist_bars[-hist_n:]]),
+        "fan": {"p10": sig(q[0]), "p50": sig(q[1]), "p90": sig(q[2])},
+    }
+
+
 def summarize(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray, last: float, stop: float, target: float) -> dict:
     """Probabilities from sampled paths, shape (n_paths, horizon). Same-candle touches count as the stop (pessimistic)."""
     n, _ = closes.shape
@@ -181,6 +191,7 @@ def kronos_job(kronos_dir: Path, doctrine_path: Path, now_ms: int, version: str,
             f = {"symbol": sym, "last": last, "last_bar_at": hb[-1]["t"], "atr": round(a, 8), "stop": stop,
                  "target": target, "vol_scale": round(k, 3), "raw_p_up": raw["p_up"], "raw_exp_ret": raw["exp_ret"],
                  **summarize(rescale(hi, last, k), rescale(lo, last, k), rescale(cl, last, k), last, stop, target)}
+            f.update(fan_chart(hb, rescale(cl, last, k)))
             forecasts.append(f)
             print(f"{sym}: p_win {f['p_win']:.2f} target-first {f['p_target_first']:.2f} stop-first {f['p_stop_first']:.2f} "
                   f"exp {f['exp_ret'] * 100:+.2f}%")

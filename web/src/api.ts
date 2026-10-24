@@ -207,3 +207,48 @@ export function useNow(ms = 1000): number {
   }, [ms]);
   return now;
 }
+
+/** /api/forecast (ADR-047): Kronos's sampled view next to the robot's own plan for one symbol. */
+export interface ForecastView {
+  symbol: string;
+  symbols: string[];
+  now: number;
+  kronos: {
+    model: string;
+    produced_at: number;
+    stale: boolean;
+    horizon_hours: number;
+    candle_hours: number;
+    confidence: "LOW";
+    about: string;
+    last: number;
+    hist: number[];
+    fan: { p10: number[]; p50: number[]; p90: number[] } | null;
+    p_up: number;
+    p_win: number;
+    exp_ret: number;
+  } | null;
+  robot: {
+    position: {
+      account: string;
+      entry: number;
+      stop: number;
+      target: number;
+      opened_at: number;
+      max_hold_until: number;
+    } | null;
+    plan: {
+      strategy: string;
+      origin: string;
+      created_at: number;
+      entry_low: number;
+      entry_high: number;
+      stop: number;
+      target: number;
+      win_prob: number;
+      bear_lethality: number;
+      thesis: string;
+    } | null;
+    regime: { posture: string; score: number | null } | null;
+  };
+}

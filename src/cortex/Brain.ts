@@ -52,7 +52,13 @@ import {
   RebuttalSchema,
   type SeatOpinion,
 } from "../court/court.ts";
-import { buildEvidence, type Evidence, evidenceForModels, resolveTradeable } from "../court/evidence.ts";
+import {
+  buildEvidence,
+  type Evidence,
+  evidenceForModels,
+  KRONOS_ABOUT,
+  resolveTradeable,
+} from "../court/evidence.ts";
 import type { HopAttempt, LlmRouter } from "../court/llm.ts";
 import {
   BEAR_PROMPT_VERSION,
@@ -1575,6 +1581,7 @@ ${postmortem}`,
         produced_at: b.produced_at,
         model: r.data.model,
         horizon_hours: r.data.horizon_hours,
+        candle_hours: r.data.candle_hours ?? 4,
         forecasts: r.data.forecasts,
       }),
       now,
@@ -1614,6 +1621,90 @@ ${postmortem}`,
     } catch {
       return null;
     }
+  }
+
+  /**
+   * ADR-047 panel: what Kronos thinks the market might do next, beside what the robot itself thinks — its open
+   * position or latest plan for the symbol, the probability behind it, and the regime. Read-only.
+   */
+  forecastView(symbol: string, now = this.deps.now()) {
+    let stored: {
+      produced_at: number;
+      model: string;
+      horizon_hours: number;
+      candle_hours?: number;
+      forecasts: KronosForecast[];
+    } | null = null;
+    try {
+      stored = JSON.parse(getKV(this.sql, "kronos:forecasts") ?? "null");
+    } catch {
+      stored = null;
+    }
+    const symbols = stored?.forecasts.map((f) => f.symbol) ?? [];
+    const f = stored?.forecasts.find((x) => x.symbol === symbol) ?? null;
+    const pos = ACCOUNTS.flatMap((a) => this.positions(a).map((p) => ({ ...p, account: a }))).find(
+      (p) => p.symbol === symbol,
+    );
+    const row = one<{ json: string; created_at: number }>(
+      this.sql,
+      "SELECT json, created_at FROM contracts WHERE symbol = ? ORDER BY created_at DESC LIMIT 1",
+      symbol,
+    );
+    const k = row ? (JSON.parse(row.json) as DecisionContract) : null;
+    const arena = isCryptoSymbol(symbol) ? "CRYPTO" : "EQUITIES";
+    const reg = this.freshRegime(arena, now);
+    return {
+      symbol,
+      symbols,
+      now,
+      kronos:
+        f && stored
+          ? {
+              model: stored.model,
+              produced_at: stored.produced_at,
+              stale:
+                now - stored.produced_at > (kronosParams(this.d)?.max_forecast_age_hours ?? 5) * 3_600_000,
+              horizon_hours: stored.horizon_hours,
+              candle_hours: stored.candle_hours ?? 4,
+              confidence: "LOW" as const,
+              about: KRONOS_ABOUT,
+              last: f.last,
+              hist: f.hist ?? [],
+              fan: f.fan ?? null,
+              p_up: f.p_up,
+              p_win: f.p_win,
+              exp_ret: f.exp_ret,
+            }
+          : null,
+      robot: {
+        position: pos
+          ? {
+              account: pos.account,
+              entry: Number(pos.avg_entry),
+              stop: Number(pos.stop_price),
+              target: Number(pos.target_price),
+              opened_at: pos.opened_at,
+              max_hold_until: pos.max_hold_until,
+            }
+          : null,
+        plan:
+          k && row
+            ? {
+                strategy: k.strategy_id,
+                origin: k.origin,
+                created_at: row.created_at,
+                entry_low: Number(k.entry_plan.zone_low),
+                entry_high: Number(k.entry_plan.zone_high),
+                stop: Number(k.invalidation_criteria.stop_price),
+                target: Number(k.entry_plan.targets[0]),
+                win_prob: k.win_prob_used,
+                bear_lethality: k.bear_lethality,
+                thesis: k.thesis_summary,
+              }
+            : null,
+        regime: reg ? { posture: reg.posture, score: reg.score } : null,
+      },
+    };
   }
 
   private resolvedStrategyOutcomes(strategyId: string): number {

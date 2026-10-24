@@ -27,6 +27,7 @@ export interface WebBrain extends OperatorBrain {
   status(): Promise<unknown>;
   memory(): Promise<unknown>;
   equity(days: number): Promise<unknown>;
+  forecast(symbol: string): Promise<unknown>;
   consumeOnce(id: string): Promise<boolean>;
 }
 
@@ -81,6 +82,11 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
     switch (path) {
       case "/api/state":
         return json(await b.status());
+      case "/api/forecast": {
+        const sym = (url.searchParams.get("symbol") ?? "BTC/USD").toUpperCase();
+        if (!/^[A-Z]{1,6}(\/USD)?$/.test(sym)) return json({ error: "bad symbol" }, 400);
+        return json(await b.forecast(sym));
+      }
       case "/api/equity":
         return json(await b.equity(Number(url.searchParams.get("days") ?? 7)));
       case "/api/memory": {

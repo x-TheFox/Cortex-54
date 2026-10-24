@@ -232,6 +232,11 @@ export class AgentCortexDO extends DurableObject<Env> {
     return this.brain.memoryView();
   }
 
+  forecast(symbol: string): ReturnType<Brain["forecastView"]> {
+    this.begin();
+    return this.brain.forecastView(symbol);
+  }
+
   equity(days: number): ReturnType<Brain["equityHistory"]> {
     this.begin();
     return this.brain.equityHistory(Date.now() - Math.min(35, Math.max(1, days)) * 86_400_000);
