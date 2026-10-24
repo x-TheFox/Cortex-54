@@ -63,7 +63,7 @@ export function checkBull(b: Bull, e: Evidence, d: Doctrine): BullCheck {
   return { ok: true, bull: { ...b, targets: [...new Set(clipped)].slice(0, 3) }, notes };
 }
 
-export const SYNTH_PROMPT_VERSION = "synth@1";
+export const SYNTH_PROMPT_VERSION = "synth@2";
 export const SUITABILITY = ["Very low", "Low", "Moderate", "High", "Very high"] as const;
 
 export function buildSynth(
@@ -73,7 +73,7 @@ export function buildSynth(
 ): { state: unknown; questions: Record<string, ClefQuestion> } {
   return {
     state: {
-      task: "Judge a long trade after a bull/bear debate. Prices in the bull brief were checked against the evidence by code.",
+      task: "Judge a long trade after a bull/bear debate. Prices in the bull brief were checked against the evidence by code. evidence.forecast (Kronos), if present, is LOW-confidence pattern-model context: weigh it lightly and never let it decide.",
       evidence: evidenceForModels(e),
       bull: {
         thesis: bull.thesis,

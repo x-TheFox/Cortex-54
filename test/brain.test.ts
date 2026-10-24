@@ -5,6 +5,7 @@ import type { Doctrine } from "../src/contracts/doctrine.ts";
 import { Brain, equityChartUrl, terminalLine } from "../src/cortex/Brain.ts";
 import type { WorkflowDispatcher } from "../src/cortex/dispatch.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
+import { buildEvidence } from "../src/court/evidence.ts";
 import { type LlmProvider, LlmRouter } from "../src/court/llm.ts";
 import { NullNotifier } from "../src/discord/notifier.ts";
 import { verifyChain } from "../src/journal/Journal.ts";
@@ -1596,20 +1597,51 @@ describe("Kronos forecasts (ADR-041)", () => {
     ...over,
   });
 
-  it("ingests forecasts, trades the favourable one on PAPER, and ignores the weak one", async () => {
+  it("never opens a trade from Kronos alone (operator: court context only)", async () => {
     const t = setup();
     t.market.bars["ETH/USD"] = flat(30, 100);
     t.market.set("ETH/USD", 100, 100.02);
-    const r = await t.brain.ingestBatch(
-      kronosBatch([fc("ETH/USD", 100), fc("SOL/USD", 100, { p_win: 0.45, exp_ret: -0.01 })]),
-    );
-    expect(r.ok).toBe(true);
+    expect((await t.brain.ingestBatch(kronosBatch([fc("ETH/USD", 100, { p_win: 0.95 })]))).ok).toBe(true);
     const pulse = await t.brain.pulse();
-    expect(pulse.entries).toBeGreaterThanOrEqual(1);
-    const rows = t.d1.db
-      .prepare("SELECT symbol FROM decision_contracts WHERE strategy_id = 'CRYPTO_KRONOS_FORECAST_V1'")
-      .all();
-    expect(rows).toEqual([{ symbol: "ETH/USD" }]);
+    expect(pulse.contracts).toBe(0);
+    expect(t.paper.orders.size).toBe(0);
+  });
+
+  it("hands the court a labelled LOW-confidence forecast", () => {
+    const e = buildEvidence({
+      symbol: "BTC/USD",
+      arena: "CRYPTO",
+      bars: flat(30, 100),
+      bid: 100,
+      ask: 100.02,
+      now: T0,
+      regime: {},
+      world: null,
+      catalyst: {
+        candidateId: "c",
+        kind: "news",
+        headline: "h",
+        source: "s",
+        url: null,
+        ageMinutes: 1,
+        tier1: null,
+      },
+      held: [],
+      forecast: {
+        model: "NeoQuasar/Kronos-small",
+        horizon_hours: 48,
+        age_minutes: 30,
+        p_up: 0.7,
+        p_win: 0.66,
+        p_target_first: 0.1,
+        p_stop_first: 0.05,
+        exp_ret: 0.01,
+      },
+    });
+    expect(e?.forecast?.confidence).toBe("LOW");
+    expect(e?.forecast?.about).toMatch(/never as a reason to trade/);
+    expect(e?.forecast?.view).toMatch(/leans up: 70%/);
+    expect(e?.receipts.some((r) => r.evidence_id === "kronos")).toBe(true);
   });
 
   it("rejects stale or malformed batches and feeds fresh forecasts to the court evidence", async () => {

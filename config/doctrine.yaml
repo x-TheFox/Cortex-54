@@ -280,7 +280,7 @@ strategies:
   # probabilities it reports describe exactly the trade the brain would place. Probabilities only; the sizer sizes.
   - id: CRYPTO_KRONOS_FORECAST_V1
     arena: CRYPTO
-    status: ACTIVE
+    status: SHADOW # operator 2026-10-24: Kronos is low-confidence court context only; it never opens trades itself
     universe:
       [
         BTC/USD,

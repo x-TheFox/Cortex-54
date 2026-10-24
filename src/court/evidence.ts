@@ -46,6 +46,11 @@ export interface Evidence {
   memory: { lessons: string[]; beliefs: string[] };
   /** Fresh Kronos forecast for this symbol (ADR-041), or null. Sampled-path probabilities, not advice. */
   forecast: {
+    /** Plain description of what Kronos is and how little to trust it (operator, 2026-10-24). */
+    about: string;
+    confidence: "LOW";
+    /** One-line plain reading of what Kronos thinks. */
+    view: string;
     model: string;
     horizon_hours: number;
     age_minutes: number;
@@ -90,7 +95,7 @@ export function buildEvidence(i: {
   held: string[];
   memory?: { lessons: string[]; beliefs: string[] };
   regimeException?: boolean;
-  forecast?: Evidence["forecast"];
+  forecast?: Omit<NonNullable<Evidence["forecast"]>, "about" | "confidence" | "view"> | null;
 }): Evidence | null {
   const closes = i.bars.map((b) => b.c);
   const a = atr(i.bars, 14);
@@ -211,8 +216,27 @@ export function buildEvidence(i: {
     portfolio: { held: i.held },
     memory: i.memory ?? { lessons: [], beliefs: [] },
     regimeException: i.regimeException ?? false,
-    forecast: i.forecast ?? null,
+    forecast: i.forecast ? { ...kronosContext(i.forecast), ...i.forecast } : null,
     receipts,
+  };
+}
+
+export const KRONOS_ABOUT =
+  "Kronos-small is a small (25M-parameter) open-source model trained only on past candlestick charts: it sees no news, " +
+  "fundamentals or order flow. The numbers are shares of 24 randomly sampled 48 h price paths, stretched to match recent " +
+  "volatility. It has not been validated on this account. LOW confidence: treat it as a weak tiebreaker at most, " +
+  "never as a reason to trade, and let any real evidence overrule it.";
+
+function kronosContext(f: { p_up: number; p_win: number; exp_ret: number; horizon_hours: number }): {
+  about: string;
+  confidence: "LOW";
+  view: string;
+} {
+  const lean = f.p_up >= 0.6 ? "leans up" : f.p_up <= 0.4 ? "leans down" : "has no clear lean";
+  return {
+    about: KRONOS_ABOUT,
+    confidence: "LOW",
+    view: `Kronos ${lean}: ${Math.round(f.p_up * 100)}% of sampled paths end higher after ${f.horizon_hours} h, average ${(f.exp_ret * 100).toFixed(1)}%; ${Math.round(f.p_win * 100)}% would end profitable for a 1.5/2.25 ATR stop/target.`,
   };
 }
 
