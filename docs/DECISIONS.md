@@ -446,7 +446,8 @@ Governor grades it like any other source; the strategy is demoted by PR if it do
 (the job still runs; the strategy code stays for a possible later promotion by the Governor). Kronos reaches decisions
 only as court evidence: `evidence.forecast` carries `confidence: "LOW"`, an `about` note explaining what Kronos is
 and why it is weak, and a one-line `view`. Bull/bear prompts (bull@2, bear@2) and the Clef synth (synth@2) are told
-to weigh it lightly and never let it decide.
+to weigh it lightly and never let it decide. The operator then switched the model to **Kronos-base** (102M params,
+same tokenizer and 512 context; ~22 s per pair locally vs ~12 s for small).
 
 ## ADR-042 — Venue minimum ticket: lift risk-sized orders to Alpaca's $10 crypto floor inside the caps (2026-10-24)
 **Context:** The first Kronos contracts (BTC, DOT) were sized $3.90 and $2.61 — a calibrated-down edge on $54 — and

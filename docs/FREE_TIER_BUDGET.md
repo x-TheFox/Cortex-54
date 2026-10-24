@@ -42,7 +42,7 @@ The meter estimates neurons from token counts *before* the call (chars/3.5 heuri
 
 | Resource | Limit | Use |
 |---|---|---|
-| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research: crypto ~4 min × 6/day + equity ~8 min × 2/weekday; governor ~2 min/day (daily + Sunday weekly); options lab ~3 min × 2/weekday; Kronos ~8 min (torch install + 13 pairs × ~18 s CPU) × 6/day |
+| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research: crypto ~4 min × 6/day + equity ~8 min × 2/weekday; governor ~2 min/day (daily + Sunday weekly); options lab ~3 min × 2/weekday; Kronos-base ~12 min (torch install + 13 pairs × ~25 s CPU) × 6/day |
 | Schedule granularity | ≥5 min, UTC, may delay 15–30 min or skip | batch jobs carry `produced_at`; brain checks staleness |
 | Inactivity | schedules auto-disable after 60 days of no repo activity | Governor PRs + a monthly keepalive commit; brain alarms on stale batch |
 | Secrets | free | `CLOUDFLARE_API_TOKEN`, `INGEST_HMAC_SECRET`, `DISCORD_WEBHOOK_GOVERNOR`, data API keys |

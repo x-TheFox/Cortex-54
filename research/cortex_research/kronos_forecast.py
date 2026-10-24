@@ -27,7 +27,7 @@ from . import payload as P
 
 STRATEGY_ID = "CRYPTO_KRONOS_FORECAST_V1"
 DATA = "https://data.alpaca.markets"
-MODEL = "NeoQuasar/Kronos-small"
+MODEL = "NeoQuasar/Kronos-base"  # operator 2026-10-24: base (102M), not small
 TOKENIZER = "NeoQuasar/Kronos-Tokenizer-base"
 MAX_CONTEXT = 512
 

@@ -1579,7 +1579,7 @@ describe("Kronos forecasts (ADR-041)", () => {
         version: "67b630e67f6a18c9e9be918d9b4337c960db1e9a",
         as_of: producedAt,
         inputs_sha256: "b".repeat(64),
-        payload: { model: "NeoQuasar/Kronos-small", horizon_hours: 48, paths: 24, forecasts },
+        payload: { model: "NeoQuasar/Kronos-base", horizon_hours: 48, paths: 24, forecasts },
       },
     ],
     posture: null,
@@ -1628,7 +1628,7 @@ describe("Kronos forecasts (ADR-041)", () => {
       },
       held: [],
       forecast: {
-        model: "NeoQuasar/Kronos-small",
+        model: "NeoQuasar/Kronos-base",
         horizon_hours: 48,
         age_minutes: 30,
         p_up: 0.7,
