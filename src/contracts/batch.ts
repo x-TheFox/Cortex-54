@@ -40,17 +40,27 @@ export type WorldCandidate = z.infer<typeof WorldCandidateSchema>;
 export const BatchSchema = z
   .object({
     schema_version: z.literal(1),
-    job: z.enum(["crypto-regime", "equity-posture", "world-intel", "governor", "options-lab", "screeners"]),
+    job: z.enum([
+      "crypto-regime",
+      "equity-posture",
+      "world-intel",
+      "governor",
+      "options-lab",
+      "screeners",
+      "kronos",
+    ]),
     produced_at: z.number().int(),
     run_url: z.url().nullable(),
     items: z.array(BatchItemSchema).min(1).max(20),
     posture: PostureSchema.nullable(),
   })
   .refine(
-    (b) => ["world-intel", "governor", "options-lab", "screeners"].includes(b.job) === (b.posture === null),
+    (b) =>
+      ["world-intel", "governor", "options-lab", "screeners", "kronos"].includes(b.job) ===
+      (b.posture === null),
     {
       message:
-        "posture is required for regime jobs and must be null for world-intel / governor / options-lab / screeners",
+        "posture is required for regime jobs and must be null for world-intel / governor / options-lab / screeners / kronos",
     },
   );
 export type Batch = z.infer<typeof BatchSchema>;

@@ -44,6 +44,17 @@ export interface Evidence {
   regimeException: boolean;
   /** Operator-merged scar lessons and decayed Governor beliefs (data, not instructions). ADR-033. */
   memory: { lessons: string[]; beliefs: string[] };
+  /** Fresh Kronos forecast for this symbol (ADR-041), or null. Sampled-path probabilities, not advice. */
+  forecast: {
+    model: string;
+    horizon_hours: number;
+    age_minutes: number;
+    p_up: number;
+    p_win: number;
+    p_target_first: number;
+    p_stop_first: number;
+    exp_ret: number;
+  } | null;
   receipts: Receipt[];
 }
 
@@ -79,6 +90,7 @@ export function buildEvidence(i: {
   held: string[];
   memory?: { lessons: string[]; beliefs: string[] };
   regimeException?: boolean;
+  forecast?: Evidence["forecast"];
 }): Evidence | null {
   const closes = i.bars.map((b) => b.c);
   const a = atr(i.bars, 14);
@@ -164,6 +176,17 @@ export function buildEvidence(i: {
       metric_value: reputationKey(i.catalyst.kind, i.catalyst.source),
       as_of: i.now,
     },
+    ...(i.forecast
+      ? [
+          {
+            evidence_id: "kronos",
+            source_skill: "kronos-forecast",
+            metric: `p_win_${i.forecast.horizon_hours}h`,
+            metric_value: i.forecast.p_win,
+            as_of: i.now - i.forecast.age_minutes * 60_000,
+          },
+        ]
+      : []),
     ...(i.regimeException
       ? [
           {
@@ -188,6 +211,7 @@ export function buildEvidence(i: {
     portfolio: { held: i.held },
     memory: i.memory ?? { lessons: [], beliefs: [] },
     regimeException: i.regimeException ?? false,
+    forecast: i.forecast ?? null,
     receipts,
   };
 }

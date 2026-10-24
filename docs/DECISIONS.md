@@ -417,3 +417,29 @@ therefore impossible at $54, whatever the constitution says.
 5. Research skills retry once after 20 s (a single TLS timeout had dropped a crypto regime batch).
 **Revisit:** at ≥ $2,000 equity a margin account would allow real shorts; that needs a new constitution change.
 
+## ADR-041 — Kronos candlestick forecasts as a probability source (2026-10-24)
+**Context:** The operator asked to integrate [Kronos](https://github.com/shiyu-coder/Kronos) (MIT), a decoder-only
+foundation model pre-trained on candlesticks from many exchanges. It cannot run in a Worker (10 ms CPU, no torch),
+and Workers AI does not host it.
+**Decision:**
+1. A `kronos` research job (`research.yml`, every 4 h at :37, also dispatched by the brain) runs Kronos-small (24.7M
+   params) from a pinned checkout on the free GitHub CPU runner. Torch comes from the CPU-only index in a separate uv
+   dependency group, so the other jobs stay light.
+2. Per crypto pair: 30 days of 4-hour candles (180, inside the 512 context) → 24 independent sampled 48 h paths
+   (`predict_batch` with one sample each; `predict` would average them away). 4-hour candles instead of hourly cut CPU
+   ~15× (hourly: >10 min for one pair; 4 h: ~18 s).
+3. **Volatility rescaling.** Measured 2026-10-24: Kronos's sampled 48 h band on BTC was −0.65%…+0.96% while BTC's
+   daily ATR was 2.6%; un-rescaled, no path ever touched a 1.5 ATR stop or target. Path moves are scaled so their
+   spread matches realized 48 h volatility (factor clamped to 1–10, never narrowed); direction and shape stay Kronos's.
+4. The job reads the stop/target multiples from `CRYPTO_KRONOS_FORECAST_V1` in the doctrine and reports, for exactly
+   that trade: p_win (paths ending profitable, first touch else marked at the horizon; same-candle touch = stop),
+   p_target_first, p_stop_first, p_up, mean and 10/90% returns. It also keeps the raw (unscaled) p_up and mean.
+5. The brain stores the latest batch (whole replace, zod-validated, stale > 5 h refused) and:
+   - `CRYPTO_KRONOS_FORECAST_V1` (PAPER): p_win ≥ 0.6, mean > 0, target-first ≥ stop-first, bid within 0.75% of the
+     forecast price, not in capitulation (composite ≥ 15). Stop 1.5 ATR, target 2.25 ATR, max hold 48 h.
+     `win_prob_used` is p_win **after** `calibrate()` (shrunk toward 0.5 until 50 Kronos outcomes, or the Governor's
+     `kronos.p_win` map). The sizer sizes; p_stop_first feeds bear lethality.
+   - Court evidence gets a `forecast` block and a `kronos` receipt when a fresh forecast exists for the symbol.
+**Honest limit:** Kronos is a pattern model with no news awareness, and 24 samples carry ±0.1 sampling error. The
+Governor grades it like any other source; the strategy is demoted by PR if it does not pay.
+

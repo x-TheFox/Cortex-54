@@ -4,6 +4,7 @@
 version: 1
 sources:
   tradermonty: { repo: tradermonty/claude-trading-skills, license: MIT }
+  kronos: { repo: shiyu-coder/Kronos, license: MIT }
   staskh: { repo: staskh/trading_skills, license: MIT }
   new: { repo: x-TheFox/Cortex-54, license: TBD }
 
@@ -16,6 +17,16 @@ families:
   GOV: Meta-governance
 
 skills:
+  # ---------- STR: Kronos forecasts (ADR-041) ----------
+  - {
+      id: kronos-forecast,
+      family: STR,
+      source: kronos,
+      runtime: py-batch,
+      phase: 6,
+      status: ACTIVE,
+      consumer: CRYPTO_KRONOS_FORECAST_V1 + court evidence,
+    }
   # ---------- RSK (ts-hot, Phase 1) ----------
   - {
       id: position-sizer,
