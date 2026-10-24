@@ -82,7 +82,7 @@ export function checkBull(b: Bull, e: Evidence, d: Doctrine): BullCheck {
   return { ok: true, bull: { ...b, targets: [...new Set(clipped)].slice(0, 3) }, notes };
 }
 
-export const SYNTH_PROMPT_VERSION = "synth@4";
+export const SYNTH_PROMPT_VERSION = "synth@5";
 export const SUITABILITY = ["Very low", "Low", "Moderate", "High", "Very high"] as const;
 
 export function buildSynth(
@@ -93,7 +93,7 @@ export function buildSynth(
 ): { state: unknown; questions: Record<string, ClefQuestion> } {
   return {
     state: {
-      task: "Judge a long trade after a full court debate (bull, bear, bull rebuttal, expert panel). Weigh arguments by their evidence, not by headcount. Prices in the bull brief were checked against the evidence by code. evidence.forecast (Kronos), if present, is LOW-confidence pattern-model context: weigh it lightly and never let it decide.",
+      task: "Judge a long trade after a full court debate (bull, bear, bull rebuttal, expert panel). Weigh arguments by their evidence, not by headcount. Prices in the bull brief were checked against the evidence by code. evidence.forecast (Kronos), if present, is LOW-confidence pattern-model context: weigh it lightly and never let it decide. evidence.research, if present, is a fresh web research dossier (sourced, dated, unverified): it is the court's best view of current events; weigh read=true findings above headline-only ones and penalize arguments that ignore a dated research finding against them.",
       evidence: evidenceForModels(e),
       bull: {
         thesis: bull.thesis,

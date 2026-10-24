@@ -129,6 +129,11 @@ funnel:
     min_confidence: 0.8 # below this a value is listed as uncertain, never shown as a fact
     max_per_day: 60
     min_chars: 60
+  research: # ADR-051: web research desk (GitHub Actions agent, free LLM chain) builds a sourced dossier per court case
+    enabled: true
+    fresh_hours: 12 # a dossier younger than this is reused instead of researching again
+    wait_minutes: 25 # the court holds a case this long for its dossier, then convenes without it
+    max_per_day: 16 # dispatches per UTC day (the court itself is capped at 12)
   tier3:
     max_sprints_per_day: 12
     min_structural_score: 78

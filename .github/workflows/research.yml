@@ -1,6 +1,6 @@
 name: research
 # "research <job>" for dispatched runs (the brain dispatches on schedule, ADR-032); scheduled runs show the cron.
-run-name: research ${{ inputs.job || github.event.schedule }}
+run-name: research ${{ inputs.job || github.event.schedule }}${{ inputs.symbol && format(' {0}', inputs.symbol) || '' }}
 
 # Phase 2 batch jobs (docs/ARCHITECTURE.md §9). Runs pinned upstream skills (never copied — ADR-026),
 # summarizes, signs with INGEST_HMAC_SECRET and POSTs to cortex /ingest/batch.
@@ -22,14 +22,22 @@ on:
         description: "Which job"
         required: true
         type: choice
-        options: [crypto, equity, world, options, screeners, kronos, backtest]
+        options: [crypto, equity, world, options, screeners, kronos, backtest, dossier]
+      symbol:
+        description: "dossier only: symbol to research (BTC/USD, COIN)"
+        required: false
+        type: string
+      context:
+        description: "dossier only: why the court is convening"
+        required: false
+        type: string
 
 permissions:
   contents: read
   actions: read # dedupe step lists recent runs
 
 concurrency:
-  group: research-${{ github.event.schedule || inputs.job }}
+  group: research-${{ github.event.schedule || inputs.job }}${{ inputs.symbol && format('-{0}', inputs.symbol) || '' }}
   cancel-in-progress: false
 
 env:
@@ -94,8 +102,26 @@ jobs:
           ALPACA_SECRET: ${{ secrets.ALPACA_PAPER_SECRET }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: uv run --group kronos python -m cortex_research.run kronos
+      - name: Deep research dossier (ADR-051; read-only web tools, free LLM chain)
+        if: steps.pick.outputs.job == 'dossier'
+        working-directory: research
+        timeout-minutes: 25
+        env:
+          CORTEX_URL: ${{ vars.CORTEX_URL }}
+          INGEST_HMAC_SECRET: ${{ secrets.INGEST_HMAC_SECRET }}
+          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          ALPACA_KEY_ID: ${{ secrets.ALPACA_LAB_KEY_ID }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_LAB_SECRET }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DOSSIER_SYMBOL: ${{ inputs.symbol }}
+          DOSSIER_CONTEXT: ${{ inputs.context }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run python -m cortex_research.run dossier
       - name: Run and ingest
-        if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job != 'options' && steps.pick.outputs.job != 'kronos'
+        if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job != 'options' && steps.pick.outputs.job != 'kronos' && steps.pick.outputs.job != 'dossier'
         working-directory: research
         env:
           UPSTREAM_DIR: ${{ github.workspace }}/research/.vendor/upstream

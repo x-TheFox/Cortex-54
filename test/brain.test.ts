@@ -954,6 +954,139 @@ describe("court end-to-end (Phase 3)", () => {
     expect(await t.brain.requestCourt("PLTR", "test")).toMatch(/isn't in the tradeable universe/);
   });
 
+  const dossierBatch = (symbol: string, asOf: number) => ({
+    schema_version: 1,
+    job: "dossier",
+    produced_at: asOf,
+    run_url: null,
+    items: [
+      {
+        skill_id: "deep-research",
+        version: "deep-research@1",
+        as_of: asOf,
+        inputs_sha256: "d".repeat(64),
+        payload: {
+          symbol,
+          arena: "CRYPTO",
+          question: "Tier 2 passed it",
+          as_of: asOf,
+          summary: "Spot ETF inflows set a record on 2026-10-23; the next FOMC is 2026-11-04.",
+          bull_case: "Flows are accelerating.",
+          bear_case: "Funding is crowded.",
+          catalysts: [{ event: "FOMC decision", date: "2026-11-04", source_url: null }],
+          risks: ["A hot CPI print"],
+          open_questions: [],
+          findings: [
+            {
+              claim: "Spot bitcoin ETFs took in $1.1B on 2026-10-23, a record",
+              source_url: "https://example.com/etf",
+              source_title: "ETF flows",
+              published: "2026-10-23",
+              stance: "BULL",
+              verified: true,
+            },
+          ],
+          sources: [
+            { url: "https://example.com/etf", title: "ETF flows", published: "2026-10-23", read: true },
+          ],
+          agent: {
+            prompt_version: "deep-research@1",
+            models: ["nim/nemotron"],
+            steps: 9,
+            tool_calls: 14,
+            pages_read: 5,
+            wall_s: 210,
+            tokens: 90000,
+            stop_reason: "agent finished",
+          },
+        },
+      },
+    ],
+    posture: null,
+  });
+
+  it("ADR-051: a Tier 2 pass dispatches the research desk; the court waits for the dossier and cites it", async () => {
+    const calls: string[] = [];
+    const users: string[] = [];
+    const base = provider(bullJson, calls);
+    const spy: LlmProvider = {
+      async complete(model, req, timeoutMs) {
+        users.push(req.user);
+        return base.complete(model, req, timeoutMs);
+      },
+    };
+    const llm = new LlmRouter({ gemini: spy, groq: spy }, doctrine, () => T0);
+    const dispatched: Record<string, string>[] = [];
+    const dispatcher: WorkflowDispatcher = {
+      async dispatch(_w, inputs) {
+        if (inputs.job === "dossier") dispatched.push(inputs);
+      },
+    };
+    const t = setup({ clef: new ScriptedClef(answers), llm, dispatcher });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    const r1 = await t.brain.pulse();
+    expect(r1.tier2).toBe(1);
+    expect(r1.courtContracts).toBe(0); // held for research
+    expect(dispatched).toEqual([expect.objectContaining({ job: "dossier", symbol: "BTC/USD" })]);
+    t.advance(60_000);
+    expect((await t.brain.pulse()).courtContracts).toBe(0); // still waiting
+
+    const ing = await t.brain.ingestBatch(dossierBatch("BTC/USD", T0 + 120_000));
+    expect(ing).toEqual({ ok: true, message: "stored dossier for BTC/USD (1 findings)" });
+    expect(t.notifier.sent.some((m) => m.msg.embeds?.[0]?.title === "📚 Research desk — BTC/USD")).toBe(true);
+    t.advance(60_000);
+    const r3 = await t.brain.pulse();
+    expect(r3.courtContracts).toBe(1);
+    expect(users[0]).toContain("res_1");
+    expect(users[0]).toContain("Spot bitcoin ETFs took in $1.1B");
+    const card = t.notifier.sent.find((m) => m.msg.embeds?.[0]?.title?.startsWith("⚖️ CORTEX COURT"));
+    const brief = card?.msg.embeds?.[1];
+    expect(brief?.title).toBe("📚 Research desk briefing — 1 findings · 🟢 1 · 🔴 0");
+    expect(JSON.stringify(brief)).toContain("[example.com](https://example.com/etf)");
+    expect(card?.msg.embeds?.[2]?.title).toMatch(/^🐂 Opening statement/);
+    expect(card?.msg.embeds?.length).toBeLessThanOrEqual(10);
+    expect(dispatched).toHaveLength(1); // the fresh dossier is reused, not re-researched
+  });
+
+  it("ADR-051: the court convenes without a dossier once the wait expires", async () => {
+    const calls: string[] = [];
+    const llm = new LlmRouter(
+      { gemini: provider(bullJson, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => T0,
+    );
+    const dispatcher: WorkflowDispatcher = { async dispatch() {} };
+    const t = setup({ clef: new ScriptedClef(answers), llm, dispatcher });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    expect((await t.brain.pulse()).courtContracts).toBe(0);
+    t.advance((doctrine.funnel.research.wait_minutes + 1) * 60_000);
+    expect((await t.brain.pulse()).courtContracts).toBe(1);
+  });
+
+  it("ADR-051: /court dispatches research first and a bad dossier is refused", async () => {
+    const dispatched: Record<string, string>[] = [];
+    const dispatcher: WorkflowDispatcher = {
+      async dispatch(_w, inputs) {
+        dispatched.push(inputs);
+      },
+    };
+    const llm = new LlmRouter({ gemini: provider(bullJson, []) }, doctrine, () => T0);
+    const t = setup({ clef: new ScriptedClef(answers), llm, dispatcher });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    expect(await t.brain.requestCourt("BTC/USD", "test")).toMatch(/Research desk dispatched for BTC\/USD/);
+    expect(dispatched.at(-1)).toMatchObject({ job: "dossier", symbol: "BTC/USD" });
+    const bad = dossierBatch("PLTR", T0);
+    expect((await t.brain.ingestBatch(bad)).ok).toBe(false);
+    const junk = dossierBatch("BTC/USD", T0);
+    (junk.items[0] as { payload: Record<string, unknown> }).payload.findings = [{ claim: "" }];
+    expect((await t.brain.ingestBatch(junk)).ok).toBe(false);
+  });
+
   it("no cross-family bear → the candidate is rejected, never traded single-family", async () => {
     const calls: string[] = [];
     const llm = new LlmRouter({ gemini: provider(bullJson, calls) }, doctrine, () => T0);

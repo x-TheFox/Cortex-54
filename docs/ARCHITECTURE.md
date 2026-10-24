@@ -126,8 +126,13 @@ Shadow / Deep). Promotion bar from doctrine: P(material) ≥ 0.45 and escalate �
 Tier 0), batch skill outputs, scar rules. Questions: `regime_alignment`, `setup_class`,
 `bear_lethality`, `structural_quality` (score). Pass → Tier 3 if daily court quota remains.
 
+**Research desk (ADR-051):** a Tier 2 pass (or `/court`) dispatches `research.yml job=dossier`; a multi-step agent on
+the GitHub runner searches news and the web, reads articles and filings with a free LLM chain, and posts a sourced
+dossier (citations checked in code). The case waits in `court_waits` up to 25 min for it, then the court hears it.
+
 **Tier 3 (the court, in the DO pulse — ADR-028/044):**
-1. Evidence — Tier 0 fact sheet in code (technicals, regime, world pulse, Clairic facts, Kronos view, memory).
+1. Evidence — Tier 0 fact sheet in code (technicals, regime, world pulse, Clairic facts, Kronos view, memory, and the
+   research dossier as `evidence.research` with citable `res_*` findings).
 2. Bull Advocate (default Gemini): thesis, entry zone, stop, targets, horizon, conviction, evidence receipts;
    `checkBull` repairs or rejects any number that doesn't fit the evidence before anyone else sees it.
 3. Bear Prosecutor from a **different model family** (default Groq gpt-oss-120b): fatal flaws, kill criteria,

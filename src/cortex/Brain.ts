@@ -21,6 +21,8 @@ import {
   type Batch,
   BatchSchema,
   BeliefSchema,
+  type Dossier,
+  DossierPayloadSchema,
   FitnessSchema,
   GradeSchema,
   OptionsEventSchema,
@@ -57,6 +59,7 @@ import {
   type Evidence,
   evidenceForModels,
   KRONOS_ABOUT,
+  researchView,
   resolveTradeable,
 } from "../court/evidence.ts";
 import type { HopAttempt, LlmRouter } from "../court/llm.ts";
@@ -642,6 +645,10 @@ export class Brain {
       now - 180 * day,
     );
     this.sql.exec("DELETE FROM d1_outbox_dead WHERE dead_at < ?", now - 90 * day);
+    // ADR-051: dossiers are only used while fresh (≤ 12 h); keep a week for the web terminal and debugging
+    this.sql.exec("DELETE FROM dossiers WHERE received_at < ?", now - 7 * day);
+    this.sql.exec("DELETE FROM court_waits WHERE until_at < ?", now - day);
+    this.sql.exec("DELETE FROM settings WHERE key LIKE 'research_pending:%' AND updated_at < ?", now - day);
   }
 
   // ------------------------------------------------------------------ broker sync / reconcile
@@ -1589,6 +1596,40 @@ ${postmortem}`,
 
   /** Store the latest Kronos forecasts (ADR-041). Whole-batch replace; each forecast is validated. */
   /** Backtest lab report (ADR-046): stored for the panel and posted as a report card to #governor. */
+  private async ingestDossier(b: Batch, now: number): Promise<{ ok: boolean; message: string }> {
+    const r = DossierPayloadSchema.safeParse(b.items.find((x) => x.skill_id === "deep-research")?.payload);
+    if (!r.success) return { ok: false, message: "dossier payload failed the schema" };
+    const dz = r.data;
+    const target = resolveTradeable([dz.symbol], this.d);
+    if (!target || target.symbol !== dz.symbol)
+      return { ok: false, message: `${dz.symbol} is not tradeable` };
+    this.sql.exec(
+      "INSERT OR REPLACE INTO dossiers (symbol, as_of, json, received_at) VALUES (?, ?, ?, ?)",
+      dz.symbol,
+      Math.min(dz.as_of, now),
+      JSON.stringify(dz),
+      now,
+    );
+    // release the cases waiting for it: the next pulse's court hears them with the dossier attached
+    this.sql.exec("DELETE FROM court_waits WHERE symbol = ?", dz.symbol);
+    this.sql.exec("DELETE FROM settings WHERE key = ?", `research_pending:${dz.symbol}`);
+    this.journal.append(
+      "SYSTEM",
+      "DOSSIER",
+      null,
+      {
+        symbol: dz.symbol,
+        findings: dz.findings.length,
+        read: dz.findings.filter((f) => f.verified).length,
+        sources: dz.sources.length,
+        ...dz.agent,
+      },
+      now,
+    );
+    await this.deps.notifier.post("court", dossierCard(dz));
+    return { ok: true, message: `stored dossier for ${dz.symbol} (${dz.findings.length} findings)` };
+  }
+
   private async ingestBacktest(b: Batch, now: number): Promise<{ ok: boolean; message: string }> {
     const r = BacktestPayloadSchema.safeParse(b.items.find((x) => x.skill_id === "backtest-lab")?.payload);
     if (!r.success) return { ok: false, message: "backtest payload failed the schema" };
@@ -2351,6 +2392,7 @@ ${postmortem}`,
               exp_ret: f.exp_ret,
             }
           : null)(this.kronosFor(symbol, now)),
+      research: ((dz) => (dz ? researchView(dz, now) : null))(this.dossierFor(symbol, now)),
     });
     return evidence ? { ok: true, evidence } : { ok: false, reason: "not enough bar history", symbol, arena };
   }
@@ -2463,7 +2505,70 @@ ${postmortem}`,
       { symbol: ev.evidence.symbol, quality: dcs.quality100, long: dcs.longFavored },
       now,
     );
+    await this.requestResearch(
+      row.candidate_id,
+      ev.evidence.symbol,
+      ev.evidence.arena,
+      `Tier 2 passed it (quality ${dcs.quality100}/100). Catalyst: ${ev.evidence.catalyst.headline}`,
+      now,
+    );
     return 1;
+  }
+
+  /** Fresh dossier for a symbol (ADR-051), or null. */
+  dossierFor(symbol: string, now = this.deps.now()): Dossier | null {
+    const row = one<{ as_of: number; json: string }>(
+      this.sql,
+      "SELECT as_of, json FROM dossiers WHERE symbol = ?",
+      symbol,
+    );
+    if (!row || now - row.as_of > this.d.funnel.research.fresh_hours * 3_600_000) return null;
+    const r = DossierPayloadSchema.safeParse(JSON.parse(row.json));
+    return r.success ? r.data : null;
+  }
+
+  /**
+   * ADR-051: ask the web research desk (GitHub Actions) for a dossier and hold the court case until it lands or
+   * `wait_minutes` pass. Returns true when the case is now waiting. Never blocks the court on failure.
+   */
+  private async requestResearch(
+    candidateId: string,
+    symbol: string,
+    arena: "CRYPTO" | "EQUITIES",
+    context: string,
+    now: number,
+  ): Promise<boolean> {
+    const cfg = this.d.funnel.research;
+    const dispatcher = this.deps.dispatcher;
+    if (!cfg.enabled || !dispatcher || this.dossierFor(symbol, now)) return false;
+    const waitMs = cfg.wait_minutes * 60_000;
+    const pendingKey = `research_pending:${symbol}`;
+    const pending = Number(getKV(this.sql, pendingKey) ?? 0);
+    const hold = (from: number) => {
+      this.sql.exec(
+        "INSERT OR REPLACE INTO court_waits (candidate_id, symbol, until_at) VALUES (?, ?, ?)",
+        candidateId,
+        symbol,
+        from + waitMs,
+      );
+      return true;
+    };
+    if (now - pending < waitMs) return hold(pending); // already being researched
+    if (this.daily("research", now) >= cfg.max_per_day) return false;
+    try {
+      await dispatcher.dispatch("research.yml", {
+        job: "dossier",
+        symbol,
+        context: context.replace(/\s+/g, " ").slice(0, 280),
+      });
+    } catch (e) {
+      await this.alertOnce("research", `⚠️ research dispatch failed (${symbol}): ${errText(e).slice(0, 200)}`);
+      return false;
+    }
+    this.bumpDaily("research", now);
+    setKV(this.sql, pendingKey, String(now), now);
+    this.journal.append("SYSTEM", "RESEARCH_REQUEST", candidateId, { symbol, arena, context }, now);
+    return hold(now);
   }
 
   /**
@@ -2495,6 +2600,18 @@ ${postmortem}`,
       now - 365 * 86_400_000, // front of the court queue
     );
     this.journal.append("SYSTEM", "COURT_REQUEST", id, { symbol: target.symbol, by }, now);
+    if (
+      await this.requestResearch(
+        id,
+        target.symbol,
+        target.arena,
+        `Operator asked the court to review ${target.symbol} (no specific catalyst).`,
+        now,
+      )
+    ) {
+      await this.flushJournal();
+      return `📚 Research desk dispatched for ${target.symbol}. The court convenes when the dossier lands (≤ ${this.d.funnel.research.wait_minutes} min) — watch #bull-vs-bear-court.`;
+    }
     const n = await this.runCourt();
     await this.flushJournal();
     return n > 0
@@ -2543,12 +2660,17 @@ ${postmortem}`,
     if (!llm || !clef) return 0;
     const now = this.deps.now();
     if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day) return 0;
+    // ADR-051: cases waiting for their research dossier are skipped until it lands or the wait expires.
     const row = one<{ candidate_id: string; payload_json: string; enqueued_at: number }>(
       this.sql,
-      "SELECT candidate_id, payload_json, enqueued_at FROM triage_queue WHERE tier = 3 ORDER BY enqueued_at LIMIT 1",
+      `SELECT candidate_id, payload_json, enqueued_at FROM triage_queue WHERE tier = 3
+         AND candidate_id NOT IN (SELECT candidate_id FROM court_waits WHERE until_at > ?)
+       ORDER BY enqueued_at LIMIT 1`,
+      now,
     );
     if (!row) return 0;
     this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", row.candidate_id); // one shot per candidate
+    this.sql.exec("DELETE FROM court_waits WHERE candidate_id = ?", row.candidate_id);
     const ev = await this.evidenceFor(row, now);
     if (!ev.ok) {
       this.rejectCandidate(
@@ -2589,6 +2711,7 @@ ${postmortem}`,
       atr: e.technicals.atr14,
       facts: e.facts?.values ?? null,
       kronos: e.forecast?.view ?? null,
+      research: e.research ? this.dossierFor(e.symbol, now) : null,
     };
     const close = async (verdict: string, ok: boolean) => {
       session.verdict = verdict;
@@ -2964,6 +3087,7 @@ ${postmortem}`,
     if (b.job === "screeners") return this.ingestScreeners(b, now);
     if (b.job === "kronos") return this.ingestKronos(b, now);
     if (b.job === "backtest") return this.ingestBacktest(b, now);
+    if (b.job === "dossier") return this.ingestDossier(b, now);
     if (b.job === "world-intel" || b.posture === null) {
       const pulse = b.items.find((x) => x.skill_id === "gdelt-world-pulse")?.payload as
         | {
@@ -4352,6 +4476,7 @@ export interface CourtSession {
   atr: number;
   facts?: Record<string, string | number> | null;
   kronos?: string | null;
+  research?: Dossier | null;
   bull?: {
     thesis: string;
     setup?: string;
@@ -4396,6 +4521,93 @@ const STANCE: Record<string, string> = { support: "🟢 SUPPORT", oppose: "🔴 
  * opening, the bear's cross-examination, the bull's rebuttal, the expert panel and the ruling. Kept under Discord's
  * 6,000-character message limit by trimming the longest fields first.
  */
+/** ADR-051: the research desk's briefing as one compact embed inside the court transcript (budget ≈ 1,300 chars). */
+function researchBriefEmbed(d: Dossier) {
+  const mark = { BULL: "🟢", BEAR: "🔴", NEUTRAL: "⚪" } as const;
+  const top = [...d.findings]
+    .sort((a, b) => Number(b.verified) - Number(a.verified))
+    .slice(0, 4)
+    .map(
+      (f) =>
+        `${mark[f.stance]} ${cut(f.claim, 150)} *(${f.published ?? "undated"}, [${hostOf(f.source_url)}](${f.source_url}))*`,
+    )
+    .join("\n");
+  const next = d.catalysts
+    .slice(0, 3)
+    .map((c) => `**${c.date ?? "date?"}** ${cut(c.event, 90)}`)
+    .join(" · ");
+  const fields: { name: string; value: string; inline?: boolean }[] = [];
+  if (top) fields.push({ name: "Exhibits from the web", value: cut(top, 900) });
+  if (next) fields.push({ name: "📅 On the calendar", value: cut(next, 320) });
+  const counts = { BULL: 0, BEAR: 0, NEUTRAL: 0 };
+  for (const f of d.findings) counts[f.stance] += 1;
+  const a = d.agent;
+  return {
+    title: `📚 Research desk briefing — ${d.findings.length} findings · 🟢 ${counts.BULL} · 🔴 ${counts.BEAR}`,
+    description: cut(d.summary || "(no summary)", 420),
+    color: COLORS.cyan,
+    fields,
+    footer: {
+      text: cut(
+        `${a.steps} steps · ${a.tool_calls} tool calls · ${a.pages_read} pages read · ${a.models[0] ?? "?"} · unverified web text, cite as res_*`,
+        200,
+      ),
+    },
+  };
+}
+
+function hostOf(u: string): string {
+  try {
+    return new URL(u).hostname.replace(/^www\./, "");
+  } catch {
+    return "source";
+  }
+}
+
+/** ADR-051: the research desk's dossier, posted to the court channel before the hearing. */
+export function dossierCard(d: Dossier): DiscordMessage {
+  const mark = { BULL: "🟢", BEAR: "🔴", NEUTRAL: "⚪" } as const;
+  const findings = d.findings
+    .slice(0, 8)
+    .map(
+      (f) =>
+        `${mark[f.stance]} ${cut(f.claim, 220)} — *${f.published ?? "undated"}* [${cut(f.source_title || "source", 40)}](${f.source_url})${f.verified ? "" : " ·headline only"}`,
+    )
+    .join("\n");
+  const cats = d.catalysts
+    .slice(0, 5)
+    .map((c) => `• **${c.date ?? "date?"}** ${cut(c.event, 160)}`)
+    .join("\n");
+  const fields: { name: string; value: string; inline?: boolean }[] = [];
+  if (cats) fields.push({ name: "📅 What's coming", value: cut(cats, 900) });
+  if (d.bull_case) fields.push({ name: "🐂 Case for", value: cut(d.bull_case, 500), inline: true });
+  if (d.bear_case) fields.push({ name: "🐻 Case against", value: cut(d.bear_case, 500), inline: true });
+  if (d.risks.length)
+    fields.push({ name: "⚠️ Risks", value: cut(d.risks.map((r) => `• ${r}`).join("\n"), 600) });
+  if (d.open_questions.length)
+    fields.push({
+      name: "❓ Could not verify",
+      value: cut(d.open_questions.map((q) => `• ${q}`).join("\n"), 400),
+    });
+  const a = d.agent;
+  return {
+    embeds: [
+      {
+        title: `📚 Research desk — ${d.symbol}`,
+        description: cut(`${d.summary || "(no summary)"}\n\n**Key findings**\n${findings || "none"}`, 3500),
+        color: COLORS.cyan,
+        fields,
+        footer: {
+          text: cut(
+            `${a.steps} steps · ${a.tool_calls} tool calls · ${a.pages_read} pages read · ${Math.round(a.wall_s)} s · ${a.models.join(", ")} · web text is unverified`,
+            300,
+          ),
+        },
+      },
+    ],
+  };
+}
+
 export function courtSessionCard(s: CourtSession): DiscordMessage {
   type Field = { name: string; value: string; inline?: boolean };
   type E = {
@@ -4429,6 +4641,7 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
     color: COLORS.cyan,
     fields: docket,
   });
+  if (s.research) embeds.push(researchBriefEmbed(s.research));
 
   if (s.bull) {
     const b = s.bull;

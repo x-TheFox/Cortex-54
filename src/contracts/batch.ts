@@ -49,6 +49,7 @@ export const BatchSchema = z
       "screeners",
       "kronos",
       "backtest",
+      "dossier",
     ]),
     produced_at: z.number().int(),
     run_url: z.url().nullable(),
@@ -57,11 +58,13 @@ export const BatchSchema = z
   })
   .refine(
     (b) =>
-      ["world-intel", "governor", "options-lab", "screeners", "kronos", "backtest"].includes(b.job) ===
+      ["world-intel", "governor", "options-lab", "screeners", "kronos", "backtest", "dossier"].includes(
+        b.job,
+      ) ===
       (b.posture === null),
     {
       message:
-        "posture is required for regime jobs and must be null for world-intel / governor / options-lab / screeners / kronos",
+        "posture is required for regime jobs and must be null for world-intel / governor / options-lab / screeners / kronos / backtest / dossier",
     },
   );
 export type Batch = z.infer<typeof BatchSchema>;
@@ -192,3 +195,59 @@ export const BacktestPayloadSchema = z.object({
   results: z.record(z.string().max(60), BacktestResult),
   limits: z.string().max(1000),
 });
+
+/** ADR-051: deep-research dossier on one symbol (research job `dossier`, skill_id `deep-research`). */
+const Day = z
+  .string()
+  .regex(/^20\d\d-[01]\d-[0-3]\d$/)
+  .nullable();
+const Stance = z.enum(["BULL", "BEAR", "NEUTRAL"]);
+export const DossierPayloadSchema = z.object({
+  symbol: z.string().min(1).max(16),
+  arena: z.enum(["CRYPTO", "EQUITIES"]),
+  question: z.string().max(300),
+  as_of: z.number().int(),
+  summary: z.string().max(1200),
+  bull_case: z.string().max(700),
+  bear_case: z.string().max(700),
+  catalysts: z
+    .array(
+      z.object({ event: z.string().min(1).max(200), date: Day, source_url: z.string().max(500).nullable() }),
+    )
+    .max(8),
+  risks: z.array(z.string().max(200)).max(6),
+  open_questions: z.array(z.string().max(200)).max(4),
+  findings: z
+    .array(
+      z.object({
+        claim: z.string().min(1).max(300),
+        source_url: z.string().max(500),
+        source_title: z.string().max(160),
+        published: Day,
+        stance: Stance,
+        verified: z.boolean(),
+      }),
+    )
+    .max(16),
+  sources: z
+    .array(
+      z.object({
+        url: z.string().max(500),
+        title: z.string().max(160),
+        published: z.string().max(20).nullable(),
+        read: z.boolean(),
+      }),
+    )
+    .max(24),
+  agent: z.object({
+    prompt_version: z.string().max(40),
+    models: z.array(z.string().max(80)).max(5),
+    steps: z.number().int().nonnegative(),
+    tool_calls: z.number().int().nonnegative(),
+    pages_read: z.number().int().nonnegative(),
+    wall_s: z.number().nonnegative(),
+    tokens: z.number().int().nonnegative(),
+    stop_reason: z.string().max(60),
+  }),
+});
+export type Dossier = z.infer<typeof DossierPayloadSchema>;

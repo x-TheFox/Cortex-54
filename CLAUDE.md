@@ -161,6 +161,11 @@ neurons/M, no output billing (ADR-043). **Jev** (TypeSafe AI) is not in our Work
   `gemini-3.5-flash` ≈ 7–25 s; `gemini-3.8-flash` is often 503 "high demand". Prompts may be used for training.
 - NVIDIA NIM: enabled for this key — `deepseek-ai/deepseek-v4.1-flash`, `nvidia/nemotron-3-ultra-550b-a55b`
   (`nemotron-3-super` is *not* enabled). OpenRouter `:free` errored on every test (left out of chains).
+- **Verified 2026-10-24 (ADR-051):** Gemini Google Search grounding has no free quota; Groq `compound` is not on our key
+  and `gpt-oss-120b` is capped at 8K tokens/min; NIM `nvidia/nemotron-3-ultra-550b-a55b` ≈3 s JSON (NIM
+  `deepseek-v4.1-flash` timed out); OpenRouter `nvidia/nemotron-3-ultra-550b-a55b:free` works (≈13 s), most other
+  `:free` models are rate-limited or harness-only. Keyless web: DuckDuckGo HTML, Google/Bing News RSS, Wikipedia REST,
+  Jina reader (`r.jina.ai`). The LLM keys are also GitHub secrets for the research desk.
 - CoinGecko Demo ~10k credits/month. SEC EDGAR 10 req/s with a contact User-Agent.
 - **Binance/Bybit block US IPs** (and GitHub runners are US). Use OKX / Hyperliquid / Coinbase / Kraken /
   Deribit public endpoints for funding, OI and IV. The tradermonty `crypto-regime-analyzer` uses Binance;
@@ -414,5 +419,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-24: ADR-047: web terminal FCST page (key 7): Kronos forecast band vs the robot's own plan per symbol.
 - 2026-10-24: external audit (operator-supplied ledger) triaged claim by claim: ADR-048 (safety/failure-path fixes),
   ADR-049 (learning loop), ADR-050 (property tests, param schemas, doc reconciliation). Rejections recorded there.
+- 2026-10-24: ADR-051: web research desk — a multi-step agent on GitHub Actions (read-only web tools, free LLM chain,
+  code-checked citations) builds a dossier per court case; the court waits ≤ 25 min for it and cites it (`res_*`).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.
