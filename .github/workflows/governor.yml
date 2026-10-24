@@ -58,20 +58,39 @@ jobs:
           ALPACA_SECRET: ${{ secrets.ALPACA_PAPER_SECRET }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: uv run python -m cortex_research.governor.run ${{ steps.mode.outputs.flag }}
-      - name: Propose calibration / scar tissue (branch + PR)
+      # PRs opened with GITHUB_TOKEN never trigger ci.yml, so the proposal is validated here before it can become a
+      # PR at all (audit W2-16): schema + constitution checks (config:build) and the config and calibration tests.
+      - name: Check for proposals
+        id: changed
         if: steps.dedupe.outputs.skip != 'true'
+        run: |
+          if git diff --quiet -- config/calibration.json config/scar-tissue.yaml; then echo "any=false" >> "$GITHUB_OUTPUT"; else echo "any=true" >> "$GITHUB_OUTPUT"; fi
+      - uses: pnpm/action-setup@v4
+        if: steps.changed.outputs.any == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.changed.outputs.any == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Validate proposals against the constitution
+        if: steps.changed.outputs.any == 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm config:build
+          pnpm vitest run test/config.test.ts test/court.test.ts test/scar.test.ts
+      - name: Propose calibration / scar tissue (branch + PR)
+        if: steps.changed.outputs.any == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           AUTHOR_EMAIL: ${{ vars.GIT_AUTHOR_EMAIL }}
         run: |
-          if git diff --quiet -- config/calibration.json config/scar-tissue.yaml; then echo "no proposals"; exit 0; fi
-          branch="governor/proposals-$(date -u +%Y%m%d)"
+          branch="governor/proposals-$(date -u +%Y%m%d)-${{ github.run_id }}"
           git config user.name "x-TheFox"
           git config user.email "${AUTHOR_EMAIL}"
           git checkout -b "$branch"
           git add config/calibration.json config/scar-tissue.yaml
           git commit -m "Governor: weekly proposals (calibration / scar tissue)"
-          git push -f origin "$branch"
+          git push origin "$branch"
           body="Weekly Governor proposals (calibration map and/or scar-tissue rules, each rule citing ≥3 contracts) from run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}. Review each rule's evidence and the Brier numbers before merging (constitution U8)."
           if ! gh pr create --base main --head "$branch" --title "Governor: proposals $(date -u +%F)" --body "$body"; then
             url="${{ github.server_url }}/${{ github.repository }}/compare/main...${branch}?expand=1"

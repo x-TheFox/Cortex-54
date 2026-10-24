@@ -17,6 +17,8 @@ are the ones whose numbers looked good. So a strategy enters CORTEX-54 only if:
 
 Celebrity systems with no credible published test (Minervini VCP, Qullamaggie episodic pivots, most YouTube setups)
 are not encoded as rules. They already reach the court as setup candidates through the Stockbee/VCP screeners
+(the doctrine entries `CRYPTO_VCP_BREAKOUT_V1`, `EQUITY_MOMENTUM_BURST_V1` and `EQUITY_EARNINGS_DRIFT_V1` have no
+parameters and no runner: they only label where a screener candidate came from)
 (ADR-035), where a human-style pattern is judged with the rest of the evidence.
 
 ## Findings

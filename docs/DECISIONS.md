@@ -592,3 +592,21 @@ so TARGET-only labels match it; relabelling would calibrate a different question
 already struck by the audit itself. (d) A per-append journal tail ring (W1-04) — ~+1 DO row write per journal row
 (tens of thousands a day) for a check the Governor already runs daily over D1; not worth the free-tier budget.
 
+## ADR-049 — External audit, part 2: the learning loop (2026-10-24)
+**Fixed / adopted:**
+1. Governor proposals were never validated before becoming PRs (GITHUB_TOKEN PRs don't trigger ci.yml) and the branch
+   was force-pushed. `governor.yml` now runs `config:build` (schema + constitution checks) and the config, court and
+   scar tests on the proposed files before any PR exists; branches are `governor/proposals-<date>-<run id>`, pushed
+   without `-f`.
+2. A hand-edited scar id like `SCAR-xyz` crashed the whole Governor run → ids are parsed with a strict pattern.
+3. Calibration ladder (audit W2-19): unsmoothed isotonic at 50–300 outcomes step-overfits. Below 300 the Governor now
+   fits a two-parameter Platt curve on logit(p) (flat at the base rate if the slope isn't positive), serialized as a
+   21-point monotone map in the existing schema; isotonic from 300 outcomes. The map records `method`.
+4. Kronos weights pinned by Hugging Face revision (only the code checkout was pinned).
+5. Panel A/B data (audit W2-01): COURT journal rows now carry each seat's stance/confidence/model and the rebuttal
+   outcome, so the panel can later be graded against plain majority votes and the judge alone — and cut if it adds
+   nothing for its three LLM calls.
+**Deferred, with reasons:** CPCV/PBO and deflated Sharpe in the backtest lab (worth doing; next research pass),
+Bayesian source reputation (D-10) and conformal abstention (W2-20) (need graded outcomes that don't exist yet),
+belief dedupe/TTL ladders (memory is near-empty), locked-window replay (large; after a month of journaled decisions).
+
