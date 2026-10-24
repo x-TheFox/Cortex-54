@@ -12,9 +12,9 @@ puts the system in `REDUCE_ONLY` at 90% of any limit (constitution untouchable #
 | Worker CPU / HTTP or cron invocation | 10 ms | routing only | — | — | heavy work lives in the DO |
 | Subrequests / invocation | 50 (1,000 to CF services) | ~14 per pulse | — | 45 | enforced per pulse |
 | Cron triggers / account | 5 | 2 (`cortex` */5, `sentinel` */1) | — | — | 3 spare; GitHub `watchdog.yml` every 30 min as backup |
-| DO requests | 100,000 | ~2,500 | 70,000 | 90,000 | alarms 1,440 max + RPC + WS/20 |
-| DO duration | 13,000 GB-s | ~400–800 | 9,100 | 11,700 | **no always-on outbound sockets** (would be 10,800) |
-| DO SQLite rows written | 100,000 | ~15,000 | 70,000 | 90,000 | batch writes; no per-tick churn |
+| DO requests | 100,000 | ~5,000 | 70,000 | 90,000 | alarms 1,440 max per brain (PRIMARY + LAB, ADR-045) + RPC + WS/20 |
+| DO duration | 13,000 GB-s | ~800–1,600 | 9,100 | 11,700 | **no always-on outbound sockets** (would be 10,800); LAB adds a second, AI-free pulse |
+| DO SQLite rows written | 100,000 | ~30,000 | 70,000 | 90,000 | batch writes; no per-tick churn; LAB roughly doubles it |
 | DO SQLite rows read | 5,000,000 | ~200,000 | — | 4,500,000 | |
 | DO storage | 5 GB total | <50 MB | — | — | hot state only |
 | D1 rows written | 100,000 (3p for exact figure) | ~5,000 | 70,000 | 90,000 | journal + logs |
@@ -108,3 +108,12 @@ available, the sprint is **rejected**, not run single-family.
 | THRIFT | any ≥ 70% | pulse 120 s when flat; Tier 1 batch size up; Tier 3 paused; HUD every 30 s |
 | REDUCE_ONLY | any ≥ 90%, or any limit error observed | no new entries; exits + stops only; Discord alarm |
 | BLACKOUT | DO itself erroring | sentinel takes over (broker stops already in place) |
+
+### LAB brain (ADR-045)
+
+A second Durable Object (`LabCortexDO`) pulses on the same cadence with no Workers AI, LLM or dispatch calls: each
+pulse is Alpaca REST (LAB keys, their own 200/min data budget) plus hot-SQLite writes, and its journal goes to the
+separate D1 `cortex-lab` (its own 500 MB; the D1 daily row limits are account-wide, so its writes count with
+PRIMARY's). Measured cost is about the same as the PRIMARY brain without the funnel: it roughly doubles DO requests,
+duration and rows written, all still under a third of the free allowance.
+

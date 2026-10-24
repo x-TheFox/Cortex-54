@@ -70,9 +70,9 @@ export interface RuleInput {
   tick: number;
 }
 
-type Signal = { contract: DecisionContract | null; reason: string };
+export type Signal = { contract: DecisionContract | null; reason: string };
 
-interface Plan {
+export interface Plan {
   arena: "CRYPTO" | "EQUITIES";
   strategy: string;
   thesis: string;
@@ -87,7 +87,7 @@ interface Plan {
   atr: number;
 }
 
-function contractFrom(i: RuleInput, p: Plan): DecisionContract {
+export function contractFrom(i: RuleInput, p: Plan): DecisionContract {
   const crypto = p.arena === "CRYPTO";
   return {
     contract_id: i.contractId,

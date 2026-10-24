@@ -7,10 +7,16 @@
   "observability": { "enabled": true },
 
   "durable_objects": {
-    "bindings": [{ "name": "CORTEX", "class_name": "AgentCortexDO" }]
+    "bindings": [
+      { "name": "CORTEX", "class_name": "AgentCortexDO" },
+      { "name": "CORTEX_LAB", "class_name": "LabCortexDO" } // ADR-045
+    ]
   },
   // Free plan supports SQLite-backed Durable Objects only.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AgentCortexDO"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AgentCortexDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["LabCortexDO"] }
+  ],
 
   "d1_databases": [
     {
@@ -18,6 +24,13 @@
       "database_name": "cortex-journal",
       // Created 2026-10-22 on the operator account (Workers Free).
       "database_id": "c041a668-974e-4d34-90f1-d02fefa70793",
+      "migrations_dir": "migrations"
+    },
+    {
+      // ADR-045: the LAB brain's own journal (same migrations), so LAB trades never touch PAPER's record
+      "binding": "DB_LAB",
+      "database_name": "cortex-lab",
+      "database_id": "b361a6bc-d4a1-4fe9-8260-feae3f2e4e42",
       "migrations_dir": "migrations"
     }
   ],
@@ -40,6 +53,7 @@
   "vars": {
     "CORTEX_ENV": "production",
     "CORTEX_DO_NAME": "CORTEX-54-PRIMARY",
+    "CORTEX_LAB_DO_NAME": "CORTEX-54-LAB",
     // Batch workflows the brain dispatches on schedule once the GH_DISPATCH_TOKEN secret exists (ADR-032).
     "GITHUB_REPO": "x-TheFox/Cortex-54",
     // Discord channel ids (not secret): command_center, briefs, court, executions, alarms

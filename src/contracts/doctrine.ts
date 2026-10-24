@@ -160,6 +160,11 @@ export const DoctrineSchema = z.object({
       max_concurrent: z.number().int().min(0).max(3),
     }),
   }),
+  /**
+   * ADR-045: the LAB brain — a second instance on its own paper account and journal that forward-tests strategies
+   * before they may trade on PAPER. Only these strategies run there (as ACTIVE); nothing else does.
+   */
+  lab: z.object({ strategies: z.array(z.string()) }).default({ strategies: [] }),
   strategies: z.array(
     z.object({
       id: z.string().regex(/^[A-Z0-9_]+_V\d+$/),
@@ -236,6 +241,8 @@ export function doctrineViolations(d: Doctrine, c: Constitution): string[] {
         if (!c.allowed.inverse_etfs_1x.includes(sym))
           v.push(`strategy ${s.id}: ${sym} is not a constitution-approved 1x inverse ETF`);
     }
+    if (d.lab.strategies.includes(s.id) && s.arena === "OPTIONS")
+      v.push(`lab: ${s.id} is an options strategy (the options lab is a virtual ledger)`);
     if (s.arena === "OPTIONS") {
       const st = s.params?.structure;
       if (typeof st !== "string" || !c.allowed.options_structures_paper.includes(st)) {
@@ -243,6 +250,9 @@ export function doctrineViolations(d: Doctrine, c: Constitution): string[] {
       }
     }
   }
+
+  for (const id of d.lab.strategies)
+    if (!d.strategies.some((s) => s.id === id)) v.push(`lab: unknown strategy ${id}`);
 
   if (d.llm_routing.require_cross_family) {
     const fam = (hop: { provider: string; model: string }) =>

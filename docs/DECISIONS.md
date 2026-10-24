@@ -498,3 +498,26 @@ Discord that reads as well thought out. The court was bull → bear → Clef jud
 re-run on ETH took 48 s: bull (Gemini), bear (gpt-oss-120b), rebuttal conceding two points, panel 1 for / 2 against,
 Clef P(win) 14% → no trade.
 
+## ADR-045 — LAB brain: forward-test strategies on a second paper account before they touch PAPER (2026-10-24)
+**Context:** The operator created a second $54 Alpaca paper account "for backtesting". New strategies (Kronos, and
+the research queue in `docs/STRATEGY_RESEARCH.md`) need evidence before they may trade on PAPER, whose record drives
+the LIVE graduation gate. A third `AccountId` would need the D1 journal's `CHECK (account IN ('PAPER','LIVE',…))`
+changed — a table rebuild of the append-only, hash-chained journal (U7) — so that path was rejected.
+**Decision:** a second instance of the same Brain.
+1. `LabCortexDO` (subclass of `AgentCortexDO`, DO migration v2) wires the LAB keys (`ALPACA_LAB_KEY_ID/SECRET`) as
+   its "PAPER" broker and data feed, its own hot SQLite, and its own D1 journal `cortex-lab` (same migrations). Its
+   journal, contracts, fills and rejections never mix with PAPER's.
+2. Doctrine view `labDoctrine()`: only `doctrine.lab.strategies` run, as ACTIVE; every PAPER strategy is off there.
+   Now: CRYPTO_KRONOS_FORECAST_V1 (operator rule kept — Kronos still never trades on PAPER; LAB measures it),
+   CRYPTO_TREND_V1, EQUITY_RSI2_PULLBACK_V1, CRYPTO_TURN_OF_MONTH_V1 (all SHADOW on PAPER).
+3. No AI: Clef, Clairic, the court and dispatching are off in LAB, so it cannot spend the shared 10k-neuron or LLM
+   quotas. It receives the crypto-regime, equity-posture and Kronos batches (the router forwards them); not
+   world-intel or Governor batches.
+4. Same constitution, sizer, validator, breakers and kill flag. Discord: LAB posts only to #agent-terminal, tagged
+   "🧪 LAB", never the HUD or briefing channels. The sentinel's FLATTEN ALL does not cover LAB (paper only); the kill
+   flag still stops its entries.
+5. Graduation: a strategy moves from `lab.strategies` to ACTIVE on PAPER only by PR, once its LAB record (graded the
+   same way) and the backtest lab agree.
+Also: the Alpaca client now pages multi-symbol daily bars (1,000 rows per page across all symbols silently cut later
+symbols short — the same bug the Kronos job hit).
+
