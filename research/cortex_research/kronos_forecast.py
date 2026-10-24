@@ -99,19 +99,20 @@ def _h() -> dict[str, str]:
 
 
 def crypto_bars(symbols: list[str], timeframe: str, days: int) -> dict[str, list[dict]]:
+    """One request series per symbol: authenticated multi-symbol paging silently dropped later symbols (2026-10-24)."""
     start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:00:00Z")
-    params = {"symbols": ",".join(symbols), "timeframe": timeframe, "start": start, "limit": 10000}
     out: dict[str, list[dict]] = {}
-    for _ in range(30):
-        r = requests.get(f"{DATA}/v1beta3/crypto/us/bars", params=params, headers=_h(), timeout=30)
-        r.raise_for_status()
-        d = r.json()
-        for sym, bars in (d.get("bars") or {}).items():
-            out.setdefault(sym, []).extend(bars)
-        tok = d.get("next_page_token")
-        if not tok:
-            break
-        params["page_token"] = tok
+    for sym in symbols:
+        params = {"symbols": sym, "timeframe": timeframe, "start": start, "limit": 10000}
+        for _ in range(10):
+            r = requests.get(f"{DATA}/v1beta3/crypto/us/bars", params=params, headers=_h(), timeout=30)
+            r.raise_for_status()
+            d = r.json()
+            out.setdefault(sym, []).extend((d.get("bars") or {}).get(sym) or [])
+            tok = d.get("next_page_token")
+            if not tok:
+                break
+            params["page_token"] = tok
     return out
 
 
