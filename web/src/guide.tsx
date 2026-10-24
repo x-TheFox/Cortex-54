@@ -110,7 +110,11 @@ const STEPS: Step[] = [
       ["Crypto", "Digital currencies like Bitcoin (BTC/USD). They trade 24/7."],
       [
         "Long",
-        "Buying something hoping it goes up. This robot only does this; it never bets on prices falling.",
+        "Buying something hoping it goes up. It is the only kind of trade the robot makes: a small cash account can't short.",
+      ],
+      [
+        "Inverse fund",
+        "A fund that rises when the market falls (SH, PSQ, RWM, BITI). Buying one is how the robot profits from a drop without borrowing.",
       ],
     ],
   },
@@ -157,6 +161,7 @@ const STEPS: Step[] = [
     title: "STS: market mood and system health",
     body: [
       "Regime is the robot's read of the market's mood. When stock markets look shaky (REDUCE_ONLY), it normally doesn't buy stocks, because buying while prices keep falling is how robots lose money.",
+      "In a falling market it switches tools rather than sitting still: it can buy inverse funds that rise as the market drops, and buy coins that fell too far, too fast, once they start bouncing.",
       "The exception: truly huge news (rated near the top of the scale by two AI checks and then the court) can still be traded, at half size and only one at a time. In the danger posture (CASH_PRIORITY) or when its data is out of date, it buys nothing.",
       "Below that are today's free-service usage and the diary's status.",
     ],

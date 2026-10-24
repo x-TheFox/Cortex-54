@@ -218,6 +218,60 @@ strategies:
       conviction: 5
       regime_proxy_ema: 20 # Phase 1 regime proxy: BTC daily close above its EMA20 (until batch regime lands)
     accounts: [PAPER]
+  # ADR-040: falling-market strategies. Cash account, so no shorting: bounce buys oversold reversals, the inverse
+  # strategy buys 1x inverse ETFs (constitution allowlist) when the regime is bearish.
+  - id: CRYPTO_OVERSOLD_BOUNCE_V1
+    arena: CRYPTO
+    status: ACTIVE
+    universe:
+      [
+        BTC/USD,
+        ETH/USD,
+        SOL/USD,
+        XRP/USD,
+        LINK/USD,
+        AVAX/USD,
+        DOGE/USD,
+        LTC/USD,
+        BCH/USD,
+        DOT/USD,
+        UNI/USD,
+        AAVE/USD,
+        ADA/USD,
+      ]
+    params:
+      atr_period: 14
+      ema_period: 20
+      rsi_period: 14
+      rsi_max: 32 # oversold: yesterday's RSI14 at or below this …
+      stretch_atr: 2.0 # … or the lowest of the last 3 closes ≥ 2 ATR under the EMA20
+      swing_lookback_days: 5 # stop just under the 5-day swing low, clamped to [1.5, 3] ATR
+      min_stop_atr: 1.5
+      max_stop_atr: 3.0
+      min_target_atr: 1.5 # target = EMA20, clamped to [1.5, 3] ATR above entry
+      max_target_atr: 3.0
+      max_hold_hours: 48
+      prior_win_prob: 0.6
+      conviction: 5
+      crash_floor: 15 # no knife-catching while a fresh crypto composite is below this
+    accounts: [PAPER]
+  - id: EQUITY_INVERSE_BREAKOUT_V1
+    arena: EQUITIES
+    status: ACTIVE # regular session only
+    universe: [SH, PSQ, RWM, BITI] # must be in constitution.allowed.inverse_etfs_1x (config:build checks)
+    params:
+      instrument: inverse_etf_1x
+      lookback_days: 10
+      atr_period: 14
+      ema_period: 20
+      atr_stop_multiple: 2.0
+      atr_target_multiple: 3.0
+      max_hold_hours: 72
+      prior_win_prob: 0.6
+      conviction: 5
+      bear_postures: [REDUCE_ONLY, CASH_PRIORITY]
+      crypto_hedges: [BITI] # gated on the crypto long gate being closed instead of the equity posture
+    accounts: [PAPER]
   - id: CRYPTO_CATALYST_COURT_V1
     arena: CRYPTO
     status: ACTIVE # Phase 3: catalyst → Tier 1 → Tier 2 → court → COURT contract (PAPER only)

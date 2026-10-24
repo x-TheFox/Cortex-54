@@ -392,3 +392,28 @@ attempt per candidate, like the court.
 **Honest limit:** no filter can both never miss a trade and never take a bad one; the lane trades a small, capped
 amount of risk for the big catalysts, and the ledger measures both sides.
 
+## ADR-040 — Profit from falling markets: 1x inverse ETFs and an oversold-bounce strategy (2026-10-24)
+**Context:** Since the fresh start (ADR-038) every crypto pair has sat under its EMA20 and the equity posture has
+been REDUCE_ONLY, so the long-only breakout baseline and the regime-gated court had nothing to buy. The operator
+authorised shorting and bounce trading ("do anything as long as it makes money").
+**Broker facts (verified 2026-10-24):** the account is cash (multiplier 1, `shorting_enabled: false`). Alpaca only
+allows short selling in margin accounts with ≥ $2,000 equity, and crypto is never shortable. True shorting is
+therefore impossible at $54, whatever the constitution says.
+**Decision:**
+1. Constitution v2 (operator-authorised): U3 now bans *leveraged* products (2x/3x, long or inverse) but permits
+   buying the 1x inverse ETFs in `allowed.inverse_etfs_1x` = SH (S&P 500), PSQ (Nasdaq-100), RWM (Russell 2000),
+   BITI (bitcoin futures). `config:build` fails if a strategy tagged `instrument: inverse_etf_1x` lists anything else.
+   Buying an inverse ETF is still a long, cash-paid, stop-protected position: every other cap is unchanged.
+2. `EQUITY_INVERSE_BREAKOUT_V1` (RULE, PAPER): during the regular session, buy an inverse ETF that breaks its
+   prior 10-day high and sits above its EMA20 while its regime is bearish — equity posture REDUCE_ONLY or
+   CASH_PRIORITY for SH/PSQ/RWM (stale posture → no trade), crypto long gate closed for BITI. Stop 2 ATR, target
+   3 ATR, max hold 72 h (inverse funds decay over long holds). The correlation guard keeps SH+PSQ from stacking.
+3. `CRYPTO_OVERSOLD_BOUNCE_V1` (RULE, PAPER, 13 pairs): yesterday's RSI14 ≤ 32 or the last 3 closes ≥ 2 ATR under
+   the EMA20, and today's bid back above yesterday's high (reversal confirmation) while still under the EMA. Stop
+   just under the 5-day swing low (clamped to 1.5–3 ATR), target the EMA20 (clamped to 1.5–3 ATR), max hold 48 h.
+   Deliberately not gated on risk-on; skipped while a fresh crypto composite is below 15 (capitulation).
+4. Both run hourly, one contract per symbol per UTC day, through the same validator, sizer, fee hurdle, scar tissue
+   and breakers as everything else, with the doctrine prior (0.6, conviction 5) until the Governor has outcomes.
+5. Research skills retry once after 20 s (a single TLS timeout had dropped a crypto regime batch).
+**Revisit:** at ≥ $2,000 equity a margin account would allow real shorts; that needs a new constitution change.
+

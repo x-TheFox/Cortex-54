@@ -1,6 +1,6 @@
 {
   "$comment": "CORTEX-54 constitution. Operator-only. Changed exclusively by git commit + deploy. Doctrine may tighten, never loosen, these values. Validated at boot by src/contracts/constitution.ts; its SHA-256 is journaled on every boot.",
-  "version": 1,
+  "version": 2,
   "untouchables": [
     {
       "id": "U1",
@@ -15,7 +15,7 @@
     {
       "id": "U3",
       "name": "hard-caps-cash-only",
-      "rule": "Per-trade risk, total heat, position notional, daily loss and drawdown caps below are absolute. Cash only: no margin, no shorting, no naked options, no leveraged or inverse products."
+      "rule": "Per-trade risk, total heat, position notional, daily loss and drawdown caps below are absolute. Cash only: no margin, no shorting, no naked options, no leveraged products. Bearish exposure only by buying the 1x inverse ETFs listed in allowed.inverse_etfs_1x (ADR-040)."
     },
     {
       "id": "U4",
@@ -72,14 +72,15 @@
       "diagonal",
       "iron_condor"
     ],
-    "options_structures_live": []
+    "options_structures_live": [],
+    "inverse_etfs_1x": ["SH", "PSQ", "RWM", "BITI"]
   },
   "forbidden": [
     "margin",
     "short_selling",
     "naked_options",
     "leveraged_etf",
-    "inverse_etf",
+    "leveraged_inverse_etf",
     "otc_securities",
     "averaging_down_without_new_contract"
   ]

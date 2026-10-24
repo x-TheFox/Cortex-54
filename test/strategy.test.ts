@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { contractViolations, DecisionContractSchema } from "../src/contracts/decision-contract.ts";
+import { bounceParams, bounceSignal, inverseParams, inverseSignal } from "../src/strategy/BearAndBounce.ts";
 import { baselineParams, baselineSignal, regimeProxyRiskOn } from "../src/strategy/CryptoBreakoutBaseline.ts";
 import { atr, type Bar, ema, priorHigh } from "../src/strategy/indicators.ts";
 import { doctrine } from "./helpers.ts";
@@ -74,5 +75,78 @@ describe("CRYPTO_BREAKOUT_BASELINE_V1", () => {
     expect(regimeProxyRiskOn(up, p)?.riskOn).toBe(true);
     const down = flatBars(30).map((b, i) => ({ ...b, c: 200 - i }));
     expect(regimeProxyRiskOn(down, p)?.riskOn).toBe(false);
+  });
+});
+
+const DAY = 86_400_000;
+/** n daily bars closing from `from` to `to` in a straight line, range 2 around each close. */
+const line = (n: number, from: number, to: number): Bar[] =>
+  Array.from({ length: n }, (_, i) => {
+    const c = from + ((to - from) * i) / (n - 1);
+    return { t: i * DAY, o: c, h: c + 1, l: c - 1, c, v: 1 };
+  });
+
+describe("CRYPTO_OVERSOLD_BOUNCE_V1", () => {
+  const p = bounceParams(doctrine);
+  if (!p) throw new Error("bounce params missing");
+  const bars = line(25, 130, 100); // a steady slide: RSI 0, far under the EMA20
+  const base = {
+    symbol: "ETH/USD",
+    bars,
+    ask: 102.02,
+    now: 25 * DAY + 3_600_000, // every bar is complete
+    contractId: "01928f4e-7b2a-7c3d-8e4f-5a6b7c8d9e0f",
+    tick: 0.01,
+    regimeScore: 30,
+  };
+
+  it("buys the reversal above yesterday's high with a stop under the swing low and an EMA target", () => {
+    const { contract, reason } = bounceSignal({ ...base, bid: 102 }, p);
+    expect(reason).toBe("oversold reversal");
+    if (!contract) throw new Error("no contract");
+    expect(DecisionContractSchema.parse(contract)).toBeTruthy();
+    expect(contractViolations(contract)).toEqual([]);
+    const stop = Number(contract.invalidation_criteria.stop_price);
+    const target = Number(contract.entry_plan.targets[0]);
+    expect(stop).toBeLessThan(99); // under the 5-day swing low (99)
+    expect(102 - stop).toBeGreaterThanOrEqual(p.min_stop_atr * contract.atr - 0.01);
+    expect(target - 102).toBeLessThanOrEqual(p.max_target_atr * contract.atr + 0.01);
+    expect(target).toBeGreaterThan(102 + p.min_target_atr * contract.atr - 0.01);
+  });
+
+  it("waits for the reversal, skips capitulation and skips coins that are not oversold", () => {
+    expect(bounceSignal({ ...base, bid: 100.5 }, p).reason).toMatch(/no reversal/);
+    expect(bounceSignal({ ...base, bid: 102, regimeScore: 10 }, p).reason).toMatch(/capitulation/);
+    const calm = { ...base, bars: line(25, 100, 100), bid: 101.5 };
+    expect(bounceSignal(calm, p).reason).toMatch(/not oversold/);
+  });
+
+  it("ignores today's forming bar when judging yesterday", () => {
+    const forming = [...bars, { t: 25 * DAY, o: 100, h: 140, l: 99, c: 101, v: 1 }];
+    expect(bounceSignal({ ...base, bars: forming, bid: 102 }, p).contract).not.toBeNull();
+  });
+});
+
+describe("EQUITY_INVERSE_BREAKOUT_V1", () => {
+  const p = inverseParams(doctrine);
+  if (!p) throw new Error("inverse params missing");
+  const base = {
+    symbol: "SH",
+    bars: line(30, 36, 40), // inverse ETF trending up = index trending down
+    ask: 41.62,
+    now: 30 * DAY + 3_600_000,
+    contractId: "01928f4e-7b2a-7c3d-8e4f-5a6b7c8d9e0f",
+    tick: 0.01,
+    gate: "equity posture REDUCE_ONLY",
+  };
+
+  it("buys the inverse breakout only while the regime is bearish", () => {
+    const { contract } = inverseSignal({ ...base, bid: 41.6, bearish: true }, p);
+    if (!contract) throw new Error("no contract");
+    expect(DecisionContractSchema.parse(contract)).toBeTruthy();
+    expect(contract.arena).toBe("EQUITIES");
+    expect(Number(contract.invalidation_criteria.stop_price)).toBeLessThan(41.6);
+    expect(inverseSignal({ ...base, bid: 41.6, bearish: false }, p).contract).toBeNull();
+    expect(inverseSignal({ ...base, bid: 40.5, bearish: true }, p).reason).toMatch(/no breakout/);
   });
 });

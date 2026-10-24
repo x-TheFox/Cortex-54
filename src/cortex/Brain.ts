@@ -75,6 +75,14 @@ import { type AccountView, type AssetView, validateEntry } from "../risk/PreTrad
 import { effectiveRung, type RungName } from "../risk/rungs.ts";
 import { type Facts, type ScarTissue, scarLessons, scarVetoes } from "../risk/scar.ts";
 import {
+  BOUNCE_ID,
+  bounceParams,
+  bounceSignal,
+  INVERSE_ID,
+  inverseParams,
+  inverseSignal,
+} from "../strategy/BearAndBounce.ts";
+import {
   STRATEGY_ID as BASELINE_ID,
   baselineParams,
   baselineSignal,
@@ -433,9 +441,15 @@ export class Brain {
     // 3. New entries (never when killed/unknown or budget is in REDUCE_ONLY).
     if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
       try {
-        const r = await this.runBaseline(quotes);
-        report.contracts += r.contracts;
-        report.entries += r.entries;
+        for (const run of [
+          () => this.runBaseline(quotes),
+          () => this.runBounce(quotes),
+          () => this.runInverse(),
+        ]) {
+          const r = await run();
+          report.contracts += r.contracts;
+          report.entries += r.entries;
+        }
       } catch (e) {
         if (!(e instanceof SubrequestBudgetExceeded)) {
           await this.alertOnce("strategy", `⚠️ strategy step failed: ${errText(e).slice(0, 300)}`);
@@ -1342,6 +1356,134 @@ ${postmortem}`,
       for (const account of accounts) {
         if (await this.route(account, contract, fresh)) entries++;
       }
+    }
+    return { contracts, entries };
+  }
+
+  /** An ACTIVE rule strategy's runnable accounts, or null when it is off or ran within the last hour. */
+  private ruleStrategyDue(id: string, now: number): { universe: string[]; accounts: AccountId[] } | null {
+    const s = this.d.strategies.find((x) => x.id === id);
+    if (s?.status !== "ACTIVE" || !this.deps.market) return null;
+    const accounts = s.accounts.filter((a) => this.deps.brokers[a]);
+    if (accounts.length === 0) return null;
+    const lastKey = `${id}:last_run`;
+    if (now - Number(getKV(this.sql, lastKey) ?? 0) < 3_600_000) return null;
+    setKV(this.sql, lastKey, String(now), now);
+    return { universe: s.universe ?? [], accounts };
+  }
+
+  /** Record, announce and route a rule contract (one per symbol per UTC day). */
+  private async emitRule(
+    id: string,
+    contract: DecisionContract,
+    accounts: AccountId[],
+    quotes: Record<string, Quote>,
+    now: number,
+  ): Promise<number> {
+    setKV(this.sql, `${id}:${contract.symbol}:${utcDay(now)}`, contract.contract_id, now);
+    this.recordContract(contract, now);
+    void this.deps.notifier.post("court", contractCard(contract));
+    let entries = 0;
+    for (const account of accounts) if (await this.route(account, contract, quotes)) entries++;
+    return entries;
+  }
+
+  /** CRYPTO_OVERSOLD_BOUNCE_V1 (ADR-040): counter-trend reversals, deliberately not gated on risk-on. */
+  private async runBounce(quotes: Record<string, Quote>): Promise<{ contracts: number; entries: number }> {
+    const now = this.deps.now();
+    const p = bounceParams(this.d);
+    const due = p ? this.ruleStrategyDue(BOUNCE_ID, now) : null;
+    const m = this.deps.market;
+    if (!p || !due || !m) return { contracts: 0, entries: 0 };
+    const bars = await m.cryptoDailyBars(due.universe, p.ema_period + p.atr_period + 10, now);
+    const missing = due.universe.filter((s) => !quotes[s]);
+    const fresh = missing.length > 0 ? { ...quotes, ...(await m.cryptoQuotes(missing)) } : quotes;
+    const reg = this.freshRegime("CRYPTO", now);
+    let contracts = 0;
+    let entries = 0;
+    for (const symbol of due.universe) {
+      if (getKV(this.sql, `${BOUNCE_ID}:${symbol}:${utcDay(now)}`)) continue;
+      const q = fresh[symbol];
+      const b = bars[symbol];
+      if (!q || !b) continue;
+      const asset = await this.assetMeta(symbol, due.accounts[0] as AccountId);
+      const tick = asset?.price_increment ? Number(asset.price_increment) : defaultTick(q.bid, "CRYPTO");
+      const { contract } = bounceSignal(
+        {
+          symbol,
+          bars: b,
+          bid: q.bid,
+          ask: q.ask,
+          now,
+          contractId: uuidv7(now),
+          tick,
+          regimeScore: reg?.score ?? null,
+        },
+        p,
+      );
+      if (!contract) continue;
+      contracts++;
+      entries += await this.emitRule(BOUNCE_ID, contract, due.accounts, fresh, now);
+    }
+    return { contracts, entries };
+  }
+
+  /**
+   * EQUITY_INVERSE_BREAKOUT_V1 (ADR-040): buy 1x inverse ETFs on a breakout while the regime is bearish. Index hedges
+   * need a fresh bearish equity posture; crypto hedges (BITI) need the crypto long gate closed. Regular session only.
+   */
+  private async runInverse(): Promise<{ contracts: number; entries: number }> {
+    const now = this.deps.now();
+    const p = inverseParams(this.d);
+    const s = this.d.strategies.find((x) => x.id === INVERSE_ID);
+    const via = s?.accounts.find((a) => this.deps.brokers[a]);
+    const m = this.deps.market;
+    if (!p || !s || s.status !== "ACTIVE" || !via || !m) return { contracts: 0, entries: 0 };
+    // cheap pre-check so the hourly slot is spent inside the session, not on a closed market
+    if (now - Number(getKV(this.sql, `${INVERSE_ID}:last_run`) ?? 0) < 3_600_000)
+      return { contracts: 0, entries: 0 };
+    const clock = await (this.deps.brokers[via] as BrokerApi).clock();
+    const minsToClose = (Date.parse(clock.next_close) - now) / 60_000;
+    if (!clock.is_open || minsToClose < this.d.execution.no_entry_last_minutes_of_session + 20)
+      return { contracts: 0, entries: 0 };
+    const due = this.ruleStrategyDue(INVERSE_ID, now);
+    if (!due) return { contracts: 0, entries: 0 };
+    const eq = this.freshRegime("EQUITIES", now);
+    const equityBear = !!eq && p.bear_postures.includes(eq.posture);
+    const proxy = one<{ posture: string }>(
+      this.sql,
+      "SELECT posture FROM regime_state WHERE arena = 'CRYPTO_PROXY'",
+    );
+    const cryptoBear = !this.cryptoLongsAllowed(now, proxy?.posture === "NEW_ENTRY_ALLOWED");
+    const [bars, quotes] = await Promise.all([
+      m.stockDailyBars(due.universe, p.lookback_days + p.atr_period + 15, now),
+      m.stockQuotes(due.universe),
+    ]);
+    let contracts = 0;
+    let entries = 0;
+    for (const symbol of due.universe) {
+      if (getKV(this.sql, `${INVERSE_ID}:${symbol}:${utcDay(now)}`)) continue;
+      const q = quotes[symbol];
+      const b = bars[symbol];
+      if (!q || !b) continue;
+      const crypto = p.crypto_hedges.includes(symbol);
+      const { contract } = inverseSignal(
+        {
+          symbol,
+          bars: b,
+          bid: q.bid,
+          ask: q.ask,
+          now,
+          contractId: uuidv7(now),
+          tick: defaultTick(q.bid, "EQUITIES"),
+          bearish: crypto ? cryptoBear : equityBear,
+          gate: crypto ? "crypto long gate closed" : `equity posture ${eq?.posture ?? "stale"}`,
+        },
+        p,
+      );
+      if (!contract) continue;
+      contracts++;
+      entries += await this.emitRule(INVERSE_ID, contract, due.accounts, quotes, now);
     }
     return { contracts, entries };
   }

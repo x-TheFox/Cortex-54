@@ -40,6 +40,15 @@ describe("config", () => {
     expect(doctrineViolations(d, constitution).some((v) => v.includes("naked_put"))).toBe(true);
   });
 
+  it("only lets the inverse strategy hold constitution-approved 1x inverse ETFs (ADR-040)", () => {
+    const d = clone();
+    const s = d.strategies.find((x) => x.params?.instrument === "inverse_etf_1x");
+    if (!s) throw new Error("no inverse strategy in doctrine");
+    s.universe = [...(s.universe ?? []), "SQQQ"];
+    expect(doctrineViolations(d, constitution).some((v) => v.includes("SQQQ"))).toBe(true);
+    expect(constitution.forbidden).toContain("leveraged_etf");
+  });
+
   it("rejects LIVE autonomy above the unratified maximum", () => {
     const d = clone();
     const live = d.accounts.LIVE;
