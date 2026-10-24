@@ -51,3 +51,21 @@ def test_fan_chart_bands_are_ordered_and_sized():
     f = out["fan"]
     assert len(f["p10"]) == len(f["p50"]) == len(f["p90"]) == 12
     assert all(a <= b <= c for a, b, c in zip(f["p10"], f["p50"], f["p90"]))
+
+
+def test_equity_universe_reads_every_stock_watchlist_once(tmp_path):
+    from cortex_research.kronos_forecast import equity_universe
+
+    d = tmp_path / "doctrine.yaml"
+    d.write_text("watchlists:\n  crypto: [BTC/USD]\n  crypto_proxies: [COIN, MSTR]\n  equities_core: [SPY]\n"
+                 "  equities_catalyst: [NVDA, COIN]\n")
+    assert equity_universe(d) == ["COIN", "MSTR", "SPY", "NVDA"]
+
+
+def test_doctrine_stock_forecast_params_fit_the_kronos_context():
+    import yaml
+    from pathlib import Path
+
+    doc = yaml.safe_load((Path(__file__).resolve().parents[2] / "config" / "doctrine.yaml").read_text())
+    p = next(s for s in doc["strategies"] if s["id"] == "CRYPTO_KRONOS_FORECAST_V1")["params"]
+    assert 120 <= p["equity_lookback_days"] <= 512 and 1 <= p["equity_horizon_days"] <= 10

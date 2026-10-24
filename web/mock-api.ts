@@ -322,7 +322,23 @@ const options = (now: number, empty: boolean) =>
 
 /** Synthetic /api/forecast (ADR-047): a drifting price, a widening amber fan, and a robot plan on BTC. */
 function forecast(now: number, symbol: string, empty: boolean) {
-  const symbols = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "LINK/USD", "AVAX/USD", "DOGE/USD", "LTC/USD"];
+  const symbols = [
+    "BTC/USD",
+    "ETH/USD",
+    "SOL/USD",
+    "XRP/USD",
+    "LINK/USD",
+    "AVAX/USD",
+    "DOGE/USD",
+    "LTC/USD",
+    "COIN",
+    "MSTR",
+    "SPY",
+    "QQQ",
+    "NVDA",
+    "AAPL",
+  ];
+  const stock = !symbol.includes("/");
   const base = { "BTC/USD": 80_500, "ETH/USD": 2_360, "SOL/USD": 142 }[symbol] ?? 12;
   const hist = Array.from(
     { length: 42 },
@@ -343,7 +359,8 @@ function forecast(now: number, symbol: string, empty: boolean) {
           produced_at: now - 75 * 60_000,
           stale: false,
           horizon_hours: 48,
-          candle_hours: 4,
+          horizon_label: stock ? "2 trading days" : "48 h",
+          candle_hours: stock ? 24 : 4,
           confidence: "LOW",
           about:
             "Kronos-base is a mid-sized (102M-parameter) open-source model trained only on past candlestick charts: it sees no news, fundamentals or order flow. The numbers are shares of 24 randomly sampled 48 h price paths, stretched to match recent volatility. It has not been validated on this account. LOW confidence: treat it as a weak tiebreaker at most, never as a reason to trade, and let any real evidence overrule it.",

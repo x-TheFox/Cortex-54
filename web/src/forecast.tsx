@@ -43,7 +43,11 @@ function Chart({ f }: { f: ForecastView }) {
   const hist = k?.hist ?? [];
   const fan = k?.fan;
   if (!k || hist.length < 2)
-    return <p className="empty">No Kronos forecast for {f.symbol} yet. It runs every 4 hours.</p>;
+    return (
+      <p className="empty">
+        No Kronos forecast for {f.symbol} yet. It runs every 4 hours (stocks: daily candles).
+      </p>
+    );
   const steps = fan?.p50.length ?? 0;
   const W = 560; // ~3.7:1, the display's usual shape, so the drawing fills the glass
   const H = 150;
@@ -91,7 +95,7 @@ function Chart({ f }: { f: ForecastView }) {
         className="fcst"
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label={`${f.symbol}: last ${hist.length} ${k.candle_hours}-hour closes, Kronos 10 to 90 percent band for ${k.horizon_hours} hours${plan ? ", and the robot's entry, stop and target" : ""}`}
+        aria-label={`${f.symbol}: last ${hist.length} ${k.candle_hours}-hour closes, Kronos 10 to 90 percent band for ${k.horizon_label ?? `${k.horizon_hours} hours`}${plan ? ", and the robot's entry, stop and target" : ""}`}
       >
         <line className="fcst-now" x1={nowX} x2={nowX} y1="0" y2={H} vectorEffect="non-scaling-stroke" />
         <path className="fcst-hist" d={line(hist, 0)} vectorEffect="non-scaling-stroke" />
@@ -137,14 +141,27 @@ export function FcstPage({ now }: { now: number }) {
   const symbols = f?.symbols.length ? f.symbols : ["BTC/USD"];
   return (
     <div className="fcst-page">
-      <fieldset className="fcst-picker">
-        <legend className="sr-only">Symbol</legend>
-        {symbols.map((s) => (
-          <button key={s} type="button" className="chip" aria-pressed={s === sym} onClick={() => setSym(s)}>
-            {s.replace("/USD", "")}
-          </button>
+      {[
+        { label: "Crypto · 4 h candles", list: symbols.filter((s) => s.includes("/")) },
+        { label: "Stocks · daily candles", list: symbols.filter((s) => !s.includes("/")) },
+      ]
+        .filter((g) => g.list.length > 0)
+        .map((g) => (
+          <fieldset key={g.label} className="fcst-picker">
+            <legend className="fcst-legend">{g.label}</legend>
+            {g.list.map((s) => (
+              <button
+                key={s}
+                type="button"
+                className="chip"
+                aria-pressed={s === sym}
+                onClick={() => setSym(s)}
+              >
+                {s.replace("/USD", "")}
+              </button>
+            ))}
+          </fieldset>
         ))}
-      </fieldset>
       {r.error && !f ? (
         <p className="empty amber">DATA FAULT · {r.error}</p>
       ) : !f ? (
@@ -174,7 +191,8 @@ export function FcstPage({ now }: { now: number }) {
                         ? "Leans down"
                         : "No clear lean"}
                     : {Math.round(f.kronos.p_up * 100)}% of its sampled futures end higher after{" "}
-                    {f.kronos.horizon_hours} h; the average path moves {signed(f.kronos.exp_ret)}.
+                    {f.kronos.horizon_label ?? `${f.kronos.horizon_hours} h`}; the average path moves{" "}
+                    {signed(f.kronos.exp_ret)}.
                   </p>
                   <p className="prose dimtext">{f.kronos.about}</p>
                 </>

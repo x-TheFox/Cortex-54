@@ -218,6 +218,7 @@ export interface ForecastView {
     produced_at: number;
     stale: boolean;
     horizon_hours: number;
+    horizon_label?: string;
     candle_hours: number;
     confidence: "LOW";
     about: string;
