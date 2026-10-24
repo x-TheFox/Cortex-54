@@ -669,7 +669,7 @@ per run (2 steps per stock).
 
 ## ADR-053 — Audit ideas, round 1: runtime, operations, operator controls (2026-10-24)
 **Context:** the operator asked for every idea in the audit ledger to be considered, not only the bugs.
-`docs/AUDIT_IDEAS.md` gives all 121 a verdict (Build / Done / Later with a trigger / No with a reason). This round
+Every idea got a verdict; what is not built lives in `docs/FUTURE_PLANS.md`. This round
 builds the runtime and operations ones.
 **Built:**
 - **Journal:** the outbox flush is single-flight (W1-06). On boot, an empty hot journal head adopts D1's head instead
@@ -752,3 +752,27 @@ builds the runtime and operations ones.
 
 **Found already done while building:** price collars (entries always price at the bid inside the zone) and
 crossed-quote rejection. W1-12/W3-34 (field taint) hold by construction, and the injection suite now pins them.
+
+## ADR-055 — Audit ideas, round 3: the learning loop; the rest becomes FUTURE_PLANS (2026-10-24)
+**Built:**
+- **Governor:**
+  - Brier decomposition (reliability / resolution / uncertainty) on the report card (W2-21);
+  - calibration pairs purged of overlapping holds per symbol (W2-24);
+  - a proposed calibration map must match or beat the incumbent's Brier on the newest 30% of pairs (W2-25);
+  - deflated Sharpe required for a PROMOTE? fitness status (W2-28);
+  - report lines for panel-majority vs judge accuracy (W2-01), realized slippage (W2-36) and the 72 h cost of
+    each scar's vetoes (W2-14).
+- **Memory:** symbol beliefs decay over 30 days, strategy beliefs over 60. A belief built from exactly the same
+  trades as another is dropped (W2-17, W2-11).
+- **Backtest lab:** each strategy gets a deflated Sharpe (trial count = strategies tested), and PASS now also needs
+  DSR ≥ 0.95. The lab reports PBO via CSCV on monthly R (W2-27/28). First run: RSI(2) still PASSES (DSR 0.99);
+  PBO 0.30.
+- **Crypto regime:**
+  - OKX perp funding is stored, and a crypto entry is halved while its asset's |annualized funding| ≥ 35%. The rule
+    is shrink-only, in code (W2-30).
+  - A numpy 2-state HMM on BTC daily returns joins the court's regime context as LOW confidence, with no sizing
+    effect (W2-29).
+
+**Stopped here (operator, 2026-10-24):** every idea not built yet — the ones that need data, LIVE or the operator,
+small extras, and the ones decided against — is recorded with its trigger in `docs/FUTURE_PLANS.md`. That file
+replaces the full per-idea table.

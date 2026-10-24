@@ -74,6 +74,7 @@ breakers:
   recovery_pulses: 3 # … for 3 pulses in a row (worse bands still apply at once)
 
 sizing:
+  funding_shrink: { above_annualized: 0.35, multiplier: 0.5 } # audit W2-30: |perp funding| ≥ 35%/yr → half size
   min_stop_atr_multiple: 1.2
   bear_disagreement: { floor: 0.3, max_penalty: 0.7 } # D_bear = min(max_penalty, max(0, lethality - floor))
   reputation_weight: { min: 0.5, max: 1.2, min_signals_before_adjusting: 20 }

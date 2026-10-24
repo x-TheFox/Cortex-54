@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import random
 from dataclasses import dataclass
@@ -266,3 +267,170 @@ def twin_divergence(fills: Sequence[dict]) -> dict:
     return {"pairs": len(diffs), "mean_bps": round(sum(diffs) / len(diffs), 2) if diffs else None,
             "worst_bps": round(max(diffs), 2) if diffs else None}
 
+
+
+# ---- ADR-055: audit round 3 (learning loop rigor) -------------------------------------------------------------------
+
+def brier_decomposition(pairs: Sequence[tuple[float, int]], bins: int = 10) -> dict | None:
+    """Murphy (1973): Brier = reliability − resolution + uncertainty (audit W2-21). Reliability is the part a better
+    calibration map can fix; resolution is real skill at telling outcomes apart; uncertainty is the base rate's own
+    noise. Binned, so the identity holds up to within-bin spread."""
+    p = list(pairs)
+    if not p:
+        return None
+    n = len(p)
+    base = sum(y for _, y in p) / n
+    buckets: list[list[tuple[float, int]]] = [[] for _ in range(bins)]
+    for x, y in p:
+        buckets[min(bins - 1, int(x * bins))].append((x, y))
+    rel = res = 0.0
+    for b in buckets:
+        if not b:
+            continue
+        fk = sum(x for x, _ in b) / len(b)
+        ok = sum(y for _, y in b) / len(b)
+        rel += len(b) * (fk - ok) ** 2
+        res += len(b) * (ok - base) ** 2
+    return {"reliability": round(rel / n, 4), "resolution": round(res / n, 4), "uncertainty": round(base * (1 - base), 4),
+            "brier": round(brier(p) or 0, 4)}
+
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def deflated_sharpe(rs: Sequence[float], n_trials: int) -> dict | None:
+    """Bailey & López de Prado (2014) deflated Sharpe ratio (audit W2-28): the probability that the per-trade Sharpe
+    beats the best Sharpe expected by luck across `n_trials` variants, adjusted for skew and fat tails. > 0.95 is the
+    usual bar; the backtest lab requires it on top of BH-FDR before a PASS."""
+    n = len(rs)
+    if n < 10 or n_trials < 1:
+        return None
+    mu = sum(rs) / n
+    sd = math.sqrt(sum((r - mu) ** 2 for r in rs) / (n - 1))
+    if sd <= 0:
+        return None
+    sr = mu / sd
+    skew = sum(((r - mu) / sd) ** 3 for r in rs) / n
+    kurt = sum(((r - mu) / sd) ** 4 for r in rs) / n
+    # expected max Sharpe of n_trials unskilled variants (variance of SR estimates ≈ 1/(n−1))
+    gamma = 0.5772156649
+    v = 1 / (n - 1)
+    if n_trials > 1:
+        from statistics import NormalDist
+
+        z = NormalDist()
+        sr0 = math.sqrt(v) * ((1 - gamma) * z.inv_cdf(1 - 1 / n_trials) + gamma * z.inv_cdf(1 - 1 / (n_trials * math.e)))
+    else:
+        sr0 = 0.0
+    denom = math.sqrt(max(1e-12, 1 - skew * sr + (kurt - 1) / 4 * sr * sr))
+    dsr = _norm_cdf((sr - sr0) * math.sqrt(n - 1) / denom)
+    return {"sharpe_per_trade": round(sr, 4), "sharpe_luck_bar": round(sr0, 4), "dsr": round(dsr, 4), "trials": n_trials}
+
+
+def pbo_cscv(perf: dict[str, Sequence[float]], blocks: int = 8) -> float | None:
+    """Probability of backtest overfitting by combinatorially symmetric cross-validation (Bailey et al., audit W2-27).
+    perf: strategy → per-period returns on a common calendar (same length). For every split of the `blocks` time
+    blocks into equal halves, pick the in-sample best strategy and see where it ranks out of sample; PBO is the share of
+    splits where it lands in the bottom half. Needs ≥ 2 strategies."""
+    from itertools import combinations
+
+    names = [k for k, v in perf.items() if len(v) >= blocks]
+    if len(names) < 2:
+        return None
+    t = min(len(perf[k]) for k in names)
+    size = t // blocks
+    if size < 1:
+        return None
+    chunks = {k: [sum(perf[k][i * size:(i + 1) * size]) for i in range(blocks)] for k in names}
+    below = total = 0
+    for ins in combinations(range(blocks), blocks // 2):
+        outs = [i for i in range(blocks) if i not in ins]
+        is_score = {k: sum(chunks[k][i] for i in ins) for k in names}
+        oos_score = {k: sum(chunks[k][i] for i in outs) for k in names}
+        best = max(names, key=lambda k: is_score[k])
+        rank = sorted(names, key=lambda k: oos_score[k]).index(best)  # 0 = worst
+        rel = (rank + 0.5) / len(names)
+        below += 1 if rel <= 0.5 else 0
+        total += 1
+    return round(below / total, 4) if total else None
+
+
+def purge_overlaps(items: Sequence[dict], key: str = "symbol", window_ms: int = 3 * 86_400_000) -> list[dict]:
+    """Audit W2-24: holds of 1–3 days overlap, so consecutive labels on one symbol share most of their price path and
+    inflate apparent sample size. Keep the first item of each symbol per window (items need `ts`)."""
+    last: dict[str, int] = {}
+    out: list[dict] = []
+    for it in sorted(items, key=lambda x: x["ts"]):
+        k = str(it.get(key))
+        if k in last and it["ts"] - last[k] < window_ms:
+            continue
+        last[k] = it["ts"]
+        out.append(it)
+    return out
+
+
+def map_beats_incumbent(pairs: Sequence[tuple[float, int]], fit, incumbent: Sequence[tuple[float, float]] | None,
+                        holdout: float = 0.3) -> dict:
+    """Audit W2-25: fit a candidate map on the older 70% of pairs (time order), score both maps' Brier on the newest
+    30%. A proposal is only written when it is no worse than the incumbent (or the identity when there is none)."""
+    p = list(pairs)
+    cut = max(1, int(len(p) * (1 - holdout)))
+    train, test = p[:cut], p[cut:]
+    if len(test) < 5:
+        return {"ok": True, "why": "too few pairs for a holdout; accepted on schema checks"}
+    _method, cand = fit(train)
+    inc = list(incumbent) if incumbent else [(0.0, 0.0), (1.0, 1.0)]
+    b_new = brier([(apply_map(cand, x), y) for x, y in test]) or 0
+    b_old = brier([(apply_map(inc, x), y) for x, y in test]) or 0
+    return {"ok": b_new <= b_old + 1e-9, "brier_new": round(b_new, 4), "brier_incumbent": round(b_old, 4),
+            "holdout": len(test)}
+
+
+def panel_vs_judge(rows: Sequence[dict]) -> dict:
+    """Audit W2-01: rows of {panel: [{stance, confidence}], win_used, r}. Did the panel's majority call the outcome
+    better than the judge's probability? Reports hit rates; a panel that adds nothing over the judge is a candidate
+    for `panel_mode: off` (three fewer LLM calls per hearing)."""
+    judged = [r for r in rows if r.get("r") is not None]
+    if not judged:
+        return {"n": 0}
+    pm = jm = 0
+    for r in judged:
+        votes = [1 if s.get("stance") == "support" else -1 if s.get("stance") == "oppose" else 0 for s in r.get("panel", [])]
+        panel_long = sum(votes) > 0
+        judge_long = (r.get("win_used") or 0) >= 0.5
+        won = r["r"] > 0
+        pm += 1 if panel_long == won else 0
+        jm += 1 if judge_long == won else 0
+    n = len(judged)
+    return {"n": n, "panel_hit": round(pm / n, 3), "judge_hit": round(jm / n, 3)}
+
+
+def slippage_summary(fills: Sequence[dict]) -> dict:
+    """Audit W2-36: realized slippage (bps, positive = worse) from FILL journal rows that carry slip_bps."""
+    xs = sorted(float(f["slip_bps"]) for f in fills if f.get("slip_bps") is not None)
+    if not xs:
+        return {"n": 0}
+    return {"n": len(xs), "mean_bps": round(sum(xs) / len(xs), 2), "p90_bps": xs[min(len(xs) - 1, int(0.9 * len(xs)))],
+            "worst_bps": xs[-1]}
+
+
+def scar_veto_cost(rejections: Sequence[dict], grades: Sequence[dict]) -> dict[str, dict]:
+    """Audit W2-14: what each scar's vetoes would have earned (72 h grades of SCAR-stage rejections). Positive means
+    the scar is costing money and is a candidate for `expires`."""
+    by_id = {g["rejection_id"]: g for g in grades if g.get("horizon") == "72h" and g.get("outcome_r") is not None}
+    out: dict[str, list[float]] = {}
+    for rj in rejections:
+        if rj.get("stage") != "SCAR" or rj["id"] not in by_id:
+            continue
+        reasons = rj.get("reason_codes", rj.get("reasons"))
+        if isinstance(reasons, str):
+            try:
+                reasons = json.loads(reasons)
+            except ValueError:
+                reasons = [reasons]
+        for reason in reasons or []:
+            m = str(reason).split(":", 1)[0].strip()
+            if m.startswith("SCAR-"):
+                out.setdefault(m, []).append(float(by_id[rj["id"]]["outcome_r"]))
+    return {k: {"n": len(v), "avg_r": round(sum(v) / len(v), 3)} for k, v in out.items()}

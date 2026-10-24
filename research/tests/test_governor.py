@@ -67,7 +67,7 @@ def test_build_trades_and_pairs_and_gate():
     ]
     trades = build_trades(journal, contracts)
     assert trades == [{**trades[0], "r": 2.0, "reason": "TARGET", "origin": "COURT", "win_prob_raw": 0.7}]
-    rej = [{"id": 5, "contract_id": cid, "stage": "VALIDATOR", "symbol": "BTC/USD", "ts": 0, "hypothetical": "{}", "reason_codes": "[]"}]
+    rej = [{"id": 5, "contract_id": cid, "stage": "VALIDATOR", "symbol": "BTC/USD", "ts": 10 * 86_400_000, "hypothetical": "{}", "reason_codes": "[]"}]
     pairs = calibration_pairs(trades, rej, [{"rejection_id": 5, "horizon": "72h", "hit": "STOP"}], contracts)
     assert pairs == [(0.7, 1), (0.7, 0)]
     gate = {g["criterion"]: g for g in gate_status(journal, trades, rej, 0.2, 2, 31 * 86_400_000)}
@@ -157,3 +157,33 @@ def test_scar_ids_with_bad_suffixes_do_not_crash():
     from cortex_research.governor.memory import scar_proposals
 
     assert scar_proposals([], {}, [{"id": "SCAR-xyz"}, {"id": "SCAR-004"}], date(2026, 10, 24)) == []
+
+
+
+def test_round3_metrics():
+    import random
+
+    from cortex_research.governor import metrics as M
+
+    r = random.Random(1)
+    pairs = [(x := r.random(), 1 if r.random() < x else 0) for _ in range(400)]
+    d = M.brier_decomposition(pairs)
+    assert abs(d["reliability"] - d["resolution"] + d["uncertainty"] - d["brier"]) < 0.02
+    rs = [r.gauss(0.2, 1) for _ in range(100)]
+    assert M.deflated_sharpe(rs, 50)["dsr"] < M.deflated_sharpe(rs, 1)["dsr"]
+    assert M.deflated_sharpe(rs[:5], 3) is None
+    good = {"a": [r.gauss(0, 1) for _ in range(160)], "b": [r.gauss(0, 1) for _ in range(160)],
+            "c": [r.gauss(0.4, 1) for _ in range(160)]}
+    assert M.pbo_cscv(good) < 0.2
+    assert M.pbo_cscv({"only": [1.0] * 16}) is None
+    kept = M.purge_overlaps([{"symbol": "X", "ts": 0}, {"symbol": "X", "ts": 3600_000}, {"symbol": "Y", "ts": 1},
+                             {"symbol": "X", "ts": 4 * 86_400_000}])
+    assert [(k["symbol"], k["ts"]) for k in kept] == [("X", 0), ("Y", 1), ("X", 4 * 86_400_000)]
+    ok = M.map_beats_incumbent([(0.9, 0)] * 40, M.calibration_map, [(0.0, 0.0), (1.0, 1.0)])
+    assert ok["ok"] is True  # a map fitted on all-losses beats an identity map that says 0.9
+    assert M.panel_vs_judge([{"panel": [{"stance": "support"}, {"stance": "oppose"}, {"stance": "support"}],
+                              "win_used": 0.4, "r": 1.5}]) == {"n": 1, "panel_hit": 1.0, "judge_hit": 0.0}
+    assert M.slippage_summary([{"slip_bps": 3}, {"slip_bps": -1}, {}])["n"] == 2
+    cost = M.scar_veto_cost([{"id": 1, "stage": "SCAR", "reason_codes": '["SCAR-002: cool down"]'}],
+                            [{"rejection_id": 1, "horizon": "72h", "outcome_r": 1.2}])
+    assert cost == {"SCAR-002": {"n": 1, "avg_r": 1.2}}

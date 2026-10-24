@@ -191,6 +191,7 @@ const BacktestResult = z
     last_third_r: z.number().nullable().optional(),
     status: z.string().optional(),
     lab: z.boolean().optional(),
+    dsr: z.number().min(0).max(1).nullable().optional(),
     verdict: z.enum(["PASS", "UNPROVEN", "LOSES", "TOO FEW TRADES"]),
   })
   .loose();
@@ -198,6 +199,8 @@ export const BacktestPayloadSchema = z.object({
   years: z.number().positive(),
   start: z.string().max(20),
   results: z.record(z.string().max(60), BacktestResult),
+  /** Audit W2-27: probability of backtest overfitting across the lab (CSCV on monthly R). */
+  pbo: z.number().min(0).max(1).nullable().optional(),
   limits: z.string().max(1000),
 });
 

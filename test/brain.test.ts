@@ -292,6 +292,19 @@ describe("Brain pulse (simulated Alpaca)", () => {
     expect(t.brain.slo().outbox_depth).toBeGreaterThanOrEqual(0);
   });
 
+  it("audit W2-30: crowded perp funding halves crypto size; stale or unknown funding changes nothing", () => {
+    expect(t.brain.fundingMultiplier("SOL/USD", T0)).toBe(1);
+    t.sql.exec(
+      "INSERT INTO settings (key, value, updated_at) VALUES ('funding', ?, ?)",
+      JSON.stringify({ at: T0, annualized: { BTC: 0.1, SOL: 0.5 } }),
+      T0,
+    );
+    expect(t.brain.fundingMultiplier("SOL/USD", T0)).toBe(0.5);
+    expect(t.brain.fundingMultiplier("BTC/USD", T0)).toBe(1);
+    expect(t.brain.fundingMultiplier("COIN", T0)).toBe(1);
+    expect(t.brain.fundingMultiplier("SOL/USD", T0 + 13 * HOUR)).toBe(1);
+  });
+
   it("unknown kill state (KV error) blocks entries", async () => {
     const t2 = setup();
     (t2.brain as unknown as { deps: { readKillFlag: () => Promise<boolean> } }).deps.readKillFlag =
