@@ -10,7 +10,7 @@ import { labDoctrine } from "../src/cortex/lab.ts";
 import { buildEvidence } from "../src/court/evidence.ts";
 import { type LlmProvider, LlmRouter } from "../src/court/llm.ts";
 import { NullNotifier } from "../src/discord/notifier.ts";
-import { verifyChain } from "../src/journal/Journal.ts";
+import { Journal, verifyChain } from "../src/journal/Journal.ts";
 import type { AccountId } from "../src/lib/ids.ts";
 import { type ScarTissue, ScarTissueSchema } from "../src/risk/scar.ts";
 import type { Bar } from "../src/strategy/indicators.ts";
@@ -1876,5 +1876,81 @@ describe("Backtest lab report (ADR-046)", () => {
       card?.msg.embeds?.[0]?.description?.indexOf("TREND") ?? 0,
     );
     expect((await t.brain.ingestBatch(batch({ X: { n: 1, verdict: "GREAT" } }))).ok).toBe(false);
+  });
+});
+
+describe("Audit fixes (2026-10-24)", () => {
+  it("a fill that cannot be applied is retried, then quarantined loudly — never silently lost", async () => {
+    const t = setup();
+    await t.brain.pulse(); // baseline the activity cursor
+    t.advance(60_000);
+    const bad = {
+      id: "act-bad",
+      activity_type: "FILL",
+      transaction_time: new Date(T0 + 60_000).toISOString(),
+      type: "fill",
+      price: "not-a-number",
+      qty: "1",
+      side: "buy",
+      symbol: "SOL/USD",
+      order_id: "nope",
+      net_amount: null,
+    };
+    (t.paper as unknown as { acts: unknown[] }).acts.push(bad);
+    const kinds = () =>
+      (t.d1.db.prepare("SELECT kind FROM journal ORDER BY seq").all() as { kind: string }[]).map(
+        (r) => r.kind,
+      );
+    for (let i = 0; i < 2; i++) {
+      t.advance(60_000);
+      await t.brain.pulse();
+      expect(t.sql.exec("SELECT id FROM seen_activities WHERE id = 'act-bad'")).toHaveLength(0);
+    }
+    t.advance(60_000);
+    await t.brain.pulse();
+    expect(kinds()).toContain("ACTIVITY_QUARANTINE");
+    expect(t.sql.exec("SELECT id FROM seen_activities WHERE id = 'act-bad'")).toHaveLength(1);
+  });
+
+  it("outbox: a poison row is quarantined while the healthy rows still reach D1; an outage quarantines nothing", async () => {
+    const sql = memorySql();
+    for (const s of HOT_SCHEMA) sql.exec(s);
+    const j = new Journal(sql);
+    for (let i = 0; i < 5; i++) j.append("SYSTEM", "K", null, { i }, T0);
+    sql.exec("INSERT INTO d1_outbox (tbl, row_json, created_at) VALUES ('nope', '{}', ?)", T0); // not whitelisted
+    const sent: unknown[][] = [];
+    const ok = {
+      prepare: () => ({ bind: () => ({}) }),
+      batch: async (s: unknown[]) => {
+        sent.push(s);
+        return s;
+      },
+    };
+    expect(await j.flush(ok)).toBe(5);
+    expect(j.quarantined()).toBe(1);
+    expect(j.pending()).toBe(1); // the OUTBOX_QUARANTINE journal row itself, queued for the next flush
+
+    const down = {
+      prepare: () => ({ bind: () => ({}) }),
+      batch: async () => Promise.reject(new Error("D1 down")),
+    };
+    for (let i = 0; i < 4; i++) await expect(j.flush(down)).rejects.toThrow("D1 down");
+    expect(j.quarantined()).toBe(1); // nothing new: an outage is not a poison pill
+  });
+
+  it("compacts per-day keys and old contracts but keeps live state", async () => {
+    const t = setup();
+    const old = T0 - 30 * 86_400_000;
+    t.sql.exec(
+      "INSERT INTO settings (key, value, updated_at) VALUES ('count:tier2:2026-09-20', '3', ?)",
+      old,
+    );
+    t.sql.exec("INSERT INTO settings (key, value, updated_at) VALUES ('X:BTC/USD:2026-09-20', 'k', ?)", old);
+    t.sql.exec("INSERT INTO settings (key, value, updated_at) VALUES ('earnings_as_of', '1', ?)", old);
+    (t.brain as unknown as { compactHotState(now: number): void }).compactHotState(T0);
+    const keys = (t.sql.exec("SELECT key FROM settings") as { key: string }[]).map((r) => r.key);
+    expect(keys).not.toContain("count:tier2:2026-09-20");
+    expect(keys).not.toContain("X:BTC/USD:2026-09-20");
+    expect(keys).toContain("earnings_as_of");
   });
 });

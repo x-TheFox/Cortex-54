@@ -36,8 +36,11 @@ const TABLES = {
 } as const;
 export type OutboxTable = keyof typeof TABLES;
 
+/** A bound statement, opaque to the journal. */
+export type D1PreparedLike = unknown;
+
 export interface D1Like {
-  prepare(query: string): { bind(...values: unknown[]): unknown };
+  prepare(query: string): { bind(...values: unknown[]): D1PreparedLike };
   batch(statements: unknown[]): Promise<unknown[]>;
 }
 
@@ -108,39 +111,126 @@ export class Journal {
     return this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM d1_outbox")[0]?.n ?? 0;
   }
 
-  /** Flush up to `max` outbox rows to D1 in one batch. Returns rows written. Throws on D1 failure (rows kept). */
+  /**
+   * Flush up to `max` outbox rows to D1. Returns rows written; throws when nothing could be written (D1 down: rows
+   * kept, the caller alerts).
+   *
+   * Poison-pill quarantine (audit W1-01): one bad row used to fail the whole batch forever and silently stop the
+   * audit trail. A row that cannot even be turned into a statement is quarantined at once. When a batch fails, it is
+   * bisected (≤ 8 extra D1 calls) to find the failing rows; a failing row earns an attempt only when other rows in
+   * the same flush succeeded (so an outage never quarantines good rows), and is moved to `d1_outbox_dead` after 3.
+   * Quarantined journal rows leave a visible gap in the D1 chain, which the Governor's chain check reports — the
+   * row itself stays in the hot dead table for replay.
+   */
   async flush(db: D1Like, max = 40): Promise<number> {
-    const rows = this.sql.exec<{ id: number; tbl: string; row_json: string }>(
-      "SELECT id, tbl, row_json FROM d1_outbox ORDER BY id LIMIT ?",
+    const rows = this.sql.exec<{ id: number; tbl: string; row_json: string; created_at: number }>(
+      "SELECT id, tbl, row_json, created_at FROM d1_outbox ORDER BY id LIMIT ?",
       max,
     );
     if (rows.length === 0) return 0;
-    const statements = rows.map((r) => {
-      const spec = TABLES[r.tbl as OutboxTable];
-      if (!spec) throw new Error(`outbox: table ${r.tbl} not whitelisted`);
-      const obj = JSON.parse(r.row_json) as Record<string, SqlValue>;
-      const cols = Object.keys(obj);
-      for (const c of cols) if (!/^[a-z_0-9]+$/.test(c)) throw new Error(`outbox: bad column ${c}`);
-      const verb =
-        "upsert" in spec && spec.upsert
-          ? "INSERT OR REPLACE"
-          : spec.ignoreDupes
-            ? "INSERT OR IGNORE"
-            : "INSERT";
-      const values = cols.map((c) => obj[c] ?? null);
-      const marks = cols.map(() => "?").join(", ");
-      if ("requires" in spec) {
-        const q = spec.requires;
-        const sql = `${verb} INTO ${r.tbl} (${cols.join(", ")}) SELECT ${marks} WHERE EXISTS (SELECT 1 FROM ${q.table} WHERE ${q.ref} = ?)`;
-        return db.prepare(sql).bind(...values, obj[q.col] ?? null);
+    const now = Date.now();
+    const built: { id: number; stmt: D1PreparedLike }[] = [];
+    for (const r of rows) {
+      try {
+        built.push({ id: r.id, stmt: this.statement(db, r.tbl, r.row_json) });
+      } catch (e) {
+        this.quarantine(r, String(e), now);
       }
-      const sql = `${verb} INTO ${r.tbl} (${cols.join(", ")}) VALUES (${marks})`;
-      return db.prepare(sql).bind(...values);
-    });
-    await db.batch(statements);
-    const last = rows.at(-1)?.id ?? 0;
-    this.sql.exec("DELETE FROM d1_outbox WHERE id <= ?", last);
-    return rows.length;
+    }
+    let written = 0;
+    let calls = 0;
+    const failed: number[] = [];
+    let lastError: unknown = null;
+    const run = async (part: { id: number; stmt: D1PreparedLike }[]): Promise<void> => {
+      if (part.length === 0) return;
+      if (calls >= 9) {
+        for (const x of part) failed.push(x.id);
+        return;
+      }
+      calls++;
+      try {
+        await db.batch(part.map((x) => x.stmt));
+        const ids = part.map((x) => x.id);
+        this.sql.exec(`DELETE FROM d1_outbox WHERE id IN (${ids.map(() => "?").join(", ")})`, ...ids);
+        written += part.length;
+      } catch (e) {
+        lastError = e;
+        if (part.length === 1) {
+          failed.push((part[0] as { id: number }).id);
+          return;
+        }
+        const mid = Math.ceil(part.length / 2);
+        await run(part.slice(0, mid));
+        await run(part.slice(mid));
+      }
+    };
+    await run(built);
+    if (written > 0 && failed.length > 0) {
+      for (const id of failed) {
+        const key = `outbox_fail:${id}`;
+        const n =
+          Number(
+            this.sql.exec<{ value: string }>("SELECT value FROM settings WHERE key = ?", key)[0]?.value ?? 0,
+          ) + 1;
+        this.sql.exec(
+          "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+          key,
+          String(n),
+          now,
+        );
+        const r = rows.find((x) => x.id === id);
+        if (r && n >= 3) this.quarantine(r, String(lastError), now);
+      }
+    }
+    if (written === 0 && failed.length > 0)
+      throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    return written;
+  }
+
+  /** Rows moved aside by the poison-pill guard (for the status view and replay). */
+  quarantined(): number {
+    return this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM d1_outbox_dead")[0]?.n ?? 0;
+  }
+
+  private quarantine(
+    r: { id: number; tbl: string; row_json: string; created_at: number },
+    error: string,
+    now: number,
+  ) {
+    this.sql.exec(
+      "INSERT OR REPLACE INTO d1_outbox_dead (id, tbl, row_json, created_at, error, dead_at) VALUES (?, ?, ?, ?, ?, ?)",
+      r.id,
+      r.tbl,
+      r.row_json,
+      r.created_at,
+      error.slice(0, 500),
+      now,
+    );
+    this.sql.exec("DELETE FROM d1_outbox WHERE id = ?", r.id);
+    this.sql.exec("DELETE FROM settings WHERE key = ?", `outbox_fail:${r.id}`);
+    this.append("SYSTEM", "OUTBOX_QUARANTINE", String(r.id), { tbl: r.tbl, error: error.slice(0, 300) }, now);
+  }
+
+  private statement(db: D1Like, tbl: string, rowJson: string): D1PreparedLike {
+    const spec = TABLES[tbl as OutboxTable];
+    if (!spec) throw new Error(`outbox: table ${tbl} not whitelisted`);
+    const obj = JSON.parse(rowJson) as Record<string, SqlValue>;
+    const cols = Object.keys(obj);
+    for (const c of cols) if (!/^[a-z_0-9]+$/.test(c)) throw new Error(`outbox: bad column ${c}`);
+    const verb =
+      "upsert" in spec && spec.upsert
+        ? "INSERT OR REPLACE"
+        : spec.ignoreDupes
+          ? "INSERT OR IGNORE"
+          : "INSERT";
+    const values = cols.map((c) => obj[c] ?? null);
+    const marks = cols.map(() => "?").join(", ");
+    if ("requires" in spec) {
+      const q = spec.requires;
+      const sql = `${verb} INTO ${tbl} (${cols.join(", ")}) SELECT ${marks} WHERE EXISTS (SELECT 1 FROM ${q.table} WHERE ${q.ref} = ?)`;
+      return db.prepare(sql).bind(...values, obj[q.col] ?? null);
+    }
+    return db.prepare(`${verb} INTO ${tbl} (${cols.join(", ")}) VALUES (${marks})`).bind(...values);
   }
 }
 

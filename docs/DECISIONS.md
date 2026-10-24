@@ -554,3 +554,41 @@ confidence, the robot's entry/stop/target as cyan/red/green lines, and plain-Eng
 **Why not a robot price path:** the robot does not forecast prices; drawing one would invent a number it never used.
 Its honest "view" is the plan and the probability behind it. Synthetic data for `pnpm web:dev` is in `mock-api.ts`.
 
+## ADR-048 — External audit (CORTEX_MASTER_LEDGER), part 1: safety and 3 a.m. fixes (2026-10-24)
+**Context:** The operator supplied a multi-agent audit of the repo ("master ledger": per-file review, a principal
+audit PH4, and ~110 improvement ideas). Every finding below was re-verified against the code before acting; several
+were stale (no backtest engine — ADR-046 since; panel 2/3 seats failing — fixed in ADR-044) or wrong (see below).
+**Fixed (verified bugs):**
+1. CSP had no `font-src`, so `default-src 'none'` blocked the self-hosted B612 fonts in production → `font-src 'self'`.
+2. Fill-loss window: an activity was marked seen *before* `applyFill`; a throw lost the money event. Now applied
+   first, marked seen on success; a failure stops the loop with the cursor before it (retried next pulse), and after 3
+   failures it is journaled `ACTIVITY_QUARANTINE` with an alarm.
+3. Outbox poison pill: one unbuildable or failing row blocked the D1 audit trail forever. Unbuildable rows are
+   quarantined at once (`d1_outbox_dead`, hot schema v6); a failing batch is bisected (≤ 9 D1 calls); a row earns an
+   attempt only when other rows in the same flush succeeded (an outage never quarantines good rows) and is quarantined
+   after 3, journaled `OUTBOX_QUARANTINE`.
+4. Hot-state retention: day/month keys, counters, alert stamps and `court_seen` older than 14 days, failure counters
+   older than 30, hot contracts older than 180 days not referenced by a position or open order, and dead outbox rows
+   older than 90 days are deleted at each day roll (D1 holds the cold copies).
+5. Workers AI calls had no timeout → Clef 45 s, Clairic 20 s (`withTimeout`).
+6. Breaker read a non-positive high-water mark or equity (corrupt data) as a 0% drawdown → now ORANGE (no entries,
+   no flatten). A real 100% drawdown is still RED.
+7. Discord failures were silent → the notifier reports each send; `/health` exposes `discord_fail_streak`; the
+   sentinel alerts through its own webhook at ≥ 5.
+8. Sentinel flatten was fire-once → while the kill flag is set it re-checks the named accounts and re-flattens up to
+   5 times, then escalates every 15 minutes (`KILL DIVERGENCE`).
+9. A failing pulse re-armed at the fastest cadence → exponential backoff to the flat cadence.
+10. Tier 2 / judge (Clef) exceptions dropped an already-dequeued candidate with no record → a rejection row is
+    written (graded later like any refusal).
+11. Web: flatten requires `confirm: FLATTEN` server-side; raising LIVE autonomy or unlocking LIVE is refused from the
+    web (Discord-signed identity only) — a stolen 12 h cookie can no longer give real money autonomy.
+12. Clairic grounding: stated numbers (deal size, quoted move) must appear in the source text and the entity must be
+    named there, else the value is demoted to `uncertain` (the audit's largest unchecked injection surface).
+13. Kronos `max_forecast_age_hours` 3 → 5 (forecasts every 4 h left a dead hour each cycle). CI jobs got timeouts.
+**Rejected after verification:** (a) "heartbeat written at pulse start, so a crash loop looks healthy" — false:
+`last_pulse_at` is written at the end of the pulse (after the flush/HUD), so a crashed pulse does go stale; only the
+error-backoff part was taken. (b) W2-23 "calibration label bug" — the court's win question is *target before stop*,
+so TARGET-only labels match it; relabelling would calibrate a different question. (c) "ci.yml `branches: ain]`" —
+already struck by the audit itself. (d) A per-append journal tail ring (W1-04) — ~+1 DO row write per journal row
+(tens of thousands a day) for a check the Governor already runs daily over D1; not worth the free-tier budget.
+

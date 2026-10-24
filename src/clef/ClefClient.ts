@@ -54,6 +54,24 @@ export interface AiBinding {
   run(model: string, input: unknown): Promise<unknown>;
 }
 
+/**
+ * Reject if `p` has not settled within `ms` (audit 2026-10-24: Workers AI calls had no timeout, so one hung call
+ * could hold the pulse — and the heartbeat — indefinitely). The underlying call is not cancelled, only abandoned.
+ */
+export function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let t: ReturnType<typeof setTimeout> | null = null;
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) => {
+      t = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+    }),
+  ]).finally(() => {
+    if (t !== null) clearTimeout(t);
+  });
+}
+
+export const CLEF_TIMEOUT_MS = 45_000;
+
 /** Thin binding wrapper; validates the response so a format change fails closed. */
 export class WorkersAiClef implements ClefApi {
   constructor(private readonly ai: AiBinding) {}
@@ -61,11 +79,11 @@ export class WorkersAiClef implements ClefApi {
   async run(model: ClefModel, state: unknown, questions: Record<string, ClefQuestion>): Promise<ClefResult> {
     const n = Object.keys(questions).length;
     if (n === 0 || n > CLEF_MAX_QUESTIONS) throw new Error(`clef: ${n} questions (1–${CLEF_MAX_QUESTIONS})`);
-    const raw = await this.ai.run(`@cf/cloudflare/${model}`, {
+    const raw = await withTimeout(
+      this.ai.run(`@cf/cloudflare/${model}`, { model, state, questions }),
+      CLEF_TIMEOUT_MS,
       model,
-      state,
-      questions,
-    });
+    );
     return ClefResultSchema.parse(raw);
   }
 }

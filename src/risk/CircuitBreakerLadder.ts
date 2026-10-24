@@ -33,8 +33,12 @@ export function evaluateBreaker(i: BreakerInput, d: Doctrine): BreakerState {
   if (dailyLoss >= b.red_daily_loss) reasons.push(`daily loss ${(dailyLoss * 100).toFixed(2)}% ≥ red`);
   if (i.stopouts24h >= b.red_consecutive_stopouts_24h) reasons.push(`${i.stopouts24h} stop-outs in 24h`);
 
+  // Fail closed (U6): a non-positive high-water mark or equity is corrupt data, not a 0% drawdown. ORANGE blocks
+  // entries without the flatten-and-lock of RED (audit 2026-10-24: this used to read as GREEN).
+  const corrupt = !(i.hwmCents > 0) || !(i.equityCents > 0);
   let band: Band;
   if (reasons.length > 0) band = "RED";
+  else if (corrupt) band = "ORANGE";
   else if (drawdown >= b.orange_drawdown) band = "ORANGE";
   else if (drawdown >= b.yellow_drawdown) band = "YELLOW";
   else band = "GREEN";

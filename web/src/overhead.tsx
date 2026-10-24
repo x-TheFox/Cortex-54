@@ -50,7 +50,6 @@ function Guarded(props: {
 
 export function AccountPanel({ a, run, busy }: { a: AccountView; run: Run; busy: boolean }) {
   const [pending, setPending] = useState<number | null>(null);
-  const [ratify, setRatify] = useState("");
   const [pm, setPm] = useState("");
   const paused = a.mode === "PAUSED";
   const stops = STOPS[a.account] ?? [];
@@ -97,17 +96,9 @@ export function AccountPanel({ a, run, busy }: { a: AccountView; run: Run; busy:
           Autonomy
         </div>
         {pending !== null && needsRatify && (
-          <Guarded
-            label={`Ratify LIVE stop ${pending}: real money trades on its own`}
-            caption="Ratify"
-            legend="RATIFY"
-            disabled={busy || ratify !== "RATIFY"}
-            onPress={() => {
-              void run("dial", { account: a.account, stop: pending, confirm: ratify });
-              setPending(null);
-              setRatify("");
-            }}
-          />
+          <p className="sub amber" style={{ maxWidth: 260 }}>
+            Real-money autonomy is ratified in Discord only: /dial LIVE {pending} confirm:RATIFY
+          </p>
         )}
         {pending !== null && !needsRatify && (
           <div className="ctl">
@@ -118,7 +109,6 @@ export function AccountPanel({ a, run, busy }: { a: AccountView; run: Run; busy:
               onClick={() => {
                 void run("dial", { account: a.account, stop: pending });
                 setPending(null);
-                setRatify("");
               }}
             >
               <span className="on-cyan">SET</span>
@@ -131,18 +121,10 @@ export function AccountPanel({ a, run, busy }: { a: AccountView; run: Run; busy:
           label={`Flatten ${a.account}`}
           legend="FLAT"
           disabled={!a.configured || busy}
-          onPress={() => void run("flatten", { account: a.account })}
+          onPress={() => void run("flatten", { account: a.account, confirm: "FLATTEN" })}
         />
       </div>
-      {needsRatify && (
-        <input
-          className="field"
-          aria-label="Type RATIFY to let LIVE trade real money"
-          placeholder="Type RATIFY to let LIVE trade real money"
-          value={ratify}
-          onChange={(e) => setRatify(e.target.value.toUpperCase())}
-        />
-      )}
+
       {a.locked && (
         <div className="ovh-row" style={{ alignItems: "stretch" }}>
           <textarea
