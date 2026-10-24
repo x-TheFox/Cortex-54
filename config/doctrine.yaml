@@ -343,7 +343,22 @@ strategies:
   - id: CRYPTO_TREND_V1
     arena: CRYPTO
     status: SHADOW
-    universe: [BTC/USD, ETH/USD, SOL/USD, XRP/USD, LINK/USD, AVAX/USD, DOGE/USD, LTC/USD, BCH/USD, DOT/USD, UNI/USD, AAVE/USD, ADA/USD]
+    universe:
+      [
+        BTC/USD,
+        ETH/USD,
+        SOL/USD,
+        XRP/USD,
+        LINK/USD,
+        AVAX/USD,
+        DOGE/USD,
+        LTC/USD,
+        BCH/USD,
+        DOT/USD,
+        UNI/USD,
+        AAVE/USD,
+        ADA/USD,
+      ]
     params:
       lookbacks: [20, 50, 100] # all three returns positive = time-series up-trend
       ema_fast: 20

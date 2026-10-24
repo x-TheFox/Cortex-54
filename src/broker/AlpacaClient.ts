@@ -259,10 +259,11 @@ export class AlpacaMarketData implements MarketDataApi {
         token ? `${url}&page_token=${encodeURIComponent(token)}` : url,
         Page,
       );
-      for (const [sym, rows] of Object.entries(body.bars ?? {}))
-        (out[sym] ??= []).push(
-          ...rows.map((b) => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })),
-        );
+      for (const [sym, rows] of Object.entries(body.bars ?? {})) {
+        const list = out[sym] ?? [];
+        list.push(...rows.map((b) => ({ t: Date.parse(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v })));
+        out[sym] = list;
+      }
       token = body.next_page_token ?? null;
       if (!token) break;
     }
