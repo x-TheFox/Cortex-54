@@ -3,6 +3,7 @@ import { AlpacaClient, AlpacaMarketData } from "../broker/AlpacaClient.ts";
 import type { BrokerApi } from "../broker/types.ts";
 import { InvocationMeter } from "../budget/FreeTierBudget.ts";
 import { WorkersAiClef } from "../clef/ClefClient.ts";
+import { WorkersAiClairic } from "../clef/clairic.ts";
 import { GeminiProvider, type LlmProvider, LlmRouter, OpenAICompatProvider } from "../court/llm.ts";
 import { DiscordNotifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
 import type { Env } from "../env.ts";
@@ -81,6 +82,7 @@ export class AgentCortexDO extends DurableObject<Env> {
       d1: env.DB,
       readKillFlag: async () => (await env.FLAGS.get("killed")) !== null,
       clef: new WorkersAiClef(env.AI),
+      clairic: new WorkersAiClairic(env.AI),
       llm: new LlmRouter(llmProviders(env), DOCTRINE),
       calibration: CALIBRATION,
       scar: SCAR_TISSUE,

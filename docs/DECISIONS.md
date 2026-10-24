@@ -462,3 +462,17 @@ Orders bound by concentration, cash or heat are never lifted. Otherwise the entr
 The constitution is unchanged; per-trade risk can rise above r_eff up to the rung cap, which is the price of trading
 at all on a $54 account. Revisit when equity grows enough that risk-sized orders clear $10 on their own.
 
+## ADR-043 — Clairic catalyst facts for Tier 2 and the court (2026-10-24)
+**Context:** The operator asked whether Clairic beats Clef or whether both belong in the system. They do different
+jobs: Clef decides among options; Clairic (Cloudflare, preview since 2026-10-19) *extracts* typed values from text with
+a confidence each. Live test on an earnings headline: revenue and EPS surprise correct to 0.01 pp (conf 0.33 / 0.94),
+guidance 2.8 vs 2.87 at conf 0.10, a weekday mis-dated; 676 input tokens ≈ 6 neurons. Jev (TypeSafe) is a decision
+model like Clef, not in our Workers AI catalog and only in paid early access: not used.
+**Decision:** once per promoted candidate (cached in hot KV for 48 h, shared by Tier 2 and the court) Clairic reads the
+catalyst headline + summary against a fixed, versioned field schema (`facts@1`: entity, event type, revenue/EPS
+surprise %, guidance vs consensus %, deal value, stated price move, event date, next-day move estimate). Values with
+confidence ≥ 0.8 become `evidence.facts.values` and `fact_*` receipts; lower ones are listed in `facts.uncertain`;
+the move estimate is labelled LOW confidence. Bull/bear/synth prompts bumped (bull@3, bear@3, synth@3). Budget: its own
+500-neuron slice carved from the reserve, ≤ 60 calls/day. Any failure is cached as "no facts" and never blocks the
+candidate (fail soft: the court simply sees no facts block).
+

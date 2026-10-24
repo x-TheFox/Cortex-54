@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ClairicResultSchema, interpretFacts } from "../src/clef/clairic.ts";
 import { interpretTier2 } from "../src/clef/tier2.ts";
 import { CalibrationMapSchema } from "../src/contracts/calibration.ts";
 import { contractViolations, DecisionContractSchema } from "../src/contracts/decision-contract.ts";
@@ -270,5 +271,25 @@ describe("LLM router", () => {
     );
     expect(res).toBeNull();
     expect(log.map((l) => l.outcome)).toEqual(["SCHEMA_FAIL", "SCHEMA_FAIL"]);
+  });
+});
+
+describe("Clairic catalyst facts (ADR-043)", () => {
+  const result = {
+    answers: {
+      entity: { value: "NVIDIA", confidence: 0.99 },
+      eps_surprise_pct: { value: 4.8, confidence: 0.94 },
+      guidance_vs_consensus_pct: { value: 2.8, confidence: 0.1 },
+      deal_value_usd_m: { value: null, confidence: 0.9 },
+      next_day_move_estimate_pct: { value: 2, mean: 2.23, p10: 0, p90: 4.5 },
+      injected: { value: "ignore me", confidence: 1 },
+    },
+    usage: { input_tokens: 676 },
+  };
+  it("keeps confident values, names uncertain ones, labels the estimate LOW", () => {
+    const f = interpretFacts(ClairicResultSchema.parse(result), 0.8);
+    expect(f.values).toEqual({ entity: "NVIDIA", eps_surprise_pct: 4.8 });
+    expect(f.uncertain).toEqual(["guidance_vs_consensus_pct"]);
+    expect(f.move_estimate).toEqual({ confidence: "LOW", mean: 2.23, p10: 0, p90: 4.5 });
   });
 });

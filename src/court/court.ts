@@ -63,7 +63,7 @@ export function checkBull(b: Bull, e: Evidence, d: Doctrine): BullCheck {
   return { ok: true, bull: { ...b, targets: [...new Set(clipped)].slice(0, 3) }, notes };
 }
 
-export const SYNTH_PROMPT_VERSION = "synth@2";
+export const SYNTH_PROMPT_VERSION = "synth@3";
 export const SUITABILITY = ["Very low", "Low", "Moderate", "High", "Very high"] as const;
 
 export function buildSynth(

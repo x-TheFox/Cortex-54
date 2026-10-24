@@ -19,6 +19,7 @@ export type DailyResource =
   | "neurons_tier1"
   | "neurons_tier2"
   | "neurons_tier3_fallback"
+  | "neurons_clairic"
   | "neurons_reserve";
 
 export const DO_MEMORY_GB = 0.125; // 128 MB billing unit
@@ -40,6 +41,8 @@ export class FreeTierBudget {
         return n.tier2;
       case "neurons_tier3_fallback":
         return n.tier3_fallback;
+      case "neurons_clairic":
+        return n.clairic;
       case "neurons_reserve":
         return n.reserve;
       default:
@@ -77,7 +80,7 @@ export class FreeTierBudget {
 
   /** True when a neuron spend fits the tier's allocation (Phase 3 callers). */
   canSpendNeurons(
-    tier: "neurons_tier1" | "neurons_tier2" | "neurons_tier3_fallback",
+    tier: "neurons_tier1" | "neurons_tier2" | "neurons_tier3_fallback" | "neurons_clairic",
     neurons: number,
     now: number,
   ): boolean {

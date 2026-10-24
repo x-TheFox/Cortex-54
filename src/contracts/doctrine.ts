@@ -94,6 +94,13 @@ export const DoctrineSchema = z.object({
       pass_threshold: Fraction,
       max_per_day: z.number().int().nonnegative(),
     }),
+    /** ADR-043: Clairic catalyst fact extraction (once per promoted candidate, cached for Tier 2 and the court). */
+    facts: z.object({
+      enabled: z.boolean(),
+      min_confidence: Fraction,
+      max_per_day: z.number().int().nonnegative(),
+      min_chars: z.number().int().nonnegative(),
+    }),
     tier3: z.object({
       max_sprints_per_day: z.number().int().nonnegative(),
       min_structural_score: z.number().min(0).max(100),
@@ -112,6 +119,7 @@ export const DoctrineSchema = z.object({
       tier1: z.number().nonnegative(),
       tier2: z.number().nonnegative(),
       tier3_fallback: z.number().nonnegative(),
+      clairic: z.number().nonnegative().default(0),
       reserve: z.number().nonnegative(),
     }),
     neurons_per_mtok: z.record(z.string(), z.number().positive()),
@@ -202,7 +210,7 @@ export function doctrineViolations(d: Doctrine, c: Constitution): string[] {
     v.push("budgets.thrift_fraction must be < hard_stop_fraction");
 
   const n = d.budgets.workers_ai_neurons_per_day;
-  if (n.tier1 + n.tier2 + n.tier3_fallback + n.reserve > n.total_free)
+  if (n.tier1 + n.tier2 + n.tier3_fallback + n.clairic + n.reserve > n.total_free)
     v.push("neuron allocations exceed total_free");
 
   const live = d.accounts.LIVE;
