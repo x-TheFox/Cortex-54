@@ -181,7 +181,9 @@ def grade_rejections(rejections: list[dict], graded: set[tuple[int, str]], contr
 
 
 def calibration_pairs(trades: list[dict], rejections: list[dict], grades: list[dict], contracts: dict[str, dict]) -> list[tuple[float, int]]:
-    pairs = [(t["win_prob_raw"], 1 if t["reason"] == "TARGET" else 0) for t in trades if t["origin"] == "COURT" and t["win_prob_raw"] is not None]
+    """(raw court win prob, target-before-stop) pairs in time order, purged of overlapping holds (audit W2-24)."""
+    items = [{"p": t["win_prob_raw"], "y": 1 if t["reason"] == "TARGET" else 0, "ts": t["ts"], "symbol": t["symbol"]}
+             for t in trades if t["origin"] == "COURT" and t["win_prob_raw"] is not None]
     by_rej = {(g["rejection_id"], g["horizon"]): g for g in grades}
     for rj in rejections:
         k = contracts.get(rj.get("contract_id") or "")
@@ -190,8 +192,8 @@ def calibration_pairs(trades: list[dict], rejections: list[dict], grades: list[d
         g = by_rej.get((rj["id"], "72h"))
         p = ((jload(k.get("clef_probabilities"), {}) or {}).get("raw") or {}).get("win_prob")
         if g and g["hit"] in ("TARGET", "STOP") and p is not None:
-            pairs.append((float(p), 1 if g["hit"] == "TARGET" else 0))
-    return pairs
+            items.append({"p": float(p), "y": 1 if g["hit"] == "TARGET" else 0, "ts": rj["ts"], "symbol": rj.get("symbol")})
+    return [(it["p"], it["y"]) for it in M.purge_overlaps(items)]
 
 
 def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict], brier_value: float | None, n_pairs: int, now: int) -> list[dict]:
@@ -303,12 +305,14 @@ def main() -> int:
         if e["kind"] == "CLOSE" and e.get("r") is not None:
             by_strat[e["strategy"]].append(float(e["r"]))
     stats = {s: M.strategy_stats(rs) for s, rs in by_strat.items()}
+    dsr = {s: M.deflated_sharpe(rs, max(1, len(by_strat))) for s, rs in by_strat.items()}  # audit W2-28
     adj = M.bh_fdr({s: (st["p_value"] if st["n"] >= 10 else None) for s, st in stats.items()})
     week = iso_week(now)
     fitness = [
         {"skill_id": s, "week": week, "signals": st["n"], "expectancy_r": st["expectancy_r"], "brier": None,
          "p_value": st["p_value"], "p_value_bh": adj.get(s),
-         "status": "INSUFFICIENT" if st["n"] < 10 else ("PROMOTE?" if (adj.get(s) or 1) < 0.05 and (st["expectancy_r"] or 0) > 0 else "HOLD")}
+         "status": "INSUFFICIENT" if st["n"] < 10 else ("PROMOTE?" if (adj.get(s) or 1) < 0.05 and (st["expectancy_r"] or 0) > 0
+                                                          and ((dsr.get(s) or {}).get("dsr") or 0) >= 0.95 else "HOLD")}
         for s, st in stats.items()
     ]
 
@@ -364,6 +368,17 @@ def main() -> int:
         scar_path.write_text(header + yaml.safe_dump(scar_doc, sort_keys=False, allow_unicode=True))
         print(f"scar-tissue.yaml: proposed {len(new_scars)} rule(s)")
 
+    dec = M.brier_decomposition(pairs)  # audit W2-21
+    court_rows = []
+    r_by_contract = {t["contract_id"]: t["r"] for t in trades}
+    for r in journal:
+        if r["kind"] == "COURT":
+            p = jload(r["payload_json"], {}) or {}
+            court_rows.append({"panel": p.get("panel") or [], "win_used": p.get("win_used", p.get("win_cal")),
+                               "r": r_by_contract.get(r.get("ref_id"))})
+    pvj = M.panel_vs_judge(court_rows)  # audit W2-01
+    slip = M.slippage_summary([jload(r["payload_json"], {}) or {} for r in journal if r["kind"] == "FILL"])  # W2-36
+    scar_cost = M.scar_veto_cost(rejections, graded_rows + new_grades)  # audit W2-14
     sections = [
         {"name": "Trades", "value": f"{len(trades)} closed · " + (", ".join(f"{s}: n={st['n']} E[R]={st['expectancy_r']} PF={st['profit_factor']}" for s, st in stats.items()) or "none yet")},
         {"name": "Options shadow lab", "value": options_summary(options)},
@@ -373,7 +388,13 @@ def main() -> int:
         {"name": "Funnel", "value": f"Tier 1 items {sum(len(jload(x['candidate_ids'], [])) for x in t1)} · Tier 2 {len(t2)} · court sessions {sum(1 for r in journal if r['kind'] == 'COURT')} · contracts {len(contracts)}"},
         {"name": "LLM providers (ok/fail)", "value": "; ".join(f"{k} {v[0]}/{v[1]}" for k, v in sorted(llm_ok.items())) or "no calls yet"},
         {"name": "Shadow ledger (72h, new grades)", "value": "; ".join(f"{s}: n={len(v)} avg R {sum(v) / len(v):+.2f}" for s, v in ledger.items()) or f"{len(new_grades)} new grade(s); none at 72h yet"},
-        {"name": "Calibration (court win prob)", "value": f"{len(pairs)} pair(s) · Brier {b_raw if b_raw is None else round(b_raw, 4)} · map needs {MIN_OUTCOMES_FOR_MAP}"},
+        {"name": "Calibration (court win prob)", "value": f"{len(pairs)} pair(s) after purging overlaps · Brier {b_raw if b_raw is None else round(b_raw, 4)}"
+                                                         + (f" = reliability {dec['reliability']} − resolution {dec['resolution']} + uncertainty {dec['uncertainty']}" if dec else "")
+                                                         + f" · map needs {MIN_OUTCOMES_FOR_MAP}"},
+        {"name": "Panel vs judge (ADR-044 kill check)", "value": (f"n={pvj['n']}: panel majority right {pvj['panel_hit']:.0%}, judge right {pvj['judge_hit']:.0%}" if pvj["n"] else "no graded court trades yet")},
+        {"name": "Realized slippage", "value": (f"{slip['n']} fills · mean {slip['mean_bps']} bps · p90 {slip['p90_bps']} · worst {slip['worst_bps']}" if slip["n"] else "no fills with an order price yet")},
+        {"name": "Scar vetoes (72h)", "value": "; ".join(f"{k}: n={v['n']} avg R {v['avg_r']:+.2f}" for k, v in scar_cost.items()) or "no graded vetoes"},
+        {"name": "Deflated Sharpe", "value": "; ".join(f"{s}: DSR {d['dsr']}" for s, d in dsr.items() if d) or "needs ≥ 10 trades per strategy"},
         {"name": "LIVE gate", "value": "\n".join(f"{'✅' if g['status'] == 'PASS' else '❌' if g['status'] == 'FAIL' else '⏳' if g['status'] == 'WAIT' else '•'} {g['criterion']}: {g['value']}" for g in gate)[:1000]},
     ]
     sections = [{"name": x["name"][:100], "value": (x["value"] or "—")[:1000]} for x in sections]
@@ -385,6 +406,10 @@ def main() -> int:
         method, pts = M.calibration_map(pairs)
         cal_path = REPO / "config" / "calibration.json"
         cal = json.loads(cal_path.read_text())
+        incumbent = (cal.get("maps", {}).get("court.win_prob") or {}).get("points")
+        check = M.map_beats_incumbent(pairs, M.calibration_map, [tuple(x) for x in incumbent] if incumbent else None)
+        print(f"calibration acceptance: {check}")
+    if a.weekly and len(pairs) >= MIN_OUTCOMES_FOR_MAP and check["ok"]:
         cal["maps"]["court.win_prob"] = {
             "n": len(pairs), "method": method, "points": [[x, y] for x, y in pts], "brier_raw": round(b_raw or 0, 4),
             "brier_calibrated": round(M.brier([(M.apply_map(pts, x), o) for x, o in pairs]) or 0, 4),

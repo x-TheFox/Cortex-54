@@ -16,6 +16,8 @@ DAY = 86_400_000
 REP_WINDOW_DAYS = 30
 REP_SHRINK = 20  # weight moves toward 1 + 0.5·E[R] as n/(n+20)
 W_MIN, W_MAX = 0.5, 1.2  # mirrors doctrine sizing.reputation_weight
+# audit W2-17: what a symbol did lately goes stale faster than how a strategy behaves in an arena
+HALF_LIFE = {"sym": 30, "strat": 60}
 
 
 def _j(s, default):
@@ -69,10 +71,20 @@ def beliefs(trades: list[dict], now: int, min_n: int = 3) -> list[dict]:
             "belief_id": f"{kind}:{subject}:{extra}"[:120], "subject": subject[:40],
             "tags": [x for x in (extra, kind) if x][:10],
             "statement": f"{label}: {n} closed trades in 30 days, {wins} winners, E[R] {e:+.2f}."[:300],
-            "c0": round(min(0.9, n / (n + 5)), 3), "half_life_days": 60, "validated_at": now, "validations": n,
-            "status": "ACTIVE", "evidence": [t["contract_id"] for t in ts][:50],
+            "c0": round(min(0.9, n / (n + 5)), 3), "half_life_days": HALF_LIFE[kind], "validated_at": now,
+            "validations": n, "status": "ACTIVE", "evidence": [t["contract_id"] for t in ts][:50],
         })
-    return out
+    # audit W2-11: a belief built from exactly the same trades as an earlier one says nothing new; the court's
+    # memory window holds 3, so duplicates would crowd out real information.
+    seen: set[frozenset[str]] = set()
+    kept = []
+    for b in out:
+        key = frozenset(b["evidence"])
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(b)
+    return kept
 
 
 def _same(expr_a: dict, expr_b: dict) -> bool:

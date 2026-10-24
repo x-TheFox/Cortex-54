@@ -46,3 +46,18 @@ def test_scar_proposals_cite_evidence_and_dedupe():
     again = MEM.scar_proposals(trades, facts, props, today)
     assert again == []
     assert MEM.scar_proposals(trades[:2], facts, [], today) == []
+
+
+
+def test_beliefs_use_per_kind_half_lives_and_drop_duplicates():
+    from cortex_research.governor.memory import beliefs
+
+    now = 100 * 86_400_000
+    ts = [{"contract_id": f"c{i}", "symbol": "SOL/USD", "arena": "CRYPTO", "strategy_id": "S1", "r": 1.0, "ts": now - 1}
+          for i in range(3)]
+    out = beliefs(ts, now)
+    assert len(out) == 1  # the symbol and strategy groups hold the same three trades
+    assert out[0]["half_life_days"] in (30, 60)
+    ts.append({"contract_id": "x", "symbol": "ETH/USD", "arena": "CRYPTO", "strategy_id": "S1", "r": -1.0, "ts": now - 1})
+    hl = {b["belief_id"].split(":")[0]: b["half_life_days"] for b in beliefs(ts, now)}
+    assert hl == {"sym": 30, "strat": 60}

@@ -43,6 +43,10 @@ export const DoctrineSchema = z.object({
     recovery_pulses: z.number().int().min(1).max(60).default(3),
   }),
   sizing: z.object({
+    /** Audit W2-30: crowded perp funding shrinks crypto entries (shrink-only; absent = off). */
+    funding_shrink: z
+      .object({ above_annualized: z.number().positive().max(10), multiplier: z.number().gt(0).max(1) })
+      .optional(),
     min_stop_atr_multiple: z.number().positive(),
     bear_disagreement: z.object({ floor: Fraction, max_penalty: Fraction }),
     reputation_weight: z.object({

@@ -1841,16 +1841,26 @@ ${postmortem}`,
     const num = (x: number | null | undefined, f: (v: number) => string) =>
       x === null || x === undefined ? "—" : f(x);
     const line = ([id, s]: [string, Res]) =>
-      `${mark[s.verdict] ?? "•"} \`${id}\` **${s.verdict}** · ${s.n} trades · win ${num(s.win_rate, (v) => `${Math.round(v * 100)}%`)} · ${num(s.expectancy_r, (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}R`)}/trade · PF ${num(s.profit_factor, (v) => v.toFixed(2))} · q ${num(s.q_value, (v) => v.toFixed(3))} · latest third ${num(s.last_third_r, (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}R`)}${s.lab ? " · 🧪 LAB" : ""}`;
+      `${mark[s.verdict] ?? "•"} \`${id}\` **${s.verdict}** · ${s.n} trades · win ${num(s.win_rate, (v) => `${Math.round(v * 100)}%`)} · ${num(s.expectancy_r, (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}R`)}/trade · PF ${num(s.profit_factor, (v) => v.toFixed(2))} · q ${num(s.q_value, (v) => v.toFixed(3))} · latest third ${num(s.last_third_r, (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}R`)} · DSR ${num(s.dsr, (v) => v.toFixed(2))}${s.lab ? " · 🧪 LAB" : ""}`;
     await this.deps.notifier.post("governor", {
       embeds: [
         {
           title: `🧪 Backtest lab — ${r.data.years} years, fees and slippage included`,
           description: rows.map(line).join("\n").slice(0, 3900),
           color: COLORS.cyan,
-          fields: [{ name: "Limits", value: r.data.limits.slice(0, 1000) }],
+          fields: [
+            ...(r.data.pbo === null || r.data.pbo === undefined
+              ? []
+              : [
+                  {
+                    name: "Overfitting check (PBO)",
+                    value: `${Math.round(r.data.pbo * 100)}% chance the in-sample winner is below median out of sample${r.data.pbo >= 0.5 ? " — treat every PASS with suspicion" : ""}`,
+                  },
+                ]),
+            { name: "Limits", value: r.data.limits.slice(0, 1000) },
+          ],
           footer: {
-            text: "PASS = positive edge that survives the BH-FDR correction and holds in the latest third",
+            text: "PASS = positive edge that survives BH-FDR, holds in the latest third, and has a deflated Sharpe ≥ 0.95",
           },
         },
       ],
@@ -2410,9 +2420,30 @@ ${postmortem}`,
   private regimeContext(now: number): Record<string, unknown> {
     const c = this.freshRegime("CRYPTO", now);
     const e = this.freshRegime("EQUITIES", now);
+    const kv = (k: string) => {
+      try {
+        const v = JSON.parse(getKV(this.sql, k) ?? "null") as { at: number } & Record<string, unknown>;
+        return v && now - v.at <= 12 * 3_600_000 ? v : null;
+      } catch {
+        return null;
+      }
+    };
+    const funding = kv("funding");
+    const hmm = kv("hmm:BTC/USD");
     return {
       crypto: c ? { posture: c.posture, score: c.score } : "stale/unknown",
       equities: e ? { posture: e.posture, score: e.score, ceiling: e.ceiling } : "stale/unknown",
+      // audit W2-30: perp funding, annualized (crowding when beyond ±35%; code halves crypto size there)
+      perp_funding_annualized: funding?.annualized ?? null,
+      // audit W2-29: LOW-confidence 2-state volatility model on BTC daily returns
+      btc_volatility_regime: hmm
+        ? {
+            confidence: "LOW",
+            p_high_volatility_state: hmm.p_high_vol_now,
+            persistence_high: hmm.persist_high,
+            daily_vol_low_vs_high: [hmm.vol_low_daily, hmm.vol_high_daily],
+          }
+        : null,
     };
   }
 
@@ -3453,6 +3484,17 @@ ${postmortem}`,
       await this.flushJournal();
       return { ok: true, message: `queued ${queued} world-intel candidate(s)` };
     }
+    // Audit W2-30 / W2-29: keep perp funding and the volatility-regime read for sizing and court context.
+    const fund = b.items.find((x) => x.skill_id === "crypto-funding-liquidation-scanner")?.payload as
+      | { annualized?: Record<string, number> }
+      | undefined;
+    if (fund?.annualized && Object.values(fund.annualized).every((v) => Number.isFinite(v)))
+      setKV(this.sql, "funding", JSON.stringify({ at: b.produced_at, annualized: fund.annualized }), now);
+    const hmm = b.items.find((x) => x.skill_id === "hmm-regime")?.payload as
+      | Record<string, unknown>
+      | undefined;
+    if (hmm && typeof hmm.p_high_vol_now === "number")
+      setKV(this.sql, "hmm:BTC/USD", JSON.stringify({ at: b.produced_at, ...hmm }), now);
     const prev = one<{ posture: string; score: number | null }>(
       this.sql,
       "SELECT posture, score FROM regime_state WHERE arena = ?",
@@ -3913,7 +3955,10 @@ ${postmortem}`,
         },
         asset,
         reputationWeight: repWeight,
-        regimeMultiplier: exception ? lane.size_multiplier : 1,
+        regimeMultiplier: Math.min(
+          exception ? lane.size_multiplier : 1,
+          this.fundingMultiplier(contract.symbol, now),
+        ),
         now,
       },
       this.d,
@@ -4606,6 +4651,28 @@ ${postmortem}`,
       court_waiting:
         one<{ n: number }>(this.sql, "SELECT COUNT(*) AS n FROM court_waits WHERE until_at > ?", now)?.n ?? 0,
     };
+  }
+
+  /**
+   * Audit W2-30: crowded perpetual funding (|annualized| beyond the doctrine threshold) halves crypto entry size.
+   * Shrink-only and computed in code, so models still never size (U2). Unknown or stale funding = no change.
+   */
+  fundingMultiplier(symbol: string, now: number): number {
+    const f = this.d.sizing.funding_shrink;
+    if (!f || !symbol.includes("/")) return 1;
+    try {
+      const v = JSON.parse(getKV(this.sql, "funding") ?? "null") as {
+        at: number;
+        annualized: Record<string, number>;
+      } | null;
+      if (!v || now - v.at > 12 * 3_600_000) return 1;
+      const base = symbol.split("/")[0] ?? "";
+      const own = v.annualized[base];
+      const rate = own ?? Math.max(...Object.values(v.annualized).map(Math.abs));
+      return Number.isFinite(rate) && Math.abs(rate) >= f.above_annualized ? f.multiplier : 1;
+    } catch {
+      return 1;
+    }
   }
 
   /** Audit W3-02: count a fail-open branch that fired (a guard that could not decide), per site per day. */

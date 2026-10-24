@@ -114,6 +114,18 @@ def crypto_job(out: Path, version: str) -> dict:
         P.item("crypto-regime-analyzer", version, t, raw, summary),
         P.item("crypto-funding-liquidation-scanner", "okx-v1", t, P.dumps(funding).encode(), funding),
     ]
+    try:  # audit W2-29: 2-state volatility regime on BTC daily returns (context only)
+        import numpy as np
+
+        from .hmm import fit_hmm
+        from .kronos_forecast import crypto_bars
+
+        closes = np.array([b["c"] for b in crypto_bars(["BTC/USD"], "1Day", 400).get("BTC/USD", [])], dtype=float)
+        hmm = fit_hmm(np.diff(np.log(closes))) if len(closes) > 1 else None
+        if hmm:
+            items.append(P.item("hmm-regime", "hmm-v1", t, P.dumps(hmm).encode(), {"symbol": "BTC/USD", **hmm}))
+    except Exception as e:  # noqa: BLE001 - optional context never drops the regime batch
+        print(f"hmm regime unavailable: {e}", file=sys.stderr)
     return P.batch("crypto-regime", t, run_url(), items, P.crypto_posture(summary, funding))
 
 

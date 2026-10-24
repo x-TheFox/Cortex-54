@@ -69,3 +69,18 @@ def test_doctrine_stock_forecast_params_fit_the_kronos_context():
     doc = yaml.safe_load((Path(__file__).resolve().parents[2] / "config" / "doctrine.yaml").read_text())
     p = next(s for s in doc["strategies"] if s["id"] == "CRYPTO_KRONOS_FORECAST_V1")["params"]
     assert 120 <= p["equity_lookback_days"] <= 512 and 1 <= p["equity_horizon_days"] <= 10
+
+
+def test_hmm_finds_the_high_volatility_regime():
+    import numpy as np
+
+    from cortex_research.hmm import fit_hmm
+
+    rng = np.random.default_rng(54)
+    calm = rng.normal(0, 0.01, 200)
+    wild = rng.normal(0, 0.05, 60)
+    out = fit_hmm(np.concatenate([calm, wild]))
+    assert out is not None and out["p_high_vol_now"] > 0.8 and out["vol_high_daily"] > 3 * out["vol_low_daily"]
+    out2 = fit_hmm(np.concatenate([wild, calm]))
+    assert out2["p_high_vol_now"] < 0.2
+    assert fit_hmm(calm[:50]) is None

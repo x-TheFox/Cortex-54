@@ -353,7 +353,15 @@ def backtest_job(doctrine_path: Path, now_ms: int, run_url: str | None) -> dict:
 
     results = {sid: score(ts) for sid, ts in trades.items()}
     adj = M.bh_fdr({sid: r.get("p_value") for sid, r in results.items()})
+    # audit W2-28: deflate each Sharpe by how many strategies were tried; W2-27: PBO across the lab on a monthly
+    # calendar (does the in-sample winner keep winning out of sample?)
+    n_trials = max(1, len(results))
+    months = sorted({str(t)[:7] for ts in trades.values() for t, _ in ts})
+    monthly = {sid: [sum(r for t, r in ts if str(t)[:7] == m) for m in months] for sid, ts in trades.items()}
+    pbo = M.pbo_cscv(monthly)
     for sid, r in results.items():
+        d_ = M.deflated_sharpe([x for _, x in sorted(trades[sid])], n_trials)
+        r["dsr"] = d_["dsr"] if d_ else None
         r["q_value"] = adj.get(sid)
         r["status"] = st[sid]["status"]
         r["lab"] = sid in (d.get("lab") or {}).get("strategies", [])
@@ -363,6 +371,7 @@ def backtest_job(doctrine_path: Path, now_ms: int, run_url: str | None) -> dict:
         "start": start[:10],
         "fees_per_side": FEE,
         "results": results,
+        "pbo": pbo,
         "limits": "daily bars, pessimistic stop-first fills, taker fees, each strategy alone, results in R; "
         "inverse-ETF regime approximated by the underlying below its 50-day average",
     }
@@ -371,13 +380,15 @@ def backtest_job(doctrine_path: Path, now_ms: int, run_url: str | None) -> dict:
 
 
 def verdict(r: dict) -> str:
-    """Plain-language call. PASS needs a positive edge that survives the multiple-testing correction and holds up
-    in the last third of the sample."""
+    """Plain-language call. PASS needs a positive edge that survives the multiple-testing correction, holds up in the
+    last third of the sample, and has a deflated Sharpe ≥ 0.95."""
     n, e, q, late = r.get("n", 0), r.get("expectancy_r"), r.get("q_value"), r.get("last_third_r")
+    dsr = r.get("dsr")
     if n < 20:
         return "TOO FEW TRADES"
     if e is None or e <= 0:
         return "LOSES"
-    if q is not None and q < 0.1 and late is not None and late > 0:
+    # audit W2-28: also the deflated Sharpe — the edge must beat the best of n_trials lucky strategies
+    if q is not None and q < 0.1 and late is not None and late > 0 and (dsr is None or dsr >= 0.95):
         return "PASS"
     return "UNPROVEN"
