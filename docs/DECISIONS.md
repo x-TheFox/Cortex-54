@@ -666,3 +666,46 @@ days ahead, with the same ATR stop/target maths, volatility rescaling and fan ch
 picker is split into Crypto and Stocks. Stock forecasts are panel and court context only (LOW confidence, ADR-041):
 `CRYPTO_KRONOS_FORECAST_V1` still trades its crypto universe and nothing else. Cost: ~1–2 extra minutes of free CPU
 per run (2 steps per stock).
+
+## ADR-053 — Audit ideas, round 1: runtime, operations, operator controls (2026-10-24)
+**Context:** the operator asked for every idea in the audit ledger to be considered, not only the bugs.
+`docs/AUDIT_IDEAS.md` gives all 121 a verdict (Build / Done / Later with a trigger / No with a reason). This round
+builds the runtime and operations ones.
+**Built:**
+- **Journal:** the outbox flush is single-flight (W1-06). On boot, an empty hot journal head adopts D1's head instead
+  of colliding with it forever (W1-03, journaled `REANCHOR`).
+- **Kill switch:** the kill flag is scoped per account (W1-09). A LIVE-only kill (daily loss) no longer stops PAPER
+  or the research bed. Unknown payloads still mean "kill everything". `KILL_SEEN` records scope, reason and the
+  sentinel's kill id (W1-22, W3-26).
+- **Liveness:** the sentinel checks that the next alarm is armed (W1-14). A restored alarm is journaled
+  `ALARM_LOST` and counted (W1-15). One structured Workers Logs line per pulse (W1-23).
+- **Invariant monitor (W1-39):** every `/health` read runs six SQL checks of the constitution:
+  - an order without a contract, or a position without a stop;
+  - stale risk reservations;
+  - entry orders on a RED-locked account;
+  - LIVE autonomy without a ratification on record;
+  - a stuck outbox.
+
+  The sentinel alerts through its own webhook. `/health.slo` shows pulse age, outbox depth, budget (actual and
+  projected), lost alarms, per-stage failures today and cases waiting for research (W1-13, W1-32).
+- **Budget projection (W1-16):** a burst that would exhaust a write or duration budget before midnight goes THRIFT
+  early. A projection never forces REDUCE_ONLY.
+- **Subrequest meter (W1-18):** an RPC arriving mid-pulse no longer resets the pulse's budget.
+- **Cron matcher (W1-19):** per-field bounds; restricted day-of-month and day-of-week OR together (Vixie/GitHub
+  semantics). Pinned by a 1,000-case property test against a brute-force reference.
+- **Dispatch receipts (W1-07):** a dispatched job whose batch never arrives is journaled `DISPATCH_STALE` and
+  alerted once.
+- **Deploy lag (W1-08):** batches carry the hash of `main`'s doctrine. A mismatch with the running brain for over
+  2 h alerts `DEPLOY LAGGING`. Found while building this: CI's deploy step skips silently because there is no
+  `CLOUDFLARE_API_TOKEN` GitHub secret, so deploys run from the operator's machine (RUNBOOK).
+- **Tier 1 (W1-20):** an item Clef fails on three times is retired with a rejection row.
+- **Operator controls:**
+  - the destructive `/admin/reset` route refuses a replayed signed request (W1-25);
+  - web logout revokes the session server-side for commands (W1-26);
+  - Discord `/unlock` enforces the 50-character postmortem in the form (W3-21);
+  - raising LIVE autonomy takes two RATIFYs 10 min – 24 h apart (W3-24);
+  - the web terminal ignores stale out-of-order replies (W3-27).
+- **Drift tests (`test/docs.test.ts`):** every optional secret is in `.dev.vars.example` and every binding is typed
+  (W1-30); the sentinel's vendored `verify.ts` equals the brain's (W1-31); retired doc claims stay retired, CLAUDE.md
+  names the latest ADR, and ADR headings are numbered and dated (W1-36, W3-31). The schema comment claiming per-pulse
+  journal verification was corrected.

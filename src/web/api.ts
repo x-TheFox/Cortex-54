@@ -29,21 +29,21 @@ export interface WebBrain extends OperatorBrain {
   equity(days: number): Promise<unknown>;
   forecast(symbol: string): Promise<unknown>;
   consumeOnce(id: string): Promise<boolean>;
+  /** Audit W1-26: true once the session's nonce was revoked by /api/logout. */
+  isRevoked(id: string): Promise<boolean>;
 }
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
 
-async function session(request: Request, env: WebEnv): Promise<boolean> {
+async function session(request: Request, env: WebEnv): Promise<{ n: string } | null> {
   const secret = env.WEB_SESSION_SECRET;
-  if (!secret) return false;
-  return (
-    (await verifyToken(
-      secret,
-      cookieValue(request.headers.get("cookie"), SESSION_COOKIE),
-      "session",
-      Date.now(),
-    )) !== null
+  if (!secret) return null;
+  return verifyToken(
+    secret,
+    cookieValue(request.headers.get("cookie"), SESSION_COOKIE),
+    "session",
+    Date.now(),
   );
 }
 
@@ -73,10 +73,14 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
     return json({ ok: true }, 200, { "set-cookie": sessionCookie(token, SESSION_TTL_MS / 1000) });
   }
   if (request.method === "POST" && path === "/api/logout") {
+    // Audit W1-26: revoke the session server-side too, so a copied cookie stops working for commands.
+    const p = await session(request, env);
+    if (p) await b.consumeOnce(`revoked:${p.n}`);
     return json({ ok: true }, 200, { "set-cookie": sessionCookie("", 0) });
   }
 
-  if (!(await session(request, env))) return json({ error: "sign in with /terminal in Discord" }, 401);
+  const sess = await session(request, env);
+  if (!sess) return json({ error: "sign in with /terminal in Discord" }, 401);
 
   if (request.method === "GET") {
     switch (path) {
@@ -130,6 +134,8 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
   if (request.method === "POST" && path === "/api/command") {
     if (request.headers.get("x-cortex-web") !== "1")
       return json({ error: "missing x-cortex-web header" }, 400);
+    if (await b.isRevoked(`revoked:${sess.n}`))
+      return json({ error: "signed out; use /terminal again" }, 401);
     const body = (await request.json().catch(() => ({}))) as { name?: string } & Record<string, unknown>;
     // Server-side guards (audit 2026-10-24): a stolen 12 h cookie must not be able to flatten in one POST or give
     // real money autonomy. Flatten needs an explicit confirmation; LIVE autonomy and LIVE unlocks need Discord,

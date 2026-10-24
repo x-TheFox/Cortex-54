@@ -15,7 +15,12 @@ GEMINI_API_KEY=
 GROQ_API_KEY=
 NVIDIA_API_KEY=
 OPENROUTER_API_KEY=
-INGEST_HMAC_SECRET=
+# LAB brain (ADR-045): a second paper account
+ALPACA_LAB_KEY_ID=
+ALPACA_LAB_SECRET=
+# Brain-dispatched GitHub workflows (ADR-032) and the web terminal (ADR-034)
+GH_DISPATCH_TOKEN=
+WEB_SESSION_SECRET=
 # Research job keys (GitHub Actions secrets; locally for dry runs)
 FMP_API_KEY=
 FRED_API_KEY=

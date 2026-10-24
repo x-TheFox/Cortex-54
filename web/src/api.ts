@@ -157,18 +157,21 @@ export function useResource<T>(path: string | null, pollMs = 0): Resource<T> {
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const alive = useRef(true);
+  /** Audit W3-27: only the newest request may update state (a slow old response must not overwrite a newer one). */
+  const latest = useRef(0);
 
   const load = useCallback(async () => {
     if (path === null) return;
+    const mine = ++latest.current;
     try {
       const d = await api<T>(path);
-      if (!alive.current) return;
+      if (!alive.current || mine !== latest.current) return;
       setData(d);
       setError(null);
       setSignedOut(false);
       setUpdatedAt(Date.now());
     } catch (e) {
-      if (!alive.current) return;
+      if (!alive.current || mine !== latest.current) return;
       if (e instanceof SignedOut) setSignedOut(true);
       else setError(e instanceof Error ? e.message : String(e));
     } finally {

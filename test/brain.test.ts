@@ -3,7 +3,14 @@ import type { ClefAnswer, ClefApi, ClefQuestion, ClefResult } from "../src/clef/
 import type { ClairicApi } from "../src/clef/clairic.ts";
 import type { DecisionContract } from "../src/contracts/decision-contract.ts";
 import type { Doctrine } from "../src/contracts/doctrine.ts";
-import { Brain, courtSessionCard, equityChartUrl, terminalLine } from "../src/cortex/Brain.ts";
+import {
+  Brain,
+  courtSessionCard,
+  equityChartUrl,
+  type KillFlag,
+  parseKillFlag,
+  terminalLine,
+} from "../src/cortex/Brain.ts";
 import type { WorkflowDispatcher } from "../src/cortex/dispatch.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
 import { labDoctrine } from "../src/cortex/lab.ts";
@@ -66,7 +73,7 @@ function setup(
   for (const s of HOT_SCHEMA) sql.exec(s);
   const d1 = memoryD1();
   const notifier = new NullNotifier();
-  const kill = { on: opts.killed ?? false };
+  const kill: { on: KillFlag } = { on: opts.killed ?? false };
   const brokers: Partial<Record<AccountId, FakeBroker>> = { PAPER: paper };
   if (opts.live) brokers.LIVE = live;
   const brain = new Brain({
@@ -230,6 +237,59 @@ describe("Brain pulse (simulated Alpaca)", () => {
     expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'KILL_CLEARED'").get()).toEqual({
       n: 1,
     });
+  });
+
+  it("audit W1-09: a kill that names only LIVE leaves PAPER trading; one naming PAPER stops it", async () => {
+    breakout(t);
+    t.kill.on = { accounts: ["LIVE"], reason: "LIVE daily loss" };
+    const r = await t.brain.pulse();
+    expect(r.kill).toBe("CLEAR");
+    expect([...t.paper.orders.values()].some((o) => o.side === "buy" && o.status !== "canceled")).toBe(true);
+    t.kill.on = { accounts: ["PAPER"] };
+    t.advance(HOUR);
+    expect((await t.brain.pulse()).kill).toBe("KILLED");
+    expect(
+      [...t.paper.orders.values()].filter((o) => o.side === "buy").every((o) => o.status === "canceled"),
+    ).toBe(true);
+  });
+
+  it("audit W1-09: kill payloads parse fail-closed", () => {
+    expect(parseKillFlag(null)).toBe(false);
+    expect(parseKillFlag("1")).toBe(true);
+    expect(parseKillFlag("{not json")).toBe(true);
+    expect(parseKillFlag(JSON.stringify({ accounts: [] }))).toBe(true);
+    expect(parseKillFlag(JSON.stringify({ at: 5, by: "s", reason: "r", accounts: ["LIVE"] }))).toEqual({
+      accounts: ["LIVE"],
+      id: "5",
+      reason: "r",
+    });
+  });
+
+  it("audit W3-24: LIVE autonomy needs two RATIFYs 10 min – 24 h apart", async () => {
+    const u = setup({ live: true });
+    expect(u.brain.setDial("LIVE", 3, "op", true)).toMatch(/RATIFY recorded/);
+    expect(u.brain.status().accounts.find((a) => a.account === "LIVE")?.autonomyStop).toBe(0);
+    u.advance(5 * 60_000);
+    expect(u.brain.setDial("LIVE", 3, "op", true)).toMatch(/Cooling off/);
+    u.advance(6 * 60_000);
+    expect(u.brain.setDial("LIVE", 3, "op", true)).toMatch(/Stop 3/);
+    expect(u.brain.status().accounts.find((a) => a.account === "LIVE")?.autonomyStop).toBe(3);
+    expect(u.brain.policyViolations()).toEqual({});
+  });
+
+  it("audit W1-39: the invariant monitor flags a position without a stop and an orphan order", async () => {
+    expect(t.brain.policyViolations()).toEqual({});
+    t.sql.exec(
+      `INSERT INTO positions (account, symbol, arena, contract_id, qty, avg_entry, stop_price, target_price, fee_rt,
+         opened_at, max_hold_until) VALUES ('PAPER','SOL/USD','CRYPTO','c1','1','100','0','110',0.004,0,0)`,
+    );
+    t.sql.exec(
+      `INSERT INTO orders (client_order_id, account, contract_id, role, attempt, state, side, symbol, arena,
+         order_type, tif, qty, created_at, updated_at) VALUES ('x','PAPER','ghost','ENTRY',1,'new','buy','SOL/USD',
+         'CRYPTO','limit','gtc','1',0,0)`,
+    );
+    expect(t.brain.policyViolations()).toEqual({ order_without_contract: 1, position_without_stop: 1 });
+    expect(t.brain.slo().outbox_depth).toBeGreaterThanOrEqual(0);
   });
 
   it("unknown kill state (KV error) blocks entries", async () => {
@@ -1391,6 +1451,40 @@ describe("batch dispatcher (ADR-032)", () => {
     expect(
       t.notifier.sent.filter((m) => m.msg.content?.includes("batch dispatch failed")).length,
     ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("audit W1-07: a dispatched job whose batch never arrives is reported once", async () => {
+    const dispatcher: WorkflowDispatcher = { async dispatch() {} };
+    const t = setup({ dispatcher });
+    t.advance(37 * 60_000 + 30_000); // 12:37:30 → the Kronos slot
+    await t.brain.pulse();
+    t.advance(95 * 60_000);
+    await t.brain.pulse();
+    t.advance(5 * 60_000);
+    await t.brain.pulse();
+    const stale = t.notifier.sent.filter((m) => m.msg.content?.includes("research job `kronos`"));
+    expect(stale).toHaveLength(1);
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'DISPATCH_STALE'").get()).toEqual({
+      n: 1,
+    });
+  });
+
+  it("audit W1-08: main's doctrine differing from the running one for > 2 h raises DEPLOY LAGGING", async () => {
+    const t = setup();
+    t.brain.init({ test: true, doctrine_sha256: "a".repeat(64) });
+    const batch = (sha: string) => ({
+      schema_version: 1,
+      job: "world-intel",
+      produced_at: T0,
+      run_url: null,
+      items: [{ skill_id: "x", version: "1", as_of: T0, inputs_sha256: "c".repeat(64), payload: {} }],
+      posture: null,
+      doctrine_sha256: sha,
+    });
+    await t.brain.ingestBatch(batch("b".repeat(64)));
+    t.advance(3 * HOUR);
+    await t.brain.ingestBatch({ ...batch("b".repeat(64)), produced_at: T0 + 3 * HOUR });
+    expect(t.notifier.sent.some((m) => m.msg.content?.includes("DEPLOY LAGGING"))).toBe(true);
   });
 });
 

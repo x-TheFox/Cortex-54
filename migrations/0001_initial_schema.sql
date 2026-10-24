@@ -6,7 +6,7 @@
 -- ---------------------------------------------------------------------------
 -- Hash-chained master journal (APPEND-ONLY)
 -- row_sha256 = SHA256(prev_row_sha256 || '|' || seq || '|' || ts || '|' || kind || '|' || payload_json)
--- computed by the writer (src/journal); verified on every pulse for the last N rows and fully weekly.
+-- computed by the writer (src/journal); verified daily over D1 by the Governor (ADR-030, ADR-048).
 -- ---------------------------------------------------------------------------
 CREATE TABLE journal (
   seq              INTEGER PRIMARY KEY,           -- strictly increasing, assigned by the DO
