@@ -476,3 +476,25 @@ the move estimate is labelled LOW confidence. Bull/bear/synth prompts bumped (bu
 500-neuron slice carved from the reserve, ≤ 60 calls/day. Any failure is cached as "no facts" and never blocks the
 candidate (fail soft: the court simply sees no facts block).
 
+## ADR-044 — The court becomes a full hearing: rebuttal, expert panel, and a six-part Discord transcript (2026-10-24)
+**Context:** The operator asked for more models in the court ("a lot of people debating it out") and a transcript on
+Discord that reads as well thought out. The court was bull → bear → Clef judge, posted as one dense embed.
+**Decision:**
+1. **Rebuttal.** After the bear, the bull's own model answers point by point, may concede points, may only lower its
+   conviction, and may withdraw — withdrawal ends the session (stage REBUTTAL, graded like any refusal). The
+   contract uses the revised conviction.
+2. **Expert panel.** Three seats in parallel — Quant Analyst (arithmetic, reward:risk, fee hurdle, facts), Risk Manager
+   (liquidity, event and correlation risk, scar lessons), Macro Strategist (regime, world pulse, priced-in) — each
+   giving stance, confidence and up to three points. Seats rotate through `llm_routing.panel.chain` so they start on
+   different models, with a 25 s cap per call (advisory seats are dropped, never waited on).
+3. The panel and rebuttal are **advisory**: they reach the decision only through the Clef synth's state (synth@4 is
+   told to weigh arguments by evidence, not headcount). Probabilities still come from Clef → calibration; size from the
+   sizer (U2 unchanged).
+4. **Transcript.** One message, six embeds: docket (catalyst, market, Clairic facts, Kronos view), opening statement,
+   cross-examination, rebuttal, expert panel tally, ruling (Clef bars + the risk engine's judgment). Trimmed
+   longest-field-first under Discord's 6,000-character limit.
+**Live check (2026-10-24, `pnpm court:smoke --post`, never trades):** Nemotron returned no JSON, DeepSeek timed out at
+60 s and Qwen failed Groq's JSON validation, so the panel chain is gpt-oss-120b → gpt-oss-20b → Gemini 3.5 Flash. The
+re-run on ETH took 48 s: bull (Gemini), bear (gpt-oss-120b), rebuttal conceding two points, panel 1 for / 2 against,
+Clef P(win) 14% → no trade.
+

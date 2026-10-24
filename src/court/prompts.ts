@@ -77,3 +77,80 @@ export const BEAR_SCHEMA = {
   },
   required: ["fatal_flaws", "kill_criteria", "lethality", "brief"],
 } as const;
+
+// ---- ADR-044: rebuttal and expert panel ---------------------------------------------------------------------------
+
+export const REBUTTAL_PROMPT_VERSION = "rebuttal@1";
+export const PANEL_PROMPT_VERSION = "panel@1";
+
+export const REBUTTAL_SYSTEM = `You are the Bull Advocate again. The Bear Prosecutor has attacked your long thesis.
+Answer each fatal flaw honestly: refute it with evidence ids, or concede it. Conceding is not weakness; holding a bad
+trade is. If the bear is right, withdraw (still_long=false).
+${RULES}
+- rebuttal: a tight point-by-point answer, ≤900 characters, citing evidence ids in [brackets].
+- concessions: the bear points you accept as true (may be empty).
+- revised_conviction: 1–10 after hearing the bear; it may only stay the same or go down.`;
+
+export const REBUTTAL_SCHEMA = {
+  type: "object",
+  properties: {
+    rebuttal: { type: "string" },
+    concessions: { type: "array", items: { type: "string" } },
+    still_long: { type: "boolean" },
+    revised_conviction: { type: "integer" },
+  },
+  required: ["rebuttal", "concessions", "still_long", "revised_conviction"],
+} as const;
+
+export interface PanelSeat {
+  id: "quant" | "risk" | "macro";
+  title: string;
+  emoji: string;
+  brief: string;
+}
+
+export const PANEL_SEATS: readonly PanelSeat[] = [
+  {
+    id: "quant",
+    title: "Quant Analyst",
+    emoji: "📐",
+    brief: `Check the arithmetic and the setup: reward-to-risk from entry/stop/targets, the target as a multiple of
+atr14 for the horizon, distance from ema20 and the 20-day range, RSI, and whether the expected move clears ~3× round-trip
+fees (crypto ~0.4–0.5%, equities ~0.1%). Use evidence.facts values when present.`,
+  },
+  {
+    id: "risk",
+    title: "Risk Manager",
+    emoji: "🛡️",
+    brief: `Judge what can go wrong for a $54 account: gap and liquidity risk (spread_bps), event risk inside the
+horizon, correlation with portfolio.held, scar-tissue lessons in evidence.memory, and whether the stop is where the
+thesis is actually wrong. You never size; say only whether the risk is acceptable.`,
+  },
+  {
+    id: "macro",
+    title: "Macro Strategist",
+    emoji: "🌍",
+    brief: `Place the trade in context: evidence.regime (crypto composite / equity posture), evidence.world (risk
+pulse), the catalyst's real importance versus noise, and whether the market has already priced it in.`,
+  },
+];
+
+export function panelSystem(seat: PanelSeat): string {
+  return `You are the ${seat.title} on a trading court's expert panel. You have read the bull's thesis, the bear's
+attack and the bull's rebuttal. Give your own independent view of the long.
+${RULES}
+${seat.brief}
+- stance: support, oppose or abstain. confidence: 0–1 in your stance.
+- headline: one sentence, ≤160 characters. points: 1–3 concrete points (≤240 characters each) citing evidence ids.`;
+}
+
+export const PANEL_SCHEMA = {
+  type: "object",
+  properties: {
+    stance: { type: "string", enum: ["support", "oppose", "abstain"] },
+    confidence: { type: "number" },
+    headline: { type: "string" },
+    points: { type: "array", items: { type: "string" } },
+  },
+  required: ["stance", "confidence", "headline", "points"],
+} as const;

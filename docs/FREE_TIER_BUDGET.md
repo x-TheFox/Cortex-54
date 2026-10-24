@@ -77,7 +77,9 @@ cut Kronos to every 8 h first.
 | Mistral | ~$10/month credits | optional fallback | opt out of training |
 | Workers AI gpt-oss-120b | neurons | emergency fallback | same family as Groq gpt-oss → only valid as bull fallback |
 
-Court quota: doctrine caps Tier 3 sprints at 12/day (≤36 LLM calls). Far below every provider's RPD.
+Court quota: doctrine caps Tier 3 sprints at 12/day. ADR-044 makes a hearing ~6 LLM calls (bull, bear, rebuttal,
+3 panel seats; more on retries) → ≤ ~100 calls/day, still far below every provider's RPD. A live hearing took ~48 s of
+wall time (≈ 6 GB-s of DO duration; ≤ 75 GB-s/day at 12 hearings).
 Cross-family rule is enforced by `doctrine.llm_routing.families`; if no different-family bear is
 available, the sprint is **rejected**, not run single-family.
 

@@ -19,6 +19,9 @@ import {
   calibrate,
   checkBull,
   interpretSynth,
+  PanelOpinionSchema,
+  RebuttalSchema,
+  type SeatOpinion,
 } from "../src/court/court.ts";
 import { buildEvidence, evidenceForModels } from "../src/court/evidence.ts";
 import {
@@ -28,7 +31,17 @@ import {
   LlmRouter,
   OpenAICompatProvider,
 } from "../src/court/llm.ts";
-import { BEAR_SCHEMA, BEAR_SYSTEM, BULL_SCHEMA, BULL_SYSTEM } from "../src/court/prompts.ts";
+import {
+  BEAR_SCHEMA,
+  BEAR_SYSTEM,
+  BULL_SCHEMA,
+  BULL_SYSTEM,
+  PANEL_SCHEMA,
+  PANEL_SEATS,
+  panelSystem,
+  REBUTTAL_SCHEMA,
+  REBUTTAL_SYSTEM,
+} from "../src/court/prompts.ts";
 
 const env = process.env;
 const d = DoctrineSchema.parse(parse(readFileSync("config/doctrine.yaml", "utf8")));
@@ -127,6 +140,55 @@ console.log(
   bear.value.fatal_flaws.join(" / ").slice(0, 200),
 );
 
+// ADR-044: rebuttal, then the expert panel in parallel
+const reb = await router.run(
+  [{ provider: bull.provider, model: bull.model }, ...d.llm_routing.bull_chain],
+  {
+    system: REBUTTAL_SYSTEM,
+    user: `Evidence JSON:\n${evJson}\n\nYour brief JSON:\n${JSON.stringify(checked.bull)}\n\nBear attack JSON:\n${JSON.stringify(bear.value)}`,
+    maxOutputTokens: 1200,
+    schema: REBUTTAL_SCHEMA as unknown as Record<string, unknown>,
+  },
+  (j) => RebuttalSchema.parse(j),
+  [bear.family],
+  log("REBUTTAL"),
+);
+const rebuttal = reb
+  ? { ...reb.value, revised_conviction: Math.min(reb.value.revised_conviction, checked.bull.conviction) }
+  : null;
+console.log(
+  "rebuttal:",
+  rebuttal ? `${rebuttal.still_long ? "holds" : "WITHDRAWS"} conv ${rebuttal.revised_conviction}` : "none",
+);
+const pc = d.llm_routing.panel;
+const panel = (
+  await Promise.all(
+    pc.seats.map(async (id, i) => {
+      const seat = PANEL_SEATS.find((s) => s.id === id);
+      if (!seat) return null;
+      const chain = [...pc.chain.slice(i), ...pc.chain.slice(0, i)];
+      const req = {
+        system: panelSystem(seat),
+        user: `Evidence JSON:\n${evJson}\n\nBull brief:\n${JSON.stringify(checked.bull)}\n\nBear attack:\n${JSON.stringify(bear.value)}${rebuttal ? `\n\nBull rebuttal:\n${JSON.stringify(rebuttal)}` : ""}`,
+        maxOutputTokens: 800,
+        schema: PANEL_SCHEMA as unknown as Record<string, unknown>,
+      };
+      const parse = (j: unknown) => PanelOpinionSchema.parse(j);
+      const r = await router.run(chain, req, parse, [], log(id.toUpperCase()), pc.timeout_ms);
+      return r
+        ? ({
+            ...r.value,
+            seat: id,
+            title: seat.title,
+            emoji: seat.emoji,
+            by: `${r.provider}/${r.model}`,
+          } as SeatOpinion)
+        : null;
+    }),
+  )
+).filter((x): x is SeatOpinion => x !== null);
+for (const p of panel) console.log(`panel ${p.title}: ${p.stance} ${p.confidence} — ${p.headline}`);
+
 const clef: ClefApi = {
   async run(model, state, questions: Record<string, ClefQuestion>) {
     const r = await fetch(
@@ -142,7 +204,7 @@ const clef: ClefApi = {
     return ClefResultSchema.parse(j.result);
   },
 };
-const sReq = buildSynth(e, checked.bull, bear.value);
+const sReq = buildSynth(e, checked.bull, bear.value, { rebuttal, panel });
 const sRes = await clef.run("clef", sReq.state, sReq.questions);
 const synth = interpretSynth(sRes);
 console.log("synth:", JSON.stringify(synth), "tokens", sRes.usage.input_tokens);
@@ -180,6 +242,10 @@ if (process.argv.includes("--post") && env.DISCORD_BOT_TOKEN && env.DISCORD_CHAN
     atr: e.technicals.atr14,
     bull: { ...checked.bull, by: `${bull.provider}/${bull.model}` },
     bear: { ...bear.value, by: `${bear.provider}/${bear.model}` },
+    ...(rebuttal && reb ? { rebuttal: { ...rebuttal, by: `${reb.provider}/${reb.model}` } } : {}),
+    panel,
+    facts: e.facts?.values ?? null,
+    kronos: e.forecast?.view ?? null,
     synth: { ...synth, calibrated: calibrate(synth.winProb, 0, d) },
     verdict: `🧪 Smoke test from the dev machine — not routed to any account. Contract ${parsed.success ? "valid" : "INVALID"}.`,
     ok: false,

@@ -46,6 +46,10 @@ import {
   calibrate,
   checkBull,
   interpretSynth,
+  PanelOpinionSchema,
+  type Rebuttal,
+  RebuttalSchema,
+  type SeatOpinion,
 } from "../court/court.ts";
 import { buildEvidence, type Evidence, evidenceForModels, resolveTradeable } from "../court/evidence.ts";
 import type { HopAttempt, LlmRouter } from "../court/llm.ts";
@@ -56,6 +60,13 @@ import {
   BULL_PROMPT_VERSION,
   BULL_SCHEMA,
   BULL_SYSTEM,
+  PANEL_PROMPT_VERSION,
+  PANEL_SCHEMA,
+  PANEL_SEATS,
+  panelSystem,
+  REBUTTAL_PROMPT_VERSION,
+  REBUTTAL_SCHEMA,
+  REBUTTAL_SYSTEM,
 } from "../court/prompts.ts";
 import { COLORS, type DiscordMessage, type Notifier } from "../discord/notifier.ts";
 import { type D1Like, Journal } from "../journal/Journal.ts";
@@ -2249,6 +2260,8 @@ ${postmortem}`,
       catalyst: e.catalyst,
       bid: e.quote.bid,
       atr: e.technicals.atr14,
+      facts: e.facts?.values ?? null,
+      kronos: e.forecast?.view ?? null,
     };
     const close = async (verdict: string, ok: boolean) => {
       session.verdict = verdict;
@@ -2300,7 +2313,73 @@ ${postmortem}`,
     }
     session.bear = { ...bear.value, by: `${bear.provider}/${bear.model}` };
 
-    const synthReq = buildSynth(e, checked.bull, bear.value);
+    // ADR-044: the bull answers the bear (withdrawing ends the session), then the expert panel weighs in.
+    const panelCfg = this.d.llm_routing.panel;
+    let rebuttal: Rebuttal | null = null;
+    if (panelCfg.rebuttal) {
+      const r = await llm.run(
+        [{ provider: bull.provider, model: bull.model }, ...this.d.llm_routing.bull_chain],
+        {
+          system: REBUTTAL_SYSTEM,
+          user: `Evidence JSON:\n${evidenceJson}\n\nYour brief JSON:\n${JSON.stringify(checked.bull)}\n\nBear attack JSON:\n${JSON.stringify(bear.value)}`,
+          maxOutputTokens: 1200,
+          schema: REBUTTAL_SCHEMA as unknown as Record<string, unknown>,
+        },
+        (j) => RebuttalSchema.parse(j),
+        this.d.llm_routing.require_cross_family ? [bear.family] : [],
+        (a) => this.logLlm(sprintId, "REBUTTAL", REBUTTAL_PROMPT_VERSION, a, this.deps.now()),
+      );
+      if (r) {
+        rebuttal = {
+          ...r.value,
+          revised_conviction: Math.min(r.value.revised_conviction, checked.bull.conviction),
+        };
+        session.rebuttal = { ...rebuttal, by: `${r.provider}/${r.model}` };
+        if (!rebuttal.still_long) {
+          this.rejectCandidate(
+            cand,
+            "REBUTTAL",
+            ["bull withdrew after the bear's attack"],
+            { ...checked.bull },
+            now,
+          );
+          await close("🏳️ The bull withdrew after cross-examination — no trade", false);
+          return 0;
+        }
+      }
+    }
+    const panel = (
+      await Promise.all(
+        panelCfg.seats.map(async (id, i) => {
+          const seat = PANEL_SEATS.find((s) => s.id === id);
+          if (!seat || panelCfg.chain.length === 0) return null;
+          // rotate the chain so seats spread across providers; prefer families not yet heard, else any
+          const chain = [...panelCfg.chain.slice(i), ...panelCfg.chain.slice(0, i)];
+          const req = {
+            system: panelSystem(seat),
+            user: `Evidence JSON:\n${evidenceJson}\n\nBull brief:\n${JSON.stringify(checked.bull)}\n\nBear attack:\n${JSON.stringify(bear.value)}${rebuttal ? `\n\nBull rebuttal:\n${JSON.stringify(rebuttal)}` : ""}`,
+            maxOutputTokens: 800,
+            schema: PANEL_SCHEMA as unknown as Record<string, unknown>,
+          };
+          const log = (a: HopAttempt) =>
+            this.logLlm(sprintId, `PANEL_${id.toUpperCase()}`, PANEL_PROMPT_VERSION, a, this.deps.now());
+          const parse = (j: unknown) => PanelOpinionSchema.parse(j);
+          const r = await llm.run(chain, req, parse, [], log, panelCfg.timeout_ms);
+          return r
+            ? ({
+                ...r.value,
+                seat: id,
+                title: seat.title,
+                emoji: seat.emoji,
+                by: `${r.provider}/${r.model}`,
+              } as SeatOpinion)
+            : null;
+        }),
+      )
+    ).filter((x): x is SeatOpinion => x !== null);
+    session.panel = panel;
+
+    const synthReq = buildSynth(e, checked.bull, bear.value, { rebuttal, panel });
     const est = estimateTokens(synthReq.state, synthReq.questions);
     if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) {
       this.rejectCandidate(
@@ -2336,7 +2415,7 @@ ${postmortem}`,
       contractId: uuidv7(now),
       now,
       evidence: e,
-      bull: checked.bull,
+      bull: rebuttal ? { ...checked.bull, conviction: rebuttal.revised_conviction } : checked.bull,
       bear: bear.value,
       synth,
       calibratedWin: calibrated,
@@ -3921,17 +4000,29 @@ export interface CourtSession {
   catalyst: { headline: string; source: string; url: string | null; kind: string };
   bid: number;
   atr: number;
+  facts?: Record<string, string | number> | null;
+  kronos?: string | null;
   bull?: {
     thesis: string;
+    setup?: string;
     entry_low: number;
     entry_high: number;
     stop: number;
     targets: number[];
     conviction: number;
     horizon_hours: number;
+    receipts?: string[];
     by: string;
   };
-  bear?: { fatal_flaws: string[]; kill_criteria: string[]; lethality: number; by: string };
+  bear?: { fatal_flaws: string[]; kill_criteria: string[]; lethality: number; brief?: string; by: string };
+  rebuttal?: {
+    rebuttal: string;
+    concessions: string[];
+    still_long: boolean;
+    revised_conviction: number;
+    by: string;
+  };
+  panel?: SeatOpinion[];
   synth?: {
     winProb: number;
     calibrated: number;
@@ -3946,51 +4037,189 @@ export interface CourtSession {
 
 const bar = (p: number) =>
   `${"█".repeat(Math.round(p * 10))}${"░".repeat(10 - Math.round(p * 10))} ${(p * 100).toFixed(0)}%`;
+const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+const model = (by: string) => `\`${by.split("/").slice(1).join("/") || by}\``;
+const STANCE: Record<string, string> = { support: "🟢 SUPPORT", oppose: "🔴 OPPOSE", abstain: "⚪ ABSTAIN" };
 
-/** #bull-vs-bear-court card: every court session, traded or not. */
+/**
+ * #bull-vs-bear-court transcript (ADR-044): one message, one embed per stage of the hearing — the docket, the bull's
+ * opening, the bear's cross-examination, the bull's rebuttal, the expert panel and the ruling. Kept under Discord's
+ * 6,000-character message limit by trimming the longest fields first.
+ */
 export function courtSessionCard(s: CourtSession): DiscordMessage {
-  const fields: { name: string; value: string; inline?: boolean }[] = [
+  type Field = { name: string; value: string; inline?: boolean };
+  type E = {
+    title: string;
+    description?: string;
+    color: number;
+    fields?: Field[];
+    footer?: { text: string };
+  };
+  const embeds: E[] = [];
+  const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+
+  const docket: Field[] = [
     {
-      name: "📰 Catalyst",
-      value: `${s.catalyst.headline.slice(0, 250)}${s.catalyst.url ? `\n${s.catalyst.url}` : ""}\n_${s.catalyst.kind} · ${s.catalyst.source}_`,
+      name: "Market",
+      value: `bid **${s.bid}**\nATR14 ${s.atr.toPrecision(4)} (${pct(s.atr / s.bid)})`,
+      inline: true,
     },
+    { name: "Source", value: `${s.catalyst.kind} · ${cut(s.catalyst.source, 40)}`, inline: true },
   ];
+  const facts = Object.entries(s.facts ?? {});
+  if (facts.length > 0)
+    docket.push({
+      name: "🔎 Facts on the record (Clairic)",
+      value: facts.map(([k, v]) => `\`${k}\` ${v}`).join(" · "),
+    });
+  if (s.kronos) docket.push({ name: "🔮 Kronos (low confidence)", value: cut(s.kronos, 300) });
+  embeds.push({
+    title: `⚖️ CORTEX COURT — ${s.symbol} (${s.arena})`,
+    description: `**Matter before the court**\n> ${cut(s.catalyst.headline, 300)}${s.catalyst.url ? `\n[source](${s.catalyst.url})` : ""}`,
+    color: COLORS.cyan,
+    fields: docket,
+  });
+
   if (s.bull) {
-    fields.push({
-      name: `🐂 Bull · ${s.bull.by}`,
-      value: `${s.bull.thesis.slice(0, 400)}\nEntry ${s.bull.entry_low}–${s.bull.entry_high} · stop ${s.bull.stop} · targets ${s.bull.targets.join(" / ")} · ${s.bull.horizon_hours}h · conviction ${s.bull.conviction}/10`,
+    const b = s.bull;
+    const rr = (b.targets[0] ?? b.entry_high) - b.entry_high;
+    const risk = b.entry_low - b.stop;
+    embeds.push({
+      title: `🐂 Opening statement — Bull Advocate`,
+      description: cut(b.thesis, 700),
+      color: COLORS.green,
+      fields: [
+        {
+          name: "Proposed trade",
+          value: `entry ${b.entry_low}–${b.entry_high}\nstop ${b.stop}\ntargets ${b.targets.join(" / ")}`,
+          inline: true,
+        },
+        {
+          name: "Terms",
+          value: `${b.setup ?? "—"} · ${b.horizon_hours}h\nreward:risk ${risk > 0 ? (rr / risk).toFixed(2) : "—"}\nconviction ${b.conviction}/10`,
+          inline: true,
+        },
+        ...(b.receipts?.length
+          ? [{ name: "Exhibits", value: cut(b.receipts.map((r) => `\`${r}\``).join(" "), 300) }]
+          : []),
+      ],
+      footer: { text: `argued by ${b.by}` },
     });
   }
   if (s.bear) {
-    fields.push({
-      name: `🐻 Bear · ${s.bear.by} · lethality ${(s.bear.lethality * 100).toFixed(0)}%`,
-      value: `${s.bear.fatal_flaws
-        .slice(0, 3)
-        .map((f) => `• ${f.slice(0, 180)}`)
-        .join("\n")}\nKill: ${s.bear.kill_criteria.slice(0, 2).join("; ").slice(0, 300)}`,
+    embeds.push({
+      title: `🐻 Cross-examination — Bear Prosecutor · lethality ${(s.bear.lethality * 100).toFixed(0)}%`,
+      description: s.bear.fatal_flaws
+        .slice(0, 4)
+        .map((f, i) => `**${i + 1}.** ${cut(f, 260)}`)
+        .join("\n"),
+      color: COLORS.red,
+      fields: [
+        {
+          name: "The bull is wrong if…",
+          value: cut(
+            s.bear.kill_criteria
+              .slice(0, 3)
+              .map((k) => `• ${k}`)
+              .join("\n"),
+            600,
+          ),
+        },
+      ],
+      footer: { text: `prosecuted by ${s.bear.by}` },
     });
   }
-  if (s.synth) {
-    fields.push({
-      name: "⚖️ Clef 27B verdict",
+  if (s.rebuttal) {
+    const r = s.rebuttal;
+    embeds.push({
+      title: `🐂 Rebuttal — ${r.still_long ? "the bull stands firm" : "the bull withdraws"}`,
+      description: cut(r.rebuttal, 900),
+      color: r.still_long ? COLORS.green : COLORS.orange,
+      fields: [
+        ...(r.concessions.length
+          ? [
+              {
+                name: "Conceded",
+                value: cut(
+                  r.concessions
+                    .slice(0, 3)
+                    .map((c) => `• ${c}`)
+                    .join("\n"),
+                  500,
+                ),
+              },
+            ]
+          : []),
+        {
+          name: "Conviction after cross",
+          value: `${s.bull?.conviction ?? "?"} → **${r.revised_conviction}**/10`,
+          inline: true,
+        },
+      ],
+      footer: { text: `answered by ${r.by}` },
+    });
+  }
+  if (s.panel && s.panel.length > 0) {
+    const tally = (k: string) => s.panel?.filter((p) => p.stance === k).length ?? 0;
+    embeds.push({
+      title: `🎓 Expert panel — ${tally("support")} for · ${tally("oppose")} against · ${tally("abstain")} abstain`,
+      color: COLORS.yellow,
+      fields: s.panel.map((p) => ({
+        name: `${p.emoji} ${p.title} — ${STANCE[p.stance] ?? p.stance} (${(p.confidence * 100).toFixed(0)}%)`,
+        value: cut(`*${p.headline}*\n${p.points.map((x) => `• ${x}`).join("\n")}\n— ${model(p.by)}`, 1000),
+      })),
+    });
+  }
+  const ruling: Field[] = [];
+  if (s.synth)
+    ruling.push({
+      name: "Clef 27B, presiding",
       value: [
-        `P(win) raw   \`${bar(s.synth.winProb)}\``,
-        `P(win) calib \`${bar(s.synth.calibrated)}\``,
-        `Bear right   \`${bar(s.synth.bearLethality)}\``,
-        `Regime fit   \`${bar(s.synth.regimeFit)}\``,
-        `Suitability  \`${bar(s.synth.suitability100 / 100)}\``,
+        `\`P(win) raw   ${bar(s.synth.winProb)}\``,
+        `\`P(win) calib ${bar(s.synth.calibrated)}\``,
+        `\`Bear right   ${bar(s.synth.bearLethality)}\``,
+        `\`Regime fit   ${bar(s.synth.regimeFit)}\``,
+        `\`Suitability  ${bar(s.synth.suitability100 / 100)}\``,
       ].join("\n"),
     });
+  ruling.push({ name: "Judgment of the risk engine", value: cut(s.verdict ?? "—", 1000) });
+  embeds.push({
+    title: s.ok ? "🔨 RULING — trade approved" : "🔨 RULING — no trade",
+    color: s.ok ? COLORS.green : s.synth ? COLORS.yellow : COLORS.red,
+    fields: ruling,
+    footer: {
+      text: `${s.contractId ? `contract ${s.contractId}` : "no contract"} · models argue, code computes, the risk engine decides`,
+    },
+  });
+
+  // Discord: ≤ 1024 per field value, ≤ 4096 per description, ≤ 6000 characters per message.
+  for (const e of embeds) for (const f of e.fields ?? []) f.value = cut(f.value, 1024);
+  const size = () =>
+    embeds.reduce(
+      (n, e) =>
+        n +
+        e.title.length +
+        (e.description?.length ?? 0) +
+        (e.footer?.text.length ?? 0) +
+        (e.fields ?? []).reduce((m, f) => m + f.name.length + f.value.length, 0),
+      0,
+    );
+  while (size() > 5800) {
+    let longest: { get: () => string; set: (v: string) => void } | null = null;
+    let len = 0;
+    for (const e of embeds) {
+      if ((e.description?.length ?? 0) > len) {
+        len = e.description?.length ?? 0;
+        longest = { get: () => e.description ?? "", set: (v) => (e.description = v) };
+      }
+      for (const f of e.fields ?? [])
+        if (f.value.length > len) {
+          len = f.value.length;
+          longest = { get: () => f.value, set: (v) => (f.value = v) };
+        }
+    }
+    if (!longest || len < 80) break;
+    longest.set(cut(longest.get(), Math.floor(len * 0.8)));
   }
-  fields.push({ name: "Outcome", value: (s.verdict ?? "—").slice(0, 1000) });
-  return {
-    embeds: [
-      {
-        title: `⚖️ Court · ${s.symbol} (${s.arena}) · bid ${s.bid} · ATR ${s.atr.toPrecision(4)}`,
-        color: s.ok ? COLORS.green : s.synth ? COLORS.yellow : COLORS.red,
-        fields: fields.map((f) => ({ ...f, value: f.value.slice(0, 1024) })),
-        footer: { text: s.contractId ? `contract ${s.contractId}` : "no contract" },
-      },
-    ],
-  };
+  return { embeds };
 }

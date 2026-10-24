@@ -3,7 +3,7 @@ import type { ClefAnswer, ClefApi, ClefQuestion, ClefResult } from "../src/clef/
 import type { ClairicApi } from "../src/clef/clairic.ts";
 import type { DecisionContract } from "../src/contracts/decision-contract.ts";
 import type { Doctrine } from "../src/contracts/doctrine.ts";
-import { Brain, equityChartUrl, terminalLine } from "../src/cortex/Brain.ts";
+import { Brain, courtSessionCard, equityChartUrl, terminalLine } from "../src/cortex/Brain.ts";
 import type { WorkflowDispatcher } from "../src/cortex/dispatch.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
 import { buildEvidence } from "../src/court/evidence.ts";
@@ -817,10 +817,36 @@ describe("court end-to-end (Phase 3)", () => {
     lethality: 0.3,
     brief: "Momentum is extended versus ATR and inflow headlines often mark short-term tops.",
   });
+  const rebuttalJson = JSON.stringify({
+    rebuttal:
+      "Stretch is 1.4 ATR [atr14], normal for record-inflow days; the stop sits under the breakout [close].",
+    concessions: ["Extended versus EMA20"],
+    still_long: true,
+    revised_conviction: 6,
+  });
+  const panelJson = JSON.stringify({
+    stance: "support",
+    confidence: 0.6,
+    headline: "Reward-to-risk clears the fee hurdle comfortably.",
+    points: ["Target is 1.5 ATR away [atr14]"],
+  });
+  /** Answers by role, read from the system prompt (bull, bear, rebuttal or panel seat). */
   const provider = (text: string, calls: string[]): LlmProvider => ({
-    async complete(model) {
+    async complete(model, req) {
       calls.push(model);
-      return { text, inputTokens: 100, outputTokens: 50 };
+      const sys = req.system;
+      const out = sys.includes("Bull Advocate again")
+        ? rebuttalJson
+        : sys.includes("expert panel")
+          ? panelJson
+          : sys.includes("Bear Prosecutor")
+            ? bearJson
+            : sys.includes("Bull Advocate")
+              ? text.includes('"no_trade"')
+                ? text // a test's own bull brief
+                : bullJson
+              : text;
+      return { text: out, inputTokens: 100, outputTokens: 50 };
     },
   });
   const cryptoBatch = {
@@ -874,7 +900,9 @@ describe("court end-to-end (Phase 3)", () => {
     expect(r.promoted).toBe(1);
     expect(r.tier2).toBe(1);
     expect(r.courtContracts).toBe(1);
-    expect(calls).toEqual(["gemini-3.5-flash", "openai/gpt-oss-120b"]); // bull google, bear openai-oss
+    // bull google, bear openai-oss, rebuttal back to the bull's model, then three panel seats
+    expect(calls.slice(0, 3)).toEqual(["gemini-3.5-flash", "openai/gpt-oss-120b", "gemini-3.5-flash"]);
+    expect(calls).toHaveLength(6);
     expect(clef.calls).toEqual(["clef-flash", "clef", "clef"]); // tier1, tier2, synth
     const k = t.d1.db
       .prepare("SELECT origin, strategy_id, models_used FROM decision_contracts WHERE origin = 'COURT'")
@@ -893,16 +921,24 @@ describe("court end-to-end (Phase 3)", () => {
     expect(buy?.limit_price).toBe("130.000");
     expect(Number(buy?.qty) * (130 - 126)).toBeLessThanOrEqual(54 * 0.025);
     expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM llm_calls WHERE outcome = 'OK'").get()).toEqual({
-      n: 2,
+      n: 6,
     });
     const card = t.notifier.sent.find(
-      (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ Court"),
+      (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ CORTEX COURT"),
     );
-    const names = card?.msg.embeds?.[0]?.fields?.map((f) => f.name) ?? [];
-    expect(names.some((n) => n.startsWith("🐂 Bull · gemini/gemini-3.5-flash"))).toBe(true);
-    expect(names.some((n) => n.startsWith("🐻 Bear · groq/openai/gpt-oss-120b"))).toBe(true);
-    expect(names).toContain("⚖️ Clef 27B verdict");
-    expect(card?.msg.embeds?.[0]?.fields?.at(-1)?.value).toContain("PAPER: entry order placed");
+    const embeds = card?.msg.embeds ?? [];
+    const titles = embeds.map((e) => e.title ?? "");
+    expect(titles.some((x) => x.startsWith("🐂 Opening statement"))).toBe(true);
+    expect(titles.some((x) => x.startsWith("🐻 Cross-examination"))).toBe(true);
+    expect(titles.some((x) => x.startsWith("🐂 Rebuttal — the bull stands firm"))).toBe(true);
+    expect(titles.some((x) => x.startsWith("🎓 Expert panel — 3 for"))).toBe(true);
+    expect(embeds.find((e) => e.title?.startsWith("🐂 Opening"))?.footer?.text).toContain(
+      "gemini/gemini-3.5-flash",
+    );
+    expect(embeds.at(-1)?.title).toBe("🔨 RULING — trade approved");
+    expect(embeds.at(-1)?.fields?.at(-1)?.value).toContain("PAPER: entry order placed");
+    const chars = JSON.stringify(embeds).length;
+    expect(chars).toBeLessThan(8000);
   });
 
   it("/court runs a session on demand and posts the card even when declined", async () => {
@@ -913,7 +949,7 @@ describe("court end-to-end (Phase 3)", () => {
     t.market.set("BTC/USD", 130, 130.02);
     expect(await t.brain.requestCourt("BTC/USD", "test")).toMatch(/ended without a contract/);
     const card = t.notifier.sent.find((m) => m.channel === "court");
-    expect(card?.msg.embeds?.[0]?.fields?.at(-1)?.value).toContain("No cross-family bear");
+    expect(card?.msg.embeds?.at(-1)?.fields?.at(-1)?.value).toContain("No cross-family bear");
     expect(await t.brain.requestCourt("PLTR", "test")).toMatch(/isn't in the tradeable universe/);
   });
 
@@ -932,6 +968,85 @@ describe("court end-to-end (Phase 3)", () => {
       stage: "BEAR",
       reason_codes: '["no cross-family bear available"]',
     });
+  });
+
+  it("the bull can withdraw after cross-examination, which ends the session without a trade", async () => {
+    const calls: string[] = [];
+    const quit = JSON.stringify({
+      rebuttal: "The bear is right: the move is priced in.",
+      concessions: ["Priced in"],
+      still_long: false,
+      revised_conviction: 2,
+    });
+    const quitter: LlmProvider = {
+      async complete(model, req) {
+        calls.push(model);
+        if (req.system.includes("Bull Advocate again"))
+          return { text: quit, inputTokens: 1, outputTokens: 1 };
+        return provider(bullJson, []).complete(model, req, 1000);
+      },
+    };
+    const llm = new LlmRouter({ gemini: quitter, groq: provider(bearJson, calls) }, doctrine, () => T0);
+    const t = setup({ clef: new ScriptedClef(answers), llm });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    const r = await t.brain.pulse();
+    expect(r.courtContracts).toBe(0);
+    expect(calls).toHaveLength(3); // bull, bear, rebuttal — no panel, no judge
+    const card = t.notifier.sent.find((m) => m.channel === "court");
+    expect(card?.msg.embeds?.some((e) => e.title?.includes("the bull withdraws"))).toBe(true);
+  });
+
+  it("a very long debate still fits Discord's 6,000-character message limit", () => {
+    const long = "x".repeat(3000);
+    const msg = courtSessionCard({
+      symbol: "BTC/USD",
+      arena: "CRYPTO",
+      catalyst: { headline: long, source: "s", url: null, kind: "news" },
+      bid: 100,
+      atr: 2,
+      facts: { eps_surprise_pct: 4.8 },
+      kronos: long,
+      bull: {
+        thesis: long,
+        entry_low: 99,
+        entry_high: 101,
+        stop: 96,
+        targets: [106],
+        conviction: 7,
+        horizon_hours: 48,
+        by: "a/b",
+      },
+      bear: { fatal_flaws: [long, long, long], kill_criteria: [long], lethality: 0.4, by: "c/d" },
+      rebuttal: { rebuttal: long, concessions: [long], still_long: true, revised_conviction: 6, by: "a/b" },
+      panel: ["quant", "risk", "macro"].map((seat) => ({
+        seat,
+        title: seat,
+        emoji: "•",
+        by: "e/f",
+        stance: "support" as const,
+        confidence: 0.5,
+        headline: long,
+        points: [long, long, long],
+      })),
+      synth: { winProb: 0.6, calibrated: 0.55, bearLethality: 0.3, regimeFit: 0.7, suitability100: 60 },
+      verdict: long,
+      ok: false,
+    });
+    const e = msg.embeds ?? [];
+    const total = e.reduce(
+      (n, x) =>
+        n +
+        (x.title?.length ?? 0) +
+        (x.description?.length ?? 0) +
+        (x.footer?.text.length ?? 0) +
+        (x.fields ?? []).reduce((m, f) => m + f.name.length + f.value.length, 0),
+      0,
+    );
+    expect(total).toBeLessThanOrEqual(6000);
+    expect(e.every((x) => (x.fields ?? []).every((f) => f.value.length <= 1024))).toBe(true);
+    expect(e).toHaveLength(6);
   });
 
   it("a bull brief whose numbers don't fit the evidence is rejected by code", async () => {

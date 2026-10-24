@@ -133,6 +133,15 @@ export const DoctrineSchema = z.object({
     families: z.record(z.string(), z.string()),
     bull_chain: z.array(LlmHop).min(1),
     bear_chain: z.array(LlmHop).min(1),
+    /** ADR-044: bull rebuttal + expert panel. Seats rotate through the chain so each starts on a different model. */
+    panel: z
+      .object({
+        rebuttal: z.boolean(),
+        seats: z.array(z.enum(["quant", "risk", "macro"])),
+        timeout_ms: z.number().int().positive().default(25_000),
+        chain: z.array(LlmHop),
+      })
+      .default({ rebuttal: false, seats: [], timeout_ms: 25_000, chain: [] }),
     require_cross_family: z.boolean(),
     max_retries_per_provider: z.number().int().min(0).max(3),
     timeout_ms: z.number().int().positive(),
