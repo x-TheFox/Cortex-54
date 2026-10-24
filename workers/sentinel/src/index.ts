@@ -89,28 +89,38 @@ async function killAll(env: SentinelEnv, accounts: Acct[], by: string, reason: s
 async function brainAgeMinutes(
   env: SentinelEnv,
   now: number,
-): Promise<{ age: number; detail: string; discordFailStreak: number }> {
+): Promise<{
+  age: number;
+  detail: string;
+  discordFailStreak: number;
+  nextAlarmAt: number | null | undefined;
+  violations: Record<string, number>;
+}> {
+  const none = { discordFailStreak: 0, nextAlarmAt: undefined, violations: {} };
   if (!env.CORTEX_HEALTH_URL)
-    return {
-      age: Number.POSITIVE_INFINITY,
-      detail: "CORTEX_HEALTH_URL not configured",
-      discordFailStreak: 0,
-    };
+    return { age: Number.POSITIVE_INFINITY, detail: "CORTEX_HEALTH_URL not configured", ...none };
   try {
-    const res = await fetch(env.CORTEX_HEALTH_URL, { signal: AbortSignal.timeout(5_000) });
-    const body = (await res.json()) as { last_pulse_at: number | null; discord_fail_streak?: number };
+    // cache-busting query: the edge once served a minutes-old /health after a deploy (2026-10-24)
+    const res = await fetch(`${env.CORTEX_HEALTH_URL}?t=${now}`, {
+      signal: AbortSignal.timeout(5_000),
+      headers: { "cache-control": "no-cache" },
+    });
+    const body = (await res.json()) as {
+      last_pulse_at: number | null;
+      next_alarm_at?: number | null;
+      discord_fail_streak?: number;
+      policy_violations?: Record<string, number>;
+    };
     const age = body.last_pulse_at === null ? Number.POSITIVE_INFINITY : (now - body.last_pulse_at) / 60_000;
     return {
       age,
       detail: `HTTP ${res.status}, last pulse ${Number.isFinite(age) ? age.toFixed(1) : "never"} min ago`,
       discordFailStreak: Number(body.discord_fail_streak ?? 0),
+      nextAlarmAt: body.next_alarm_at,
+      violations: body.policy_violations ?? {},
     };
   } catch (e) {
-    return {
-      age: Number.POSITIVE_INFINITY,
-      detail: `health fetch failed: ${String(e)}`,
-      discordFailStreak: 0,
-    };
+    return { age: Number.POSITIVE_INFINITY, detail: `health fetch failed: ${String(e)}`, ...none };
   }
 }
 
@@ -192,7 +202,21 @@ async function cron(env: SentinelEnv, now: number): Promise<void> {
   }
 
   // 2. Brain heartbeat.
-  const { age, detail, discordFailStreak } = await brainAgeMinutes(env, now);
+  const { age, detail, discordFailStreak, nextAlarmAt, violations } = await brainAgeMinutes(env, now);
+  const every30 = new Date(now).getUTCMinutes() % 30 === 0;
+  // Audit W1-39: the brain checks constitution invariants over its own state; any violation is alerted from here.
+  const broken = Object.entries(violations);
+  if (broken.length > 0 && every30)
+    await alert(
+      env,
+      `⚖️ SENTINEL: constitution invariant violated — ${broken.map(([k, n]) => `${k} ×${n}`).join(", ")}. Check the journal.`,
+    );
+  // Audit W1-14: an alarm that is not armed (or is far in the past) means the heart won't beat again by itself.
+  if (nextAlarmAt !== undefined && (nextAlarmAt === null || nextAlarmAt < now - 10 * 60_000) && every30)
+    await alert(
+      env,
+      `⏰ SENTINEL: the brain's next alarm is ${nextAlarmAt === null ? "not armed" : "overdue"}.`,
+    );
   // The brain's own Discord path failing (revoked token, missing permission) can't report itself: say it here,
   // through the separate webhook (audit 2026-10-24: notifier failures were silent).
   if (discordFailStreak >= 5 && new Date(now).getUTCMinutes() % 30 === 0)

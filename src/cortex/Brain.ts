@@ -130,7 +130,7 @@ import {
   kronosSignal,
 } from "../strategy/KronosForecast.ts";
 import { dueJobs, type WorkflowDispatcher } from "./dispatch.ts";
-import { getKV, one, type SqlLike, setKV } from "./store.ts";
+import { getKV, one, type SqlLike, type SqlValue, setKV } from "./store.ts";
 
 export const ACCOUNTS: AccountId[] = ["PAPER", "LIVE"];
 /** Triage queue cap (news + future screener candidates) — keeps DO storage and row writes bounded. */
@@ -215,6 +215,41 @@ type OrderRow = {
 
 export type KillState = "KILLED" | "CLEAR" | "UNKNOWN";
 
+export interface SloView {
+  pulse_age_s: number | null;
+  outbox_depth: number;
+  outbox_dead: number;
+  budget_mode: string;
+  budget_worst: { resource: string; fraction: number };
+  budget_projected: { resource: string; fraction: number };
+  alarm_lost_total: number;
+  stage_failures_today: Record<string, number>;
+  court_waiting: number;
+}
+
+/**
+ * What the sentinel's kill flag says (audit W1-09). `true` = everything (old bare flag, or any unparseable payload:
+ * fail closed); `{accounts}` = only those accounts — a LIVE daily-loss kill no longer stops the PAPER research bed.
+ */
+export type KillFlag = boolean | { accounts: string[]; id?: string; reason?: string };
+
+/** Parse the KV `killed` value. Unknown shapes are a global kill (fail closed). */
+export function parseKillFlag(raw: string | null): KillFlag {
+  if (raw === null) return false;
+  try {
+    const p = JSON.parse(raw) as { accounts?: unknown; at?: unknown; reason?: unknown };
+    if (Array.isArray(p.accounts) && p.accounts.length > 0 && p.accounts.every((a) => typeof a === "string"))
+      return {
+        accounts: p.accounts as string[],
+        ...(typeof p.at === "number" ? { id: String(p.at) } : {}),
+        ...(typeof p.reason === "string" ? { reason: p.reason.slice(0, 200) } : {}),
+      };
+  } catch {
+    /* bare flag */
+  }
+  return true;
+}
+
 export interface BrainDeps {
   sql: SqlLike;
   d: Doctrine;
@@ -223,7 +258,7 @@ export interface BrainDeps {
   market: MarketDataApi | null;
   notifier: Notifier;
   d1: D1Like | null;
-  readKillFlag: () => Promise<boolean>;
+  readKillFlag: () => Promise<KillFlag>;
   now: () => number;
   /** Workers AI Clef (Tier 1/2). Null disables the funnel; trading is unaffected. */
   clef?: ClefApi | null;
@@ -332,6 +367,14 @@ export class Brain {
 
   // ------------------------------------------------------------------ setup
 
+  /** Audit W1-03: adopt D1's journal head after a hot-storage reset (call before init). */
+  async reanchorJournal(d1Head: () => Promise<{ seq: number; sha: string } | null>): Promise<string> {
+    const r = await this.journal.reanchor(d1Head);
+    if (r === "adopted")
+      this.journal.append("SYSTEM", "REANCHOR", null, { seq: this.journal.head().seq }, this.deps.now());
+    return r;
+  }
+
   init(bootInfo: Record<string, unknown>): void {
     const now = this.deps.now();
     for (const account of ACCOUNTS) {
@@ -349,6 +392,8 @@ export class Brain {
     this.sql.exec(
       "UPDATE accounts SET autonomy_stop = 2 WHERE account = 'PAPER' AND autonomy_stop IN (1, 3)",
     );
+    if (typeof bootInfo.doctrine_sha256 === "string")
+      setKV(this.sql, "running_doctrine", bootInfo.doctrine_sha256, now);
     const lastBoot = getKV(this.sql, "boot_hash");
     const bootHash = JSON.stringify(bootInfo);
     if (lastBoot !== bootHash) {
@@ -391,7 +436,8 @@ export class Brain {
     this.rollDay(started);
 
     report.kill = await this.readKill();
-    if (report.kill !== "UNKNOWN") this.noteKill(report.kill === "KILLED");
+    if (report.kill !== "UNKNOWN")
+      this.noteKill(ACCOUNTS.some((a) => this.deps.brokers[a] && this.killedFor(a)));
     const budget = this.budget.snapshot(started);
     report.budgetMode = budget.mode;
 
@@ -425,7 +471,7 @@ export class Brain {
         await this.manageOrders(account, broker);
         await this.ensureProtectiveStops(account, broker);
         await this.applyBreaker(account, broker);
-        if (report.kill === "KILLED") await this.cancelEntries(account, broker, "KILLED by sentinel");
+        if (this.killedFor(account)) await this.cancelEntries(account, broker, "KILLED by sentinel");
       } catch (e) {
         if (!(e instanceof SubrequestBudgetExceeded)) {
           await this.alertOnce(
@@ -504,6 +550,7 @@ export class Brain {
 
     await this.checkBatchStaleness(started).catch(() => undefined);
     await this.dispatchDue(started).catch(() => undefined);
+    await this.checkDispatchReceipts(started).catch(() => undefined);
 
     // 4. Persist, report, schedule.
     this.sampleEquity(started);
@@ -536,6 +583,60 @@ export class Brain {
   }
 
   /** Start any batch workflow whose slot came due in the last 20 min (ADR-032). Never blocks trading. */
+  /**
+   * Audit W1-08: research batches carry the doctrine hash on `main`. When it differs from what this brain runs for
+   * more than 2 h, a merged config change was never deployed (CI's deploy step skips without a Cloudflare token).
+   */
+  private async checkDeployLag(mainSha: string, now: number): Promise<void> {
+    const running = getKV(this.sql, "running_doctrine");
+    if (!running || running === mainSha) {
+      this.sql.exec("DELETE FROM settings WHERE key = 'deploy_lag_since'");
+      return;
+    }
+    const since = Number(getKV(this.sql, "deploy_lag_since") ?? 0);
+    if (!since) {
+      setKV(this.sql, "deploy_lag_since", String(now), now);
+      return;
+    }
+    if (now - since > 2 * 3_600_000)
+      await this.alertOnce(
+        "deploy-lag",
+        `🚧 DEPLOY LAGGING: main's doctrine is ${mainSha.slice(0, 12)} but the brain runs ${running.slice(0, 12)} (for ${Math.round((now - since) / 3_600_000)} h). Run pnpm deploy:cortex.`,
+      );
+  }
+
+  /** Audit W1-07: jobs that always ingest when they succeed; a dispatch with no batch after this long is a failure. */
+  private static readonly EXPECTED_BATCH: Record<string, { job: string; within_min: number }> = {
+    crypto: { job: "crypto-regime", within_min: 60 },
+    "equity-open": { job: "equity-posture", within_min: 60 },
+    "equity-close": { job: "equity-posture", within_min: 60 },
+    kronos: { job: "kronos", within_min: 90 },
+    governor: { job: "governor", within_min: 60 },
+    "governor-weekly": { job: "governor", within_min: 90 },
+  };
+
+  private async checkDispatchReceipts(now: number): Promise<void> {
+    let last: Record<string, number> = {};
+    try {
+      last = JSON.parse(getKV(this.sql, "dispatch_last") ?? "{}") as Record<string, number>;
+    } catch {
+      return;
+    }
+    for (const [key, exp] of Object.entries(Brain.EXPECTED_BATCH)) {
+      const slot = last[key];
+      if (!slot || now - slot < exp.within_min * 60_000 || now - slot > 24 * 3_600_000) continue;
+      const seen = Number(getKV(this.sql, `batch_seen:${exp.job}`) ?? 0);
+      if (seen >= slot) continue;
+      if (getKV(this.sql, `dispatch_stale:${key}`) === String(slot)) continue; // reported this slot already
+      setKV(this.sql, `dispatch_stale:${key}`, String(slot), now);
+      this.journal.append("SYSTEM", "DISPATCH_STALE", null, { job: key, slot }, now);
+      await this.alertOnce(
+        `dispatch-stale:${key}`,
+        `⚠️ research job \`${key}\` was dispatched ${Math.round((now - slot) / 60_000)} min ago but no batch arrived. Check the GitHub Actions run.`,
+      );
+    }
+  }
+
   private async dispatchDue(now: number): Promise<number> {
     const dispatcher = this.deps.dispatcher;
     if (!dispatcher) return 0;
@@ -561,11 +662,37 @@ export class Brain {
     return n;
   }
 
+  /**
+   * Overall kill state for this brain: KILLED only when every configured account is covered by the flag; a flag that
+   * names some accounts leaves the others trading (audit W1-09), with entries blocked per account by `killedFor`.
+   */
   private async readKill(): Promise<KillState> {
+    let flag: KillFlag;
     try {
-      return (await this.deps.readKillFlag()) ? "KILLED" : "CLEAR";
+      flag = await this.deps.readKillFlag();
     } catch {
       return "UNKNOWN";
+    }
+    const scope = flag === false ? [] : flag === true ? ["ALL"] : flag.accounts;
+    setKV(this.sql, "kill_scope", JSON.stringify(scope), this.deps.now());
+    setKV(
+      this.sql,
+      "kill_meta",
+      JSON.stringify(typeof flag === "object" ? { id: flag.id ?? null, reason: flag.reason ?? null } : {}),
+      this.deps.now(),
+    );
+    if (flag === false) return "CLEAR";
+    const configured = ACCOUNTS.filter((a) => this.deps.brokers[a]);
+    return configured.length === 0 || configured.every((a) => this.killedFor(a)) ? "KILLED" : "CLEAR";
+  }
+
+  /** True when the current kill flag covers this account. */
+  killedFor(account: AccountId): boolean {
+    try {
+      const scope = JSON.parse(getKV(this.sql, "kill_scope") ?? "[]") as string[];
+      return scope.includes("ALL") || scope.includes(account);
+    } catch {
+      return true;
     }
   }
 
@@ -3003,6 +3130,28 @@ ${postmortem}`,
       if (/neuron|quota|limit|exceeded|4006/i.test(errText(e))) {
         // Workers AI says we're out: stop tier 1 for the rest of the UTC day.
         this.budget.add("neurons_tier1", this.d.budgets.workers_ai_neurons_per_day.tier1, now);
+      } else if (items.length === 1) {
+        // Audit W1-20: an item Clef keeps failing on must not block the queue forever. Three tries, then a record.
+        const it = items[0] as TriageItem;
+        const key = `t1_fail:${it.candidateId}`;
+        const n = Number(getKV(this.sql, key) ?? 0) + 1;
+        setKV(this.sql, key, String(n), now);
+        if (n >= 3) {
+          this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", it.candidateId);
+          this.sql.exec("DELETE FROM settings WHERE key = ?", key);
+          this.rejectCandidate(
+            {
+              candidateId: it.candidateId,
+              symbol: resolveTradeable(it.symbols, this.d)?.symbol ?? it.symbols[0] ?? "?",
+              arena: resolveTradeable(it.symbols, this.d)?.arena ?? "CRYPTO",
+              source: "tier1",
+            },
+            "TIER1",
+            [`Clef failed 3 times: ${errText(e).slice(0, 120)}`],
+            {},
+            now,
+          );
+        }
       }
       throw e;
     }
@@ -3068,6 +3217,8 @@ ${postmortem}`,
     }
     const b: Batch = parsed.data;
     if (b.produced_at > now + 5 * 60_000) return { ok: false, message: "produced_at is in the future" };
+    setKV(this.sql, `batch_seen:${b.job}`, String(now), now); // audit W1-07: dispatch receipts
+    if (b.doctrine_sha256) await this.checkDeployLag(b.doctrine_sha256, now);
     for (const item of b.items) {
       this.journal.enqueue(
         "batch_results",
@@ -3845,7 +3996,7 @@ ${postmortem}`,
       breakerMultiplier: this.d.breakers.multipliers[row.breaker],
       autonomyStop: row.autonomy_stop,
       mode,
-      killed: getKV(this.sql, "kill_seen") === "1",
+      killed: getKV(this.sql, "kill_seen") === "1" && this.killedFor(account),
       reconciledAt: row.reconciled_at,
       ordersToday: row.orders_today,
       heldOrPendingSymbols: [...symbols],
@@ -4000,6 +4151,21 @@ ${postmortem}`,
     const max = this.c.hard_limits.max_live_autonomy_stop_without_ratification;
     if (account === "LIVE" && stop > max && !ratified)
       return `LIVE above Stop ${max} needs confirm:RATIFY (constitution U8).`;
+    if (account === "LIVE" && stop > max) {
+      // Audit W3-24: real-money autonomy takes two RATIFYs, the second 10 min – 24 h after the first.
+      const key = `ratify_request:LIVE:${stop}`;
+      const first = Number(getKV(this.sql, key) ?? 0);
+      const wait = 10 * 60_000;
+      if (!first || now - first > 86_400_000) {
+        setKV(this.sql, key, String(now), now);
+        this.journal.append(account, "RATIFY_REQUEST", null, { stop, by }, now);
+        return `RATIFY recorded for LIVE Stop ${stop}. Confirm again with RATIFY between 10 minutes and 24 hours from now to make it take effect.`;
+      }
+      if (now - first < wait)
+        return `Cooling off: confirm LIVE Stop ${stop} again in ${Math.ceil((first + wait - now) / 60_000)} min.`;
+      this.sql.exec("DELETE FROM settings WHERE key = ?", key);
+      setKV(this.sql, "live_ratified", JSON.stringify({ stop, by, at: now }), now);
+    }
     this.sql.exec("UPDATE accounts SET autonomy_stop = ? WHERE account = ?", stop, account);
     this.journal.append(account, "DIAL", null, { stop, by, ratified }, now);
     return `${account} autonomy dial → Stop ${stop}.`;
@@ -4113,8 +4279,18 @@ ${postmortem}`,
     if (prev === next) return;
     setKV(this.sql, "kill_seen", next, now);
     // Journal transitions so kill drills are provable from the record (first observation of "clear" is silent).
+    // Audit W1-22/W3-26: the record says which accounts, why, and the sentinel's kill id.
+    let meta: Record<string, unknown> = {};
+    try {
+      meta = {
+        scope: JSON.parse(getKV(this.sql, "kill_scope") ?? "[]"),
+        ...JSON.parse(getKV(this.sql, "kill_meta") ?? "{}"),
+      };
+    } catch {
+      /* keep the transition even without details */
+    }
     if (killed || prev === "1")
-      this.journal.append("SYSTEM", killed ? "KILL_SEEN" : "KILL_CLEARED", null, {}, now);
+      this.journal.append("SYSTEM", killed ? "KILL_SEEN" : "KILL_CLEARED", null, killed ? meta : {}, now);
   }
 
   // ------------------------------------------------------------------ persistence & telemetry
@@ -4137,11 +4313,92 @@ ${postmortem}`,
 
   private async alertOnce(key: string, text: string): Promise<void> {
     const now = this.deps.now();
+    // Audit W1-13: count every failure per stage per day (the alert itself is deduped to one an hour).
+    const fk = `fail:${key.split(":")[0]}:${utcDay(now)}`;
+    setKV(this.sql, fk, String(Number(getKV(this.sql, fk) ?? 0) + 1), now);
     const last = Number(getKV(this.sql, `alert:${key}`) ?? 0);
     if (now - last < 3_600_000) return;
     setKV(this.sql, `alert:${key}`, String(now), now);
     this.journal.append("SYSTEM", "ALERT", key, { text }, now);
     await this.deps.notifier.post("alarms", { content: text.slice(0, 1900) });
+  }
+
+  /**
+   * Audit W1-39: multi-row invariants of the constitution, checked over hot state with plain SQL (no LLM). Non-zero
+   * counts show up in /health, where the sentinel alerts on them through its own path.
+   */
+  policyViolations(now = this.deps.now()): Record<string, number> {
+    const n = (q: string, ...b: SqlValue[]) => one<{ n: number }>(this.sql, q, ...b)?.n ?? 0;
+    const v: Record<string, number> = {
+      // U1: every open order traces to a contract (adopted orphans are named ADOPTED-… and tracked separately)
+      order_without_contract: n(
+        `SELECT COUNT(*) AS n FROM orders o WHERE o.state IN (${OPEN_SQL}) AND o.contract_id NOT LIKE 'ADOPTED-%'
+           AND NOT EXISTS (SELECT 1 FROM contracts c WHERE c.contract_id = o.contract_id)`,
+      ),
+      // U4: every position has a stop
+      position_without_stop: n(
+        "SELECT COUNT(*) AS n FROM positions WHERE state = 'OPEN' AND (stop_price IS NULL OR CAST(stop_price AS REAL) <= 0)",
+      ),
+      // ADR-004: reservations are short-lived
+      stale_reservation: n(
+        "SELECT COUNT(*) AS n FROM risk_reservations WHERE expires_at < ?",
+        now - 15 * 60_000,
+      ),
+      // U5: a RED-locked account has no live entry orders
+      red_locked_with_entries: n(
+        `SELECT COUNT(*) AS n FROM orders o JOIN accounts a ON a.account = o.account
+           WHERE a.locked = 1 AND o.role = 'ENTRY' AND o.state IN (${OPEN_SQL})`,
+      ),
+      // U8: LIVE autonomy above the unratified ceiling has a ratification on record
+      live_dial_unratified:
+        n(
+          "SELECT COUNT(*) AS n FROM accounts WHERE account = 'LIVE' AND autonomy_stop > ?",
+          this.c.hard_limits.max_live_autonomy_stop_without_ratification,
+        ) > 0 && !getKV(this.sql, "live_ratified")
+          ? 1
+          : 0,
+      // U7: the audit trail is flowing (a deep outbox means D1 writes are stuck)
+      outbox_backlog: n("SELECT COUNT(*) AS n FROM d1_outbox") > 2_000 ? 1 : 0,
+    };
+    return Object.fromEntries(Object.entries(v).filter(([, x]) => x > 0));
+  }
+
+  /** Audit W1-32/W1-13: one-glance health numbers for /health and the sentinel. */
+  slo(now = this.deps.now()): SloView {
+    const last = Number(getKV(this.sql, "last_pulse_at") ?? 0);
+    const b = this.budget.snapshot(now);
+    const day = utcDay(now);
+    const failures = Object.fromEntries(
+      this.sql
+        .exec<{ key: string; value: string }>(
+          "SELECT key, value FROM settings WHERE key LIKE 'fail:%' AND key LIKE ?",
+          `%:${day}`,
+        )
+        .map((r) => [r.key.split(":")[1], Number(r.value)]),
+    );
+    return {
+      pulse_age_s: last ? Math.round((now - last) / 1000) : null,
+      outbox_depth: one<{ n: number }>(this.sql, "SELECT COUNT(*) AS n FROM d1_outbox")?.n ?? 0,
+      outbox_dead: one<{ n: number }>(this.sql, "SELECT COUNT(*) AS n FROM d1_outbox_dead")?.n ?? 0,
+      budget_mode: b.mode,
+      budget_worst: { resource: b.worst.resource, fraction: Math.round(b.worst.fraction * 1000) / 1000 },
+      budget_projected: {
+        resource: b.projected.resource,
+        fraction: Math.round(b.projected.fraction * 1000) / 1000,
+      },
+      alarm_lost_total: Number(getKV(this.sql, "alarm_lost_total") ?? 0),
+      stage_failures_today: failures,
+      court_waiting:
+        one<{ n: number }>(this.sql, "SELECT COUNT(*) AS n FROM court_waits WHERE until_at > ?", now)?.n ?? 0,
+    };
+  }
+
+  /** Audit W1-15: the cron self-heal found no alarm armed and restored it. Journaled so drops are countable. */
+  noteAlarmLost(gapSeconds: number | null): void {
+    const now = this.deps.now();
+    const n = Number(getKV(this.sql, "alarm_lost_total") ?? 0) + 1;
+    setKV(this.sql, "alarm_lost_total", String(n), now);
+    this.journal.append("SYSTEM", "ALARM_LOST", null, { gap_s: gapSeconds, total: n }, now);
   }
 
   /** One equity sample per account per UTC hour (HUD chart, web terminal). */
@@ -4183,6 +4440,10 @@ ${postmortem}`,
   /** Single-use check for web-terminal login links (ADR-034). */
   consumeOnce(id: string): boolean {
     return this.markSeen(`web:${id}`, this.deps.now());
+  }
+
+  isRevoked(id: string): boolean {
+    return one(this.sql, "SELECT 1 AS x FROM seen_items WHERE id = ?", `web:${id}`) !== undefined;
   }
 
   /** Memory Vault view: decayed beliefs, reputation weights, merged scar rules. */

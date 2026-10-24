@@ -87,6 +87,14 @@ sign everyone out.
 
 Manual last resort: Alpaca dashboard → "Close all positions" + "Cancel all orders".
 
+### Deploying (and the DEPLOY LAGGING alert, ADR-053)
+CI's deploy job skips itself because the repo has no `CLOUDFLARE_API_TOKEN` secret, so merged code does not reach
+Cloudflare by itself. After merging, run `pnpm deploy:cortex` (and `pnpm deploy:sentinel` if `workers/sentinel`
+changed) from a machine logged in with `wrangler login`. If a merge is never deployed, the brain notices within ~2 h
+(research batches carry `main`'s doctrine hash) and posts **DEPLOY LAGGING** to #alarms. To make CI deploy instead:
+create a Cloudflare API token (template "Edit Cloudflare Workers", plus D1 edit) and add it with the account id as
+GitHub secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+
 ### Switching to a new paper account (fresh start, ADR-038)
 1. Rotate `ALPACA_PAPER_KEY_ID` / `ALPACA_PAPER_SECRET` in: `pnpm wrangler secret put …` (cortex), the same with
    `-c workers/sentinel/wrangler.jsonc`, `gh secret set …`, and local `.dev.vars`.

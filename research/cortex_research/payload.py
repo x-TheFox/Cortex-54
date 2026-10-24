@@ -116,8 +116,16 @@ def equity_posture(exposure: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def doctrine_sha256() -> str | None:
+    """sha256 of config/doctrine.yaml as committed (same bytes the worker build hashes) for the deploy-lag check."""
+    from pathlib import Path
+
+    p = Path(__file__).resolve().parents[2] / "config" / "doctrine.yaml"
+    return hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None
+
+
 def batch(job: str, produced_at_ms: int, run_url: str | None, items: list[dict], posture: dict | None) -> dict[str, Any]:
-    return {
+    b: dict[str, Any] = {
         "schema_version": 1,
         "job": job,
         "produced_at": produced_at_ms,
@@ -125,6 +133,10 @@ def batch(job: str, produced_at_ms: int, run_url: str | None, items: list[dict],
         "items": items,
         "posture": posture,
     }
+    sha = doctrine_sha256()
+    if sha:
+        b["doctrine_sha256"] = sha
+    return b
 
 
 def dumps(obj: Any) -> str:

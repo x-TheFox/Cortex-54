@@ -423,5 +423,9 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   code-checked citations) builds a dossier per court case; the court waits ≤ 25 min for it and cites it (`res_*`).
 - 2026-10-24: ADR-052: Kronos also forecasts the 18 watchlist stocks (daily candles, 2 trading days) for the court and
   the FCST page; they never trade on it.
+- 2026-10-24: every audit idea triaged in `docs/AUDIT_IDEAS.md`. ADR-053 builds round 1: per-account kill scope,
+  invariant monitor in /health, journal re-anchor, budget projection, dispatch receipts, deploy-lag alert, RATIFY
+  cooling-off, drift tests. CI cannot deploy (no `CLOUDFLARE_API_TOKEN` secret): deploy with `pnpm deploy:cortex`.
+- 2026-10-24 15:53 UTC: first fills — LAB (Kronos forward test) bought BTC/USD and AAVE/USD (~$10 each).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

@@ -57,6 +57,29 @@ export class Journal {
 
   constructor(private readonly sql: SqlLike) {}
 
+  /**
+   * Audit W1-03: after a hot-storage reset the head is GENESIS while D1 still holds the chain, and every new row would
+   * collide with an existing seq forever. On boot, adopt D1's head when (and only when) the hot head is empty and
+   * nothing is waiting in the outbox. Returns what happened.
+   */
+  async reanchor(
+    d1Head: () => Promise<{ seq: number; sha: string } | null>,
+  ): Promise<"kept" | "adopted" | "fresh"> {
+    if (this.head().seq !== 0) return "kept";
+    const pending = this.sql.exec<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM d1_outbox WHERE tbl = 'journal'",
+    )[0];
+    if ((pending?.n ?? 0) > 0) return "kept";
+    const h = await d1Head();
+    if (!h || h.seq <= 0 || !/^[0-9a-f]{64}$/.test(h.sha)) return "fresh";
+    this.sql.exec(
+      "INSERT INTO journal_head (id, seq, row_sha256) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET seq = excluded.seq, row_sha256 = excluded.row_sha256",
+      h.seq,
+      h.sha,
+    );
+    return "adopted";
+  }
+
   head(): { seq: number; sha: string } {
     const row = this.sql.exec<{ seq: number; row_sha256: string }>(
       "SELECT seq, row_sha256 FROM journal_head WHERE id = 1",
@@ -122,7 +145,20 @@ export class Journal {
    * Quarantined journal rows leave a visible gap in the D1 chain, which the Governor's chain check reports — the
    * row itself stays in the hot dead table for replay.
    */
+  /** Audit W1-06: D1 batches are awaits the DO input gate doesn't cover; two flushes must never send the same rows. */
+  private flushing = false;
+
   async flush(db: D1Like, max = 40): Promise<number> {
+    if (this.flushing) return 0; // another flush is in flight; its rows go out with it, the rest next pulse
+    this.flushing = true;
+    try {
+      return await this.flushOnce(db, max);
+    } finally {
+      this.flushing = false;
+    }
+  }
+
+  private async flushOnce(db: D1Like, max: number): Promise<number> {
     const rows = this.sql.exec<{ id: number; tbl: string; row_json: string; created_at: number }>(
       "SELECT id, tbl, row_json, created_at FROM d1_outbox ORDER BY id LIMIT ?",
       max,

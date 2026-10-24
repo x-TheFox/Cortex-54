@@ -55,6 +55,11 @@ export const BatchSchema = z
     run_url: z.url().nullable(),
     items: z.array(BatchItemSchema).min(1).max(20),
     posture: PostureSchema.nullable(),
+    /** Audit W1-08: sha256 of config/doctrine.yaml on the commit the job ran from (deploy-lag check). */
+    doctrine_sha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
   })
   .refine(
     (b) =>

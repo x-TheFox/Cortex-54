@@ -16,7 +16,7 @@ import {
   SCAR_TISSUE,
 } from "../generated/config.ts";
 import type { AccountId } from "../lib/ids.ts";
-import { Brain, type StatusView } from "./Brain.ts";
+import { Brain, parseKillFlag, type SloView, type StatusView } from "./Brain.ts";
 import { GitHubDispatcher } from "./dispatch.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "./hot-schema.ts";
 import { LabNotifier, labDoctrine } from "./lab.ts";
@@ -33,6 +33,10 @@ export interface Health {
   accounts_configured: AccountId[];
   /** Consecutive failed Discord sends; the sentinel alerts through its own webhook at ≥ 5. */
   discord_fail_streak: number;
+  /** Audit W1-39: constitution invariants violated right now (empty = fine); the sentinel alerts on any. */
+  policy_violations: Record<string, number>;
+  /** Audit W1-32: freshness, backlog, budget and failure counts at a glance. */
+  slo: SloView;
 }
 
 /**
@@ -98,7 +102,7 @@ export class AgentCortexDO extends DurableObject<Env> {
           )
         : new NullNotifier(),
       d1: env.DB,
-      readKillFlag: async () => (await env.FLAGS.get("killed")) !== null,
+      readKillFlag: async () => parseKillFlag(await env.FLAGS.get("killed")),
       clef: new WorkersAiClef(env.AI),
       clairic: new WorkersAiClairic(env.AI),
       llm: new LlmRouter(llmProviders(env), DOCTRINE),
@@ -121,6 +125,15 @@ export class AgentCortexDO extends DurableObject<Env> {
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('hot_schema_version', ?)",
         String(HOT_SCHEMA_VERSION),
       );
+      const db = (this.constructor as typeof AgentCortexDO).lab ? this.env.DB_LAB : this.env.DB;
+      await this.brain
+        .reanchorJournal(async () => {
+          const r = await db
+            .prepare("SELECT seq, row_sha256 FROM journal ORDER BY seq DESC LIMIT 1")
+            .first<{ seq: number; row_sha256: string }>();
+          return r ? { seq: r.seq, sha: r.row_sha256 } : null;
+        })
+        .catch(() => "fresh"); // D1 down at boot: keep going; a reset is rare and the next boot retries
       this.brain.init({
         constitution_sha256: CONSTITUTION_SHA256,
         doctrine_sha256: DOCTRINE_SHA256,
@@ -133,9 +146,16 @@ export class AgentCortexDO extends DurableObject<Env> {
     });
   }
 
-  /** Fresh subrequest budget per invocation (Workers Free: 50). */
+  /** True while an alarm pulse is running (its awaits let RPCs interleave). */
+  private pulsing = false;
+
+  /**
+   * Fresh subrequest budget per invocation (Workers Free: 50). Audit W1-18: an RPC that arrives while a pulse is in
+   * flight shares the pulse's meter instead of resetting it, so the pulse can't be handed a fresh budget mid-way.
+   */
   private begin(): void {
-    this.meter.current = new InvocationMeter(DOCTRINE.budgets.per_invocation.subrequests - 5);
+    if (!this.pulsing)
+      this.meter.current = new InvocationMeter(DOCTRINE.budgets.per_invocation.subrequests - 5);
     this.brain.budget.add("do_requests", 1, Date.now());
   }
 
@@ -144,15 +164,36 @@ export class AgentCortexDO extends DurableObject<Env> {
     if (existing !== null) return existing;
     const at = Date.now() + 1_000;
     await this.ctx.storage.setAlarm(at);
+    // Audit W1-15: a lost alarm was restored silently, so how often it happens was unknowable.
+    const last = Number(getKV(this.sql, "last_pulse_at") ?? 0);
+    this.brain.noteAlarmLost(last > 0 ? Math.round((Date.now() - last) / 1000) : null);
     return at;
   }
 
   override async alarm(): Promise<void> {
     this.meter.current = new InvocationMeter(DOCTRINE.budgets.per_invocation.subrequests - 5);
+    this.pulsing = true;
     let next = DOCTRINE.cadence.pulse_seconds_exposed;
     try {
+      const t0 = Date.now();
       const report = await this.brain.pulse();
       next = report.nextPulseSeconds;
+      // Audit W1-23: one structured line per pulse for Workers Logs (free; queryable, unlike Discord embeds).
+      console.log(
+        JSON.stringify({
+          kind: "pulse",
+          brain: (this.constructor as typeof AgentCortexDO).lab ? "LAB" : "PRIMARY",
+          ok: true,
+          ms: Date.now() - t0,
+          mode: report.budgetMode,
+          kill: report.kill,
+          entries: report.entries,
+          exits: report.exits,
+          court: report.courtContracts,
+          tier2: report.tier2,
+          next_s: next,
+        }),
+      );
       if ((getKV(this.sql, "pulse_error_streak") ?? "0") !== "0")
         setKV(this.sql, "pulse_error_streak", "0", Date.now());
     } catch (e) {
@@ -163,8 +204,17 @@ export class AgentCortexDO extends DurableObject<Env> {
         DOCTRINE.cadence.pulse_seconds_exposed * 2 ** Math.min(n, 6),
         DOCTRINE.cadence.pulse_seconds_flat,
       );
-      console.error("[cortex] pulse failed", n, e);
+      console.error(
+        JSON.stringify({
+          kind: "pulse",
+          brain: (this.constructor as typeof AgentCortexDO).lab ? "LAB" : "PRIMARY",
+          ok: false,
+          streak: n,
+          error: String(e).slice(0, 300),
+        }),
+      );
     } finally {
+      this.pulsing = false;
       // Always re-arm: a pulse error must never stop the heart.
       await this.ctx.storage.setAlarm(Date.now() + next * 1000);
     }
@@ -181,6 +231,8 @@ export class AgentCortexDO extends DurableObject<Env> {
       doctrine_sha256: DOCTRINE_SHA256,
       hot_schema_version: HOT_SCHEMA_VERSION,
       discord_fail_streak: Number(getKV(this.sql, "discord_fail_streak") ?? 0),
+      policy_violations: this.brain.policyViolations(),
+      slo: this.brain.slo(),
       accounts_configured: this.brain
         .status()
         .accounts.filter((a) => a.configured)
@@ -243,6 +295,11 @@ export class AgentCortexDO extends DurableObject<Env> {
   consumeOnce(id: string): boolean {
     this.begin();
     return this.brain.consumeOnce(id);
+  }
+
+  isRevoked(id: string): boolean {
+    this.begin();
+    return this.brain.isRevoked(id);
   }
 
   memory(): ReturnType<Brain["memoryView"]> {

@@ -34,6 +34,7 @@ function fakeBrain() {
       used.add(id);
       return true;
     },
+    isRevoked: async (id) => used.has(id),
     pause: (a, by) => {
       calls.push(`pause ${a} ${by}`);
       return "paused";
@@ -77,6 +78,11 @@ describe("web API", () => {
     expect((await cmd({ name: "flatten", account: "PAPER" })).status).toBe(400);
     expect((await cmd({ name: "flatten", account: "PAPER", confirm: "FLATTEN" })).status).toBe(200);
     expect((await cmd({ name: "rm", account: "PAPER" })).status).toBe(400);
+    // audit W1-26: logout revokes the session server-side; the same cookie can no longer command
+    expect(
+      (await handleWeb(req("/api/logout", { method: "POST", headers: { cookie } }), env, b)).status,
+    ).toBe(200);
+    expect((await cmd({ name: "pause", account: "PAPER" })).status).toBe(401);
   });
 
   it("refuses everything when no secret is configured", async () => {

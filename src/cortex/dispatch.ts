@@ -35,37 +35,44 @@ export const DISPATCH_JOBS: readonly DispatchJob[] = [
 /** Late slots older than this are skipped (the next slot will come). */
 export const DISPATCH_GRACE_MS = 20 * 60_000;
 
-function fieldMatches(field: string, value: number): boolean {
+const FIELD_MAX = [59, 23, 31, 12, 6] as const; // minute, hour, day-of-month, month, day-of-week
+
+function fieldMatches(field: string, value: number, max: number): boolean {
   return field.split(",").some((part) => {
     const [range, stepRaw] = part.split("/") as [string, string | undefined];
     const step = stepRaw === undefined ? 1 : Number(stepRaw);
     let lo: number;
     let hi: number;
     if (range === "*") {
-      lo = 0;
-      hi = 59;
+      lo = max === 31 || max === 12 ? 1 : 0;
+      hi = max;
     } else if (range.includes("-")) {
       [lo, hi] = range.split("-").map(Number) as [number, number];
     } else {
       lo = Number(range);
-      hi = stepRaw === undefined ? lo : 59;
+      hi = stepRaw === undefined ? lo : max; // "5/15" = from 5 to the field's max (audit W1-19: was always 59)
     }
     return value >= lo && value <= hi && (value - lo) % step === 0;
   });
 }
 
-/** Five-field cron (minute hour day-of-month month day-of-week; Sunday = 0), evaluated in UTC. */
+/**
+ * Five-field cron (minute hour day-of-month month day-of-week; Sunday = 0), evaluated in UTC. Like Vixie cron (and
+ * GitHub), when both day fields are restricted a day matches if EITHER does (audit W1-19).
+ */
 export function cronMatches(expr: string, ms: number): boolean {
   const f = expr.trim().split(/\s+/);
   if (f.length !== 5) throw new Error(`bad cron: ${expr}`);
   const d = new Date(ms);
   const [m, h, dom, mon, dow] = f as [string, string, string, string, string];
+  const domOk = fieldMatches(dom, d.getUTCDate(), FIELD_MAX[2]);
+  const dowOk = fieldMatches(dow, d.getUTCDay(), FIELD_MAX[4]);
+  const dayOk = dom !== "*" && dow !== "*" ? domOk || dowOk : domOk && dowOk;
   return (
-    fieldMatches(m, d.getUTCMinutes()) &&
-    fieldMatches(h, d.getUTCHours()) &&
-    fieldMatches(dom, d.getUTCDate()) &&
-    fieldMatches(mon, d.getUTCMonth() + 1) &&
-    fieldMatches(dow, d.getUTCDay())
+    fieldMatches(m, d.getUTCMinutes(), FIELD_MAX[0]) &&
+    fieldMatches(h, d.getUTCHours(), FIELD_MAX[1]) &&
+    fieldMatches(mon, d.getUTCMonth() + 1, FIELD_MAX[3]) &&
+    dayOk
   );
 }
 

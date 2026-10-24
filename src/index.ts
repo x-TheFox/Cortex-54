@@ -193,6 +193,9 @@ async function adminReset(request: Request, env: Env): Promise<Response> {
     return new Response("bad json", { status: 400 });
   }
   if (q.account !== "PAPER" && q.account !== "LIVE") return new Response("bad account", { status: 400 });
+  // Audit W1-25: a captured signed request must not replay within its ±10 min window.
+  if (!(await brain(env).consumeOnce(`admin-reset:${request.headers.get("x-cortex-signature")}`)))
+    return new Response("replayed request", { status: 409 });
   const r = await brain(env).resetAccount(q.account, "operator:admin-reset");
   return Response.json(r, { status: r.ok ? 200 : 409 });
 }

@@ -38,6 +38,8 @@ export const CORTEX_COMMANDS = [
         name: "postmortem",
         description: "What happened and what changes (≥50 chars)",
         required: true,
+        min_length: 50,
+        max_length: 1500,
       },
     ],
   },

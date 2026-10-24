@@ -139,3 +139,29 @@ describe("risk spine properties", () => {
     );
   });
 });
+
+describe("journal re-anchor (audit W1-03)", () => {
+  const fresh = () => {
+    const sql = memorySql();
+    for (const s of HOT_SCHEMA) sql.exec(s);
+    return { sql, j: new Journal(sql) };
+  };
+  const sha = "a".repeat(64);
+
+  it("adopts D1's head only when the hot head is empty and nothing is pending", async () => {
+    const { j } = fresh();
+    expect(await j.reanchor(async () => ({ seq: 500, sha }))).toBe("adopted");
+    expect(j.head()).toEqual({ seq: 500, sha });
+    expect(j.append("SYSTEM", "K", null, {}, 1).seq).toBe(501);
+    expect(await j.reanchor(async () => ({ seq: 9, sha }))).toBe("kept");
+  });
+
+  it("keeps a fresh chain when D1 is empty, and never overrides pending rows", async () => {
+    const a = fresh();
+    expect(await a.j.reanchor(async () => null)).toBe("fresh");
+    const b = fresh();
+    b.j.append("SYSTEM", "K", null, {}, 1);
+    b.sql.exec("DELETE FROM journal_head");
+    expect(await b.j.reanchor(async () => ({ seq: 500, sha }))).toBe("kept");
+  });
+});
