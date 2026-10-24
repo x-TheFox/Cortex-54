@@ -521,3 +521,23 @@ changed — a table rebuild of the append-only, hash-chained journal (U7) — so
 Also: the Alpaca client now pages multi-symbol daily bars (1,000 rows per page across all symbols silently cut later
 symbols short — the same bug the Kronos job hit).
 
+## ADR-046 — Backtest lab: replay every rule strategy with costs; promote the one that passes, demote the losers (2026-10-24)
+**Context:** `docs/STRATEGY_RESEARCH.md` put a backtest lab first in the build queue, so no strategy trades PAPER on
+reputation alone. Containers are paid; GitHub Actions is free.
+**Decision:** `research.yml` job `backtest` (Sundays 07:13 UTC, also brain-dispatched) replays every deterministic RULE
+strategy over 3 years of Alpaca daily bars (`research/cortex_research/backtest.py`, parameters read from the doctrine),
+charging crypto 0.35% and equities 0.05% per side, filling triggers at max(open, trigger), counting same-bar
+stop/target touches as stops, one position per symbol. Each strategy gets the Governor's statistics (expectancy in R,
+profit factor, bootstrap p, max drawdown) plus a BH-FDR q-value across all strategies and a first-two-thirds versus
+latest-third split. Verdict: PASS (positive, q < 0.1, positive latest third), UNPROVEN, LOSES, TOO FEW TRADES. The
+brain stores the report (`backtest:latest`), journals the verdicts and posts a card to #governor.
+**First run (2026-10-24, 3 years):** RSI(2) pullback PASS (104 trades, 78% win, +0.27R, PF 2.5, q≈0, latest third
++0.17R); breakout baseline UNPROVEN (+0.05R, latest third −0.04R); oversold bounce −0.08R, crypto trend −0.08R,
+inverse ETFs −0.06R, turn-of-month −0.14R: all LOSE.
+**Acted on (operator delegated the calls):** EQUITY_RSI2_PULLBACK_V1 → ACTIVE on PAPER (and still in LAB);
+CRYPTO_OVERSOLD_BOUNCE_V1 and EQUITY_INVERSE_BREAKOUT_V1 → SHADOW on PAPER, moved to LAB to keep collecting forward
+evidence (the backtest simplifies their intraday triggers and, for inverse ETFs, proxies the regime). The baseline
+stays ACTIVE as the plumbing strategy but is flagged. The court and Kronos are not replayed.
+**Honest limit:** a backtest that agrees with the literature is still a backtest. LAB forward results and live PAPER
+grading decide what stays.
+

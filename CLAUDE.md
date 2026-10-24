@@ -283,7 +283,7 @@ pnpm web:dev              # web terminal on localhost with synthetic data (/?ale
 pnpm deploy:cortex        # builds web/ then wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists). NOT `pnpm deploy` (pnpm builtin)
 pnpm deploy:sentinel      # deploy the independent watchdog/kill-switch worker
 pnpm discord:setup        # idempotent: CORTEX-54 category + 8 channels, sentinel webhook, guild slash commands
-gh workflow run research -f job=crypto    # or job=equity | world | options | screeners | kronos: run a research batch now
+gh workflow run research -f job=crypto    # or job=equity | world | options | screeners | kronos | backtest: run a batch now
 pnpm court:smoke BTC/USD ["headline"] [--post]   # real bull/bear/Clef run on live evidence; never trades
 # Discord /court SYMBOL convenes a real session (PAPER, all gates apply); cards go to #bull-vs-bear-court
 pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
@@ -407,5 +407,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-24: ADR-044: the court is a full hearing (rebuttal + 3-seat panel) and posts a six-part transcript to Discord.
 - 2026-10-24: ADR-045: LAB brain (`LabCortexDO`, D1 `cortex-lab`, LAB paper account) forward-tests Kronos and the
   research strategies (trend, RSI(2) pullback, turn-of-month); PAPER only runs strategies that graduate by PR.
+- 2026-10-24: ADR-046: backtest lab (weekly). RSI(2) pullback PASSES → ACTIVE on PAPER; bounce and inverse ETFs lose
+  net of costs → moved to LAB; trend and turn-of-month lose too (LAB only).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

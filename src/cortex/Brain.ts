@@ -17,6 +17,7 @@ import {
   type TriageItem,
 } from "../clef/triage.ts";
 import {
+  BacktestPayloadSchema,
   type Batch,
   BatchSchema,
   BeliefSchema,
@@ -1524,6 +1525,43 @@ ${postmortem}`,
   }
 
   /** Store the latest Kronos forecasts (ADR-041). Whole-batch replace; each forecast is validated. */
+  /** Backtest lab report (ADR-046): stored for the panel and posted as a report card to #governor. */
+  private async ingestBacktest(b: Batch, now: number): Promise<{ ok: boolean; message: string }> {
+    const r = BacktestPayloadSchema.safeParse(b.items.find((x) => x.skill_id === "backtest-lab")?.payload);
+    if (!r.success) return { ok: false, message: "backtest payload failed the schema" };
+    setKV(this.sql, "backtest:latest", JSON.stringify({ produced_at: b.produced_at, ...r.data }), now);
+    type Res = (typeof r.data.results)[string];
+    const rows = Object.entries(r.data.results).sort(
+      (x, y) => (y[1].expectancy_r ?? -9) - (x[1].expectancy_r ?? -9),
+    );
+    const mark: Record<string, string> = { PASS: "🟢", UNPROVEN: "🟡", LOSES: "🔴", "TOO FEW TRADES": "⚪" };
+    const num = (x: number | null | undefined, f: (v: number) => string) =>
+      x === null || x === undefined ? "—" : f(x);
+    const line = ([id, s]: [string, Res]) =>
+      `${mark[s.verdict] ?? "•"} \`${id}\` **${s.verdict}** · ${s.n} trades · win ${num(s.win_rate, (v) => `${Math.round(v * 100)}%`)} · ${num(s.expectancy_r, (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}R`)}/trade · PF ${num(s.profit_factor, (v) => v.toFixed(2))} · q ${num(s.q_value, (v) => v.toFixed(3))} · latest third ${num(s.last_third_r, (v) => `${v >= 0 ? "+" : ""}${v.toFixed(2)}R`)}${s.lab ? " · 🧪 LAB" : ""}`;
+    await this.deps.notifier.post("governor", {
+      embeds: [
+        {
+          title: `🧪 Backtest lab — ${r.data.years} years, fees and slippage included`,
+          description: rows.map(line).join("\n").slice(0, 3900),
+          color: COLORS.cyan,
+          fields: [{ name: "Limits", value: r.data.limits.slice(0, 1000) }],
+          footer: {
+            text: "PASS = positive edge that survives the BH-FDR correction and holds in the latest third",
+          },
+        },
+      ],
+    });
+    this.journal.append(
+      "SYSTEM",
+      "BACKTEST",
+      null,
+      Object.fromEntries(rows.map(([id, s]) => [id, s.verdict])),
+      now,
+    );
+    return { ok: true, message: `stored ${rows.length} backtest results` };
+  }
+
   private ingestKronos(b: Batch, now: number): { ok: boolean; message: string } {
     const p = kronosParams(this.d);
     const age = p ? p.max_forecast_age_hours : 5;
@@ -2737,6 +2775,7 @@ ${postmortem}`,
     if (b.job === "options-lab") return this.ingestOptionsLab(b, now);
     if (b.job === "screeners") return this.ingestScreeners(b, now);
     if (b.job === "kronos") return this.ingestKronos(b, now);
+    if (b.job === "backtest") return this.ingestBacktest(b, now);
     if (b.job === "world-intel" || b.posture === null) {
       const pulse = b.items.find((x) => x.skill_id === "gdelt-world-pulse")?.payload as
         | {

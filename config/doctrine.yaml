@@ -218,6 +218,8 @@ lab:
     - CRYPTO_TREND_V1
     - EQUITY_RSI2_PULLBACK_V1
     - CRYPTO_TURN_OF_MONTH_V1
+    - CRYPTO_OVERSOLD_BOUNCE_V1 # ADR-046: demoted from PAPER by the backtest
+    - EQUITY_INVERSE_BREAKOUT_V1 # ADR-046: demoted from PAPER by the backtest
 
 strategies:
   - id: CRYPTO_BREAKOUT_BASELINE_V1
@@ -253,7 +255,7 @@ strategies:
   # strategy buys 1x inverse ETFs (constitution allowlist) when the regime is bearish.
   - id: CRYPTO_OVERSOLD_BOUNCE_V1
     arena: CRYPTO
-    status: ACTIVE
+    status: SHADOW # ADR-046: 3-year backtest −0.08R/trade net of costs → LAB only
     universe:
       [
         BTC/USD,
@@ -288,7 +290,7 @@ strategies:
     accounts: [PAPER]
   - id: EQUITY_INVERSE_BREAKOUT_V1
     arena: EQUITIES
-    status: ACTIVE # regular session only
+    status: SHADOW # ADR-046: 3-year backtest −0.06R/trade (regime proxied) → LAB only
     universe: [SH, PSQ, RWM, BITI] # must be in constitution.allowed.inverse_etfs_1x (config:build checks)
     params:
       instrument: inverse_etf_1x
@@ -374,7 +376,7 @@ strategies:
     accounts: [PAPER]
   - id: EQUITY_RSI2_PULLBACK_V1
     arena: EQUITIES
-    status: SHADOW
+    status: ACTIVE # ADR-046: backtest PASS (104 trades, 78% win, +0.27R, q≈0, holds in the latest third)
     universe: [SPY, QQQ, IWM, DIA]
     params:
       sma_trend: 200
