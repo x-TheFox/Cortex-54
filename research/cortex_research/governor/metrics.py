@@ -121,6 +121,51 @@ def isotonic(pairs: Sequence[tuple[float, int]]) -> list[tuple[float, float]]:
     return dedup
 
 
+def platt(pairs: Sequence[tuple[float, int]], grid: int = 21) -> list[tuple[float, float]]:
+    """Two-parameter logistic calibration on logit(p), fitted by Newton's method, serialized as a dense monotone
+    point map for the existing TypeScript schema (audit W2-19: unsmoothed isotonic overfits at n≈50–300).
+    Falls back to a flat map at the base rate if the fitted slope is not positive."""
+    eps = 1e-4
+    xs = [math.log(min(1 - eps, max(eps, p)) / (1 - min(1 - eps, max(eps, p)))) for p, _ in pairs]
+    ys = [float(y) for _, y in pairs]
+    a, b = 1.0, 0.0
+    for _ in range(50):
+        ga = gb = haa = hab = hbb = 0.0
+        for x, y in zip(xs, ys):
+            q = 1 / (1 + math.exp(-(a * x + b)))
+            w = q * (1 - q)
+            ga += (q - y) * x
+            gb += q - y
+            haa += w * x * x + 1e-9
+            hab += w * x
+            hbb += w + 1e-9
+        det = haa * hbb - hab * hab
+        if abs(det) < 1e-12:
+            break
+        da = (hbb * ga - hab * gb) / det
+        db = (haa * gb - hab * ga) / det
+        a, b = a - da, b - db
+        if abs(da) + abs(db) < 1e-9:
+            break
+    base = sum(ys) / len(ys) if ys else 0.5
+    out: list[tuple[float, float]] = []
+    for i in range(grid):
+        p = i / (grid - 1)
+        if a <= 0:
+            y = base
+        else:
+            x = math.log(min(1 - eps, max(eps, p)) / (1 - min(1 - eps, max(eps, p))))
+            y = 1 / (1 + math.exp(-(a * x + b)))
+        y = round(y, 4)
+        out.append((round(p, 4), max(y, out[-1][1]) if out else y))
+    return out
+
+
+def calibration_map(pairs: Sequence[tuple[float, int]]) -> tuple[str, list[tuple[float, float]]]:
+    """The ladder: Platt below 300 outcomes, isotonic from 300 (where the step map stops being noise)."""
+    return ("isotonic", isotonic(pairs)) if len(pairs) >= 300 else ("platt", platt(pairs))
+
+
 def apply_map(points: Sequence[tuple[float, float]], raw: float) -> float:
     """Piecewise-linear, clamped — identical to applyMap in src/contracts/calibration.ts."""
     if raw <= points[0][0]:

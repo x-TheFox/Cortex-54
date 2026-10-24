@@ -2787,6 +2787,15 @@ ${postmortem}`,
         win_cal: calibrated,
         bear: bear.value.lethality,
         notes: checked.notes,
+        // audit W2-01: keep each seat's independent view so the Governor can grade panel vs plain votes vs judge
+        panel: panel.map((p) => ({ seat: p.seat, stance: p.stance, confidence: p.confidence, by: p.by })),
+        rebuttal: rebuttal
+          ? {
+              held: rebuttal.still_long,
+              conceded: rebuttal.concessions.length,
+              conviction: rebuttal.revised_conviction,
+            }
+          : null,
       },
       now,
     );

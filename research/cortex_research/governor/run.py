@@ -382,11 +382,11 @@ def main() -> int:
 
     # calibration map → file (the workflow turns a changed file into a PR)
     if a.weekly and len(pairs) >= MIN_OUTCOMES_FOR_MAP:
-        pts = M.isotonic(pairs)
+        method, pts = M.calibration_map(pairs)
         cal_path = REPO / "config" / "calibration.json"
         cal = json.loads(cal_path.read_text())
         cal["maps"]["court.win_prob"] = {
-            "n": len(pairs), "points": [[x, y] for x, y in pts], "brier_raw": round(b_raw or 0, 4),
+            "n": len(pairs), "method": method, "points": [[x, y] for x, y in pts], "brier_raw": round(b_raw or 0, 4),
             "brier_calibrated": round(M.brier([(M.apply_map(pts, x), o) for x, o in pairs]) or 0, 4),
         }
         cal["generated_at"] = now

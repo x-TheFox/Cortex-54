@@ -30,6 +30,9 @@ DATA = "https://data.alpaca.markets"
 MODEL = "NeoQuasar/Kronos-base"  # operator 2026-10-24: base (102M), not small
 TOKENIZER = "NeoQuasar/Kronos-Tokenizer-base"
 MAX_CONTEXT = 512
+# Weights pinned by Hugging Face revision (audit 2026-10-24: only the code checkout was pinned).
+MODEL_REVISION = "2b554741eca47781b64468546e77fef3e85130e6"
+TOKENIZER_REVISION = "0e0117387f39004a9016484a186a908917e22426"
 
 
 def strategy(doctrine_path: Path) -> dict:
@@ -133,8 +136,8 @@ def load_predictor(kronos_dir: Path):
 
     torch.manual_seed(54)
     torch.set_num_threads(max(1, os.cpu_count() or 1))
-    tok = KronosTokenizer.from_pretrained(TOKENIZER)
-    model = Kronos.from_pretrained(MODEL)
+    tok = KronosTokenizer.from_pretrained(TOKENIZER, revision=TOKENIZER_REVISION)
+    model = Kronos.from_pretrained(MODEL, revision=MODEL_REVISION)
     return KronosPredictor(model, tok, device="cpu", max_context=MAX_CONTEXT)
 
 

@@ -8,6 +8,7 @@ merges them (constitution U8). Every rule cites ≥3 contract ids.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -81,7 +82,8 @@ def _same(expr_a: dict, expr_b: dict) -> bool:
 
 def scar_proposals(trades: list[dict], facts: dict[str, dict], existing: list[dict], today: date) -> list[dict]:
     """New hard-filter proposals from repeated losses. Never duplicates an existing expression."""
-    nums = [int(r["id"].split("-")[1]) for r in existing if str(r.get("id", "")).startswith("SCAR-")]
+    # a hand-edited id like "SCAR-xyz" must not crash the whole Governor run (audit W2-16)
+    nums = [int(m.group(1)) for r in existing if (m := re.match(r"SCAR-(\d+)$", str(r.get("id", ""))))]
     nxt = max(nums, default=0) + 1
     out: list[dict] = []
 

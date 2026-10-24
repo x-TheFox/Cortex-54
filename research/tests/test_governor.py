@@ -130,3 +130,30 @@ def test_gate_cost_grades_regime_refusals():
     out = gate_cost(rej, grades)
     assert "2 graded" in out and "avg R +0.25" in out and "1 would have won" in out
     assert "none graded" in gate_cost(rej, [])
+
+
+def test_calibration_ladder_platt_is_smooth_monotone_and_spans_0_1():
+    import random
+
+    rnd = random.Random(7)
+    pairs = []
+    for _ in range(120):
+        p = rnd.random()
+        pairs.append((p, 1 if rnd.random() < 0.2 + 0.6 * p else 0))  # true rate rises with p, compressed
+    method, pts = M.calibration_map(pairs)
+    assert method == "platt" and len(pts) == 21
+    xs = [x for x, _ in pts]
+    ys = [y for _, y in pts]
+    assert xs[0] == 0.0 and xs[-1] == 1.0 and all(b > a for a, b in zip(xs, xs[1:]))
+    assert all(b >= a for a, b in zip(ys, ys[1:])) and ys[-1] > ys[0]
+    assert M.calibration_map(pairs * 3)[0] == "isotonic"
+    flat = M.platt([(0.9, 0), (0.1, 1)] * 30)  # anti-correlated: no positive slope → flat at the base rate
+    assert len({y for _, y in flat}) == 1
+
+
+def test_scar_ids_with_bad_suffixes_do_not_crash():
+    from datetime import date
+
+    from cortex_research.governor.memory import scar_proposals
+
+    assert scar_proposals([], {}, [{"id": "SCAR-xyz"}, {"id": "SCAR-004"}], date(2026, 10, 24)) == []
