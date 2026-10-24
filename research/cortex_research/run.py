@@ -208,11 +208,18 @@ def sign_and_post(body: str) -> requests.Response:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["crypto", "equity", "world", "screeners", "kronos", "backtest"])
+    ap.add_argument("job", choices=["crypto", "equity", "world", "screeners", "kronos", "backtest", "dossier"])
     ap.add_argument("--dry-run", action="store_true", help="print the payload instead of posting")
     a = ap.parse_args()
     version = os.environ.get("UPSTREAM_SHA", "unknown")
-    if a.job == "screeners":
+    if a.job == "dossier":
+        from .deep.job import dossier_job
+
+        b = dossier_job(REPO / "config" / "doctrine.yaml", os.environ.get("DOSSIER_SYMBOL", ""),
+                        os.environ.get("DOSSIER_CONTEXT", ""), now_ms(), run_url())
+        if b is None:
+            return 1
+    elif a.job == "screeners":
         from .screeners import screener_job
 
         b = screener_job(Path(os.environ["UPSTREAM_DIR"]), version, run_skill, newest, now_ms(), REPO / "config" / "doctrine.yaml")
@@ -241,6 +248,7 @@ def main() -> int:
     head = (f"{p['arena']} {p['posture']} score {p['score']:.1f}" if p
             else f"{len(b['items'][0]['payload']['forecasts'])} forecasts" if b["job"] == "kronos"
             else f"{len(b['items'][0]['payload']['results'])} strategies" if b["job"] == "backtest"
+            else f"{b['items'][0]['payload']['symbol']}: {len(b['items'][0]['payload']['findings'])} findings" if b["job"] == "dossier"
             else f"{sum(len(i['payload'].get('candidates', [])) for i in b['items'])} candidates")
     print(f"{b['job']}: {head} ({len(b['items'])} items, {len(body)} bytes)")
     if a.dry_run:

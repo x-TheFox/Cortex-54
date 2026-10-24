@@ -627,3 +627,31 @@ fields (worthwhile, medium effort; after the panel A/B data exists); participati
 (irrelevant at $10 tickets); HMM/BOCPD regime features and funding-rate vetoes (research ideas — they enter through
 the backtest lab like any strategy).
 
+
+## ADR-051 — Web research desk: a multi-step research agent feeds the court (2026-10-24)
+**Context:** The court argued from a thin bundle (one headline, technicals, regime, Clairic facts) and its models
+know nothing after their training cutoffs. The operator asked for an agent with web tools and full multi-step freedom
+whose findings go to the court. Verified 2026-10-24: Gemini's Google Search grounding has zero free quota; Groq's
+`compound` web-search models are not on this key; keyless DuckDuckGo HTML, Google News RSS, Bing News RSS, Wikipedia
+REST and the Jina reader work; NIM `nemotron-3-ultra` answers JSON in ≈3 s; OpenRouter `nemotron-3-ultra:free` in ≈13 s
+(most other `:free` models are rate-limited or harness-only); Groq `gpt-oss-120b` caps at 8K tokens/minute.
+**Decision:** a micro-harness in `research/cortex_research/deep/` (GitHub Actions, `research.yml` job `dossier`):
+- *Agent loop* (`agent.py`): the model drives — each step it thinks, writes notes (claim + source URL + date + stance)
+  and picks up to 3 tool calls, or finishes. It is told today's date and that its memory is stale. The harness only
+  bounds the loop (22 steps, 14 min, 450K tokens), keeps context small (running notebook + latest results), and when
+  the budget ends makes one write-up call from the notebook.
+- *Tools* (`tools.py`, read-only): web_search, news_search, read_url (direct fetch, Jina fallback; local addresses
+  refused), wikipedia, sec_filings (EDGAR), market_snapshot and company_news (Alpaca, LAB key).
+- *Model chain* (`llm.py`): NIM nemotron-3-ultra → OpenRouter nemotron-3-ultra:free → Gemini 3.5 Flash → Groq
+  gpt-oss-120b/20b (small prompts only); throttled providers cool down.
+- *Code checks* (`build_dossier`): a finding may only cite a URL some tool returned (invented sources are dropped);
+  `verified` = the agent read that page; near-duplicates merged; schema-bounded (`DossierPayloadSchema`).
+**Brain:** a Tier 2 pass (or `/court`) dispatches `research.yml job=dossier symbol=… context=…` and holds the case in
+`court_waits` (hot schema v7) for up to `funnel.research.wait_minutes` (25); the dossier's ingest stores it in
+`dossiers`, releases the case, and posts a full 📚 card. The court then sees `evidence.research` — summary, cases,
+catalysts, risks and numbered findings (`res_N`, citable receipts) — and the transcript gains a "📚 Research desk
+briefing" embed. Fresh dossiers (≤ 12 h) are reused; ≤ 16 dispatches/day. Prompts bull@4, bear@4, rebuttal@2,
+panel@2, synth@5 tell every role the dossier is the best view of current events but unverified web text that never
+overrides code-computed prices. Nothing in the dossier can size or place an order (U2 unchanged).
+**Cost:** $0 — public-repo Actions minutes, keyless web sources, free LLM tiers. ≈ 15–30 LLM calls and ≈ 100–300K
+tokens per dossier, almost all on NIM.

@@ -31,6 +31,7 @@ data skips the dependent decision (fail closed).
 | Insider Form 4 | SEC EDGAR full-text / submissions JSON | daily | insider-form4-watcher |
 | COT | CFTC Socrata (publicreporting.cftc.gov) | Friday after release | cot-contrarian-detector |
 | Polymarket odds | Gamma API | daily (Phase 7+) | macro divergence (read-only) |
+| Web research (ADR-051) | DuckDuckGo HTML search, Google News RSS, Bing News RSS, Wikipedia REST, page fetch with Jina reader fallback, EDGAR submissions, Alpaca bars/news | per court case (≤ 16/day) | research desk dossier → court evidence (`res_*`) |
 | World risk pulse | **GDELT GKG 2.1 bulk files** (free, no rate limit, ~45 min lag; DOC API is throttled on GitHub runners) | hourly | gdelt-world-pulse → regime `WORLD` + wire press releases → triage |
 
 ## Blocked / avoided

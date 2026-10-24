@@ -43,7 +43,7 @@ The meter estimates neurons from token counts *before* the call (chars/3.5 heuri
 
 | Resource | Limit | Use |
 |---|---|---|
-| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research: crypto ~4 min × 6/day + equity ~8 min × 2/weekday; governor ~2 min/day (daily + Sunday weekly); options lab ~3 min × 2/weekday; Kronos-base ~12 min (torch install + 13 pairs × ~25 s CPU) × 6/day; backtest lab ~2 min weekly (LAB data key) |
+| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research: crypto ~4 min × 6/day + equity ~8 min × 2/weekday; governor ~2 min/day (daily + Sunday weekly); options lab ~3 min × 2/weekday; Kronos-base ~12 min (torch install + 13 pairs × ~25 s CPU) × 6/day; backtest lab ~2 min weekly (LAB data key); research desk (ADR-051) ≤ 16 dossiers/day × ≤ 25 min |
 | Schedule granularity | ≥5 min, UTC, may delay 15–30 min or skip | batch jobs carry `produced_at`; brain checks staleness |
 | Inactivity | schedules auto-disable after 60 days of no repo activity | Governor PRs + a monthly keepalive commit; brain alarms on stale batch |
 | Secrets | free | `CLOUDFLARE_API_TOKEN`, `INGEST_HMAC_SECRET`, `DISCORD_WEBHOOK_GOVERNOR`, data API keys |
@@ -63,6 +63,11 @@ existing budget). GitHub allows 5,000 requests/hour per token.
 Kronos (ADR-041) adds one ingest every 4 h (one Worker + one DO request, one KV row write) and no Workers AI neurons:
 the model runs on the GitHub runner. Weights (~100 MB) are cached between runs with `actions/cache`.
 
+The research desk (ADR-051) adds per dossier: one GitHub dispatch, one ingest (one Worker + one DO request, a few DO
+rows), one Discord post, and ≈ 15–30 LLM calls / 100–300K tokens on the free chain (NIM first). Web reads are keyless
+(DuckDuckGo, Google/Bing News RSS, Wikipedia, Jina reader at ≤ 20 req/min) plus a few Alpaca data calls on the LAB key.
+At 16/day: ≤ ~500 NIM calls/day (40 RPM cap, no daily cap seen); Groq only takes prompts ≤ 6K tokens (8K TPM).
+
 If the repo ever goes private: 2,000 min/month free would no longer cover this (~3,100 min/month projected with Kronos);
 cut Kronos to every 8 h first.
 
@@ -72,8 +77,8 @@ cut Kronos to every 8 h first.
 |---|---|---|---|
 | Google Gemini (AI Studio) | console-only limits | Bull (primary) | free-tier prompts may be used for training → send market data only |
 | Groq | ~30 RPM, 1K RPD, 200K TPD per model | Bear (primary, gpt-oss-120b) | different family from Gemini |
-| NVIDIA NIM | ~40 RPM | Bear fallback (nemotron) | requires NVIDIA Developer Program (free) |
-| OpenRouter `:free` | 20 RPM, 50 RPD | last-resort fallback | free hosts may log prompts |
+| NVIDIA NIM | ~40 RPM | Bear fallback (nemotron); research desk primary (nemotron-3-ultra) | requires NVIDIA Developer Program (free) |
+| OpenRouter `:free` | 20 RPM, 50 RPD | research desk fallback (nemotron-3-ultra:free) | free hosts may log prompts |
 | Mistral | ~$10/month credits | optional fallback | opt out of training |
 | Workers AI gpt-oss-120b | neurons | emergency fallback | same family as Groq gpt-oss → only valid as bull fallback |
 

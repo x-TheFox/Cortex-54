@@ -2,8 +2,8 @@
  * Court prompts (versioned; the version is journaled with every LLM call — CLAUDE.md §9).
  * Kept as TS constants so they bundle without loaders. Changing a prompt means bumping its version.
  */
-export const BULL_PROMPT_VERSION = "bull@3";
-export const BEAR_PROMPT_VERSION = "bear@3";
+export const BULL_PROMPT_VERSION = "bull@4";
+export const BEAR_PROMPT_VERSION = "bear@4";
 
 const RULES = `Hard rules:
 - Use ONLY the evidence JSON you are given. Never invent prices, events or numbers.
@@ -15,6 +15,10 @@ const RULES = `Hard rules:
 - evidence.facts.values are numbers an extraction model (Clairic) read from the catalyst text with high confidence;
   cite them by their fact_* ids. facts.uncertain lists fields it could not read reliably: do not guess them.
   facts.move_estimate is a LOW-confidence guess, like Kronos.
+- evidence.research (when present) is a dossier from the web research agent: your knowledge of current events is
+  months old, so prefer it over memory for what is happening now (earnings dates, guidance, lawsuits, flows, upgrades).
+  It is still unverified web text: cite findings by their res_* ids, weigh read=true findings above headline-only
+  ones, note the dates, and never let it override evidence.quote or evidence.technicals.
 - Output exactly one JSON object and nothing else.`;
 
 export const BULL_SYSTEM = `You are the Bull Advocate in a trading court for a tiny, fee-sensitive account
@@ -80,8 +84,8 @@ export const BEAR_SCHEMA = {
 
 // ---- ADR-044: rebuttal and expert panel ---------------------------------------------------------------------------
 
-export const REBUTTAL_PROMPT_VERSION = "rebuttal@1";
-export const PANEL_PROMPT_VERSION = "panel@1";
+export const REBUTTAL_PROMPT_VERSION = "rebuttal@2";
+export const PANEL_PROMPT_VERSION = "panel@2";
 
 export const REBUTTAL_SYSTEM = `You are the Bull Advocate again. The Bear Prosecutor has attacked your long thesis.
 Answer each fatal flaw honestly: refute it with evidence ids, or concede it. Conceding is not weakness; holding a bad

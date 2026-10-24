@@ -102,6 +102,12 @@ export const DoctrineSchema = z.object({
       max_per_day: z.number().int().nonnegative(),
       min_chars: z.number().int().nonnegative(),
     }),
+    research: z.object({
+      enabled: z.boolean(),
+      fresh_hours: z.number().positive().max(72),
+      wait_minutes: z.number().int().min(1).max(120),
+      max_per_day: z.number().int().nonnegative().max(100),
+    }),
     tier3: z.object({
       max_sprints_per_day: z.number().int().nonnegative(),
       min_structural_score: z.number().min(0).max(100),

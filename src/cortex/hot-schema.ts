@@ -3,7 +3,7 @@
  * Small, transactional, current-state only. History goes to D1 via the outbox.
  * Once deployed: bump HOT_SCHEMA_VERSION and append statements; never edit applied ones.
  */
-export const HOT_SCHEMA_VERSION = 6;
+export const HOT_SCHEMA_VERSION = 7;
 
 export const HOT_SCHEMA: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -79,4 +79,9 @@ export const HOT_SCHEMA: readonly string[] = [
      PRIMARY KEY (account, at))`,
   // v5: equity earnings calendar for the 72 h blackout (ADR-035)
   `CREATE TABLE IF NOT EXISTS earnings (symbol TEXT NOT NULL, date TEXT NOT NULL, PRIMARY KEY (symbol, date))`,
+  // v7: web research dossiers (ADR-051) and court cases held for their dossier
+  `CREATE TABLE IF NOT EXISTS dossiers (symbol TEXT PRIMARY KEY, as_of INTEGER NOT NULL, json TEXT NOT NULL,
+     received_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS court_waits (candidate_id TEXT PRIMARY KEY, symbol TEXT NOT NULL,
+     until_at INTEGER NOT NULL)`,
 ];
