@@ -71,13 +71,11 @@ describe("web API", () => {
     const ok = await cmd({ name: "pause", account: "PAPER" });
     expect(ok.status).toBe(200);
     expect(calls).toEqual(["pause PAPER web:42"]);
-    expect(
-      (
-        (await (await cmd({ name: "dial", account: "LIVE", stop: 3, confirm: "RATIFY" })).json()) as {
-          message: string;
-        }
-      ).message,
-    ).toBe("dial LIVE 3 true");
+    // audit 2026-10-24: LIVE autonomy is Discord-only; flatten needs an explicit confirm
+    expect((await cmd({ name: "dial", account: "LIVE", stop: 3, confirm: "RATIFY" })).status).toBe(403);
+    expect((await cmd({ name: "unlock", account: "LIVE", postmortem: "x".repeat(60) })).status).toBe(403);
+    expect((await cmd({ name: "flatten", account: "PAPER" })).status).toBe(400);
+    expect((await cmd({ name: "flatten", account: "PAPER", confirm: "FLATTEN" })).status).toBe(200);
     expect((await cmd({ name: "rm", account: "PAPER" })).status).toBe(400);
   });
 

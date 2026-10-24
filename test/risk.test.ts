@@ -152,6 +152,12 @@ describe("breakers", () => {
       },
       d,
     );
+  it("fails closed on corrupt equity data instead of reading it as a 0% drawdown (audit)", () => {
+    expect(at(9_800, { hwmCents: 0 }).band).toBe("ORANGE");
+    expect(at(0, { hwmCents: 0 }).band).toBe("ORANGE");
+    expect(at(0, { hwmCents: 0 }).multiplier).toBe(0);
+    expect(at(0).band).toBe("RED"); // a real 100% drawdown is still RED
+  });
   it("bands by drawdown", () => {
     expect(at(9_800).band).toBe("GREEN");
     expect(at(9_650).band).toBe("YELLOW");

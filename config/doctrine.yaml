@@ -336,7 +336,7 @@ strategies:
       max_hold_hours: 48
       min_p_win: 0.6 # share of sampled paths that end profitable for this exact trade
       min_edge: 0.0 # p_target_first − p_stop_first must not be negative
-      max_forecast_age_hours: 3
+      max_forecast_age_hours: 5 # forecasts arrive every 4 h (+ runner delay); 3 h left a dead hour each cycle
       max_price_drift: 0.0075 # skip when the bid moved this far from the forecast's last price
       conviction: 5
       crash_floor: 15

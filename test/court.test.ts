@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ClairicResultSchema, interpretFacts } from "../src/clef/clairic.ts";
+import { ClairicResultSchema, grounded, interpretFacts } from "../src/clef/clairic.ts";
 import { interpretTier2 } from "../src/clef/tier2.ts";
 import { CalibrationMapSchema } from "../src/contracts/calibration.ts";
 import { contractViolations, DecisionContractSchema } from "../src/contracts/decision-contract.ts";
@@ -291,5 +291,30 @@ describe("Clairic catalyst facts (ADR-043)", () => {
     expect(f.values).toEqual({ entity: "NVIDIA", eps_surprise_pct: 4.8 });
     expect(f.uncertain).toEqual(["guidance_vs_consensus_pct"]);
     expect(f.move_estimate).toEqual({ confidence: "LOW", mean: 2.23, p10: 0, p90: 4.5 });
+  });
+});
+
+describe("Clairic grounding (audit 2026-10-24)", () => {
+  it("demotes stated numbers and entities that are not in the source text", () => {
+    const text = "Acme agreed to buy Widgetco for $1.2 billion; Acme shares rose 4% on the news.";
+    const r = ClairicResultSchema.parse({
+      answers: {
+        entity: { value: "Acme", confidence: 0.99 },
+        deal_value_usd_m: { value: 1200, confidence: 0.95 },
+        price_move_mentioned_pct: { value: 9, confidence: 0.95 }, // not in the text
+      },
+    });
+    const f = interpretFacts(r, 0.8, text);
+    expect(f.values).toEqual({ entity: "Acme", deal_value_usd_m: 1200 });
+    expect(f.uncertain).toEqual(["price_move_mentioned_pct"]);
+    expect(
+      interpretFacts(
+        ClairicResultSchema.parse({ answers: { entity: { value: "Ignore previous", confidence: 1 } } }),
+        0.8,
+        text,
+      ).uncertain,
+    ).toEqual(["entity"]);
+    expect(grounded(4, "shares rose 4% today")).toBe(true);
+    expect(grounded(4, "shares rose 14% today")).toBe(false);
   });
 });

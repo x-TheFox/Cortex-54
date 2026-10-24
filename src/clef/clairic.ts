@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AiBinding } from "./ClefClient.ts";
+import { type AiBinding, withTimeout } from "./ClefClient.ts";
 
 /**
  * Cloudflare Clairic (ADR-043): an extraction model on Workers AI (preview, verified live 2026-10-24). It reads text
@@ -45,12 +45,16 @@ export class WorkersAiClairic implements ClairicApi {
     fields: Record<string, ClairicField>,
     referenceDate: string,
   ): Promise<ClairicResult> {
-    const raw = await this.ai.run("@cf/cloudflare/clairic", {
-      model: "clairic",
-      state,
-      fields,
-      reference_date: referenceDate,
-    });
+    const raw = await withTimeout(
+      this.ai.run("@cf/cloudflare/clairic", {
+        model: "clairic",
+        state,
+        fields,
+        reference_date: referenceDate,
+      }),
+      20_000,
+      "clairic",
+    );
     return ClairicResultSchema.parse(raw);
   }
 }
@@ -117,8 +121,27 @@ export interface CatalystFacts {
   move_estimate: { confidence: "LOW"; mean: number; p10: number | null; p90: number | null } | null;
 }
 
-/** Pure: keep confident values, name the uncertain ones, label the estimate. */
-export function interpretFacts(r: ClairicResult, minConfidence: number): CatalystFacts {
+/** Fields whose value is *stated* in the text, so it must literally appear there (audit: Clairic grounding). */
+const STATED_NUMBERS = new Set(["deal_value_usd_m", "price_move_mentioned_pct"]);
+
+function fmtNum(x: number): string {
+  return String(Math.round(x * 100) / 100);
+}
+
+/** True when the number (or its billion/thousand rescaling) appears in the source text as written. */
+export function grounded(v: number, text: string): boolean {
+  const plain = text.replace(/,(?=\d{3})/g, "");
+  return [v, Math.abs(v), v / 1000, v * 1000]
+    .map(fmtNum)
+    .some((s) => new RegExp(`(^|[^0-9.])${s.replace(".", "\\.")}([^0-9]|$)`).test(plain));
+}
+
+/**
+ * Pure: keep confident values, name the uncertain ones, label the estimate. With `source`, stated numbers must
+ * appear in the text and the entity must be named there — an injection-steered or hallucinated "fact" becomes
+ * uncertain instead of evidence (audit 2026-10-24: Clairic was the largest unchecked injection surface).
+ */
+export function interpretFacts(r: ClairicResult, minConfidence: number, source?: string): CatalystFacts {
   const values: Record<string, string | number> = {};
   const uncertain: string[] = [];
   let move: CatalystFacts["move_estimate"] = null;
@@ -138,7 +161,12 @@ export function interpretFacts(r: ClairicResult, minConfidence: number): Catalys
     const v = a.value;
     if (v === null || v === undefined || Array.isArray(v) || v === "") continue;
     if (typeof v === "number" && !Number.isFinite(v)) continue;
-    if ((a.confidence ?? 0) >= minConfidence) values[k] = typeof v === "string" ? v.slice(0, 80) : v;
+    const ungrounded =
+      source !== undefined &&
+      ((typeof v === "number" && STATED_NUMBERS.has(k) && !grounded(v, source)) ||
+        (k === "entity" && typeof v === "string" && !source.toLowerCase().includes(v.toLowerCase())));
+    if ((a.confidence ?? 0) >= minConfidence && !ungrounded)
+      values[k] = typeof v === "string" ? v.slice(0, 80) : v;
     else uncertain.push(k);
   }
   return {

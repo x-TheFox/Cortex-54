@@ -131,6 +131,22 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
     if (request.headers.get("x-cortex-web") !== "1")
       return json({ error: "missing x-cortex-web header" }, 400);
     const body = (await request.json().catch(() => ({}))) as { name?: string } & Record<string, unknown>;
+    // Server-side guards (audit 2026-10-24): a stolen 12 h cookie must not be able to flatten in one POST or give
+    // real money autonomy. Flatten needs an explicit confirmation; LIVE autonomy and LIVE unlocks need Discord,
+    // where the operator's identity is signed by Discord rather than carried by a cookie.
+    if (body.name === "flatten" && body.confirm !== "FLATTEN")
+      return json({ ok: false, message: "Flatten needs confirm: FLATTEN." }, 400);
+    if (
+      body.account === "LIVE" &&
+      ((body.name === "dial" && Number(body.stop) > 0) || body.name === "unlock")
+    )
+      return json(
+        {
+          ok: false,
+          message: "LIVE autonomy and LIVE unlocks are Discord-only: /dial LIVE 3 confirm:RATIFY.",
+        },
+        403,
+      );
     const by = `web:${env.OPERATOR_DISCORD_ID ?? "operator"}`;
     const r = await runCommand(b, String(body.name ?? ""), body as CommandArgs, by);
     return json(r, r.ok ? 200 : 400);

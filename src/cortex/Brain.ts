@@ -6,7 +6,7 @@ import {
   type Quote,
 } from "../broker/types.ts";
 import { DO_MEMORY_GB, FreeTierBudget, SubrequestBudgetExceeded, utcDay } from "../budget/FreeTierBudget.ts";
-import { CLEF_CONTEXT_TOKENS, type ClefApi, estimateTokens } from "../clef/ClefClient.ts";
+import { CLEF_CONTEXT_TOKENS, type ClefApi, type ClefResult, estimateTokens } from "../clef/ClefClient.ts";
 import { type CatalystFacts, type ClairicApi, FACT_FIELDS, interpretFacts } from "../clef/clairic.ts";
 import { buildTier2, interpretTier2, TIER2_PROMPT_VERSION } from "../clef/tier2.ts";
 import {
@@ -614,7 +614,34 @@ export class Brain {
       this.sql.exec("DELETE FROM seen_items WHERE at < ?", now - 3 * 86_400_000);
       this.budget.prune(now);
       this.sql.exec("DELETE FROM equity_history WHERE at < ?", now - 35 * 86_400_000);
+      this.compactHotState(now);
     }
+  }
+
+  /**
+   * Hot-state retention (audit W1-02): counters, alert stamps and per-day strategy keys used to grow forever. D1
+   * keeps the cold copy of contracts and the journal; the hot copies only need to cover what is still open and the
+   * recent past. Day/month keys are matched by their date suffix, so long-lived settings are never touched.
+   */
+  private compactHotState(now: number): void {
+    const day = 86_400_000;
+    this.sql.exec(
+      `DELETE FROM settings WHERE updated_at < ? AND (
+         key LIKE 'count:%' OR key LIKE 'alert:%' OR key LIKE 'court_seen:%'
+         OR key GLOB '*:20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' OR key GLOB '*:month:20[0-9][0-9]-[0-9][0-9]')`,
+      now - 14 * day,
+    );
+    this.sql.exec(
+      "DELETE FROM settings WHERE updated_at < ? AND (key LIKE 'act_fail:%' OR key LIKE 'outbox_fail:%')",
+      now - 30 * day,
+    );
+    this.sql.exec(
+      `DELETE FROM contracts WHERE created_at < ?
+         AND contract_id NOT IN (SELECT contract_id FROM positions)
+         AND contract_id NOT IN (SELECT contract_id FROM orders WHERE state IN (${OPEN_SQL}))`,
+      now - 180 * day,
+    );
+    this.sql.exec("DELETE FROM d1_outbox_dead WHERE dead_at < ?", now - 90 * day);
   }
 
   // ------------------------------------------------------------------ broker sync / reconcile
@@ -667,14 +694,44 @@ export class Brain {
       lastTs = new Date(now).toISOString();
       this.journal.append(account, "ACTIVITY_BASELINE", null, { skipped_history: backlog.length }, now);
     }
+    // Apply first, mark seen only on success (audit W1-21): a throw used to consume the fill id and lose the money
+    // event. A failing activity stops the loop with the cursor before it, so the next pulse retries it; after 3
+    // failures it is quarantined loudly instead of blocking every later fill forever.
     for (const act of cursor === null ? [] : activities) {
-      lastTs = act.transaction_time ?? act.date ?? lastTs;
-      const seen = one(this.sql, "SELECT id FROM seen_activities WHERE id = ?", act.id);
-      if (seen) continue;
+      const ts = act.transaction_time ?? act.date ?? lastTs;
+      if (one(this.sql, "SELECT id FROM seen_activities WHERE id = ?", act.id)) {
+        lastTs = ts;
+        continue;
+      }
+      try {
+        if (act.activity_type === "FILL") this.applyFill(account, act, now);
+        else if (act.activity_type === "CFEE")
+          this.journal.append(account, "FEE", act.symbol ?? null, act, now);
+      } catch (e) {
+        const key = `act_fail:${act.id}`;
+        const n = Number(getKV(this.sql, key) ?? 0) + 1;
+        setKV(this.sql, key, String(n), now);
+        if (n < 3) {
+          await this.alertOnce(
+            `act-fail:${act.id}`,
+            `⚠️ ${account}: could not apply activity ${act.id} (${errText(e).slice(0, 160)}); retrying next pulse.`,
+          );
+          break;
+        }
+        this.journal.append(
+          account,
+          "ACTIVITY_QUARANTINE",
+          act.id,
+          { activity: act, error: errText(e).slice(0, 300) },
+          now,
+        );
+        await this.alertOnce(
+          `act-q:${act.id}`,
+          `🚨 ${account}: activity ${act.id} failed 3 times and was quarantined — reconcile by hand.`,
+        );
+      }
       this.sql.exec("INSERT INTO seen_activities (id, account, at) VALUES (?, ?, ?)", act.id, account, now);
-      if (act.activity_type === "FILL") this.applyFill(account, act, now);
-      else if (act.activity_type === "CFEE")
-        this.journal.append(account, "FEE", act.symbol ?? null, act, now);
+      lastTs = ts;
     }
     if (lastTs) {
       this.sql.exec(
@@ -2191,7 +2248,7 @@ ${postmortem}`,
         (used * (this.d.budgets.neurons_per_mtok.clairic ?? 9091)) / 1_000_000,
         now,
       );
-      const facts = interpretFacts(r, cfg.min_confidence);
+      const facts = interpretFacts(r, cfg.min_confidence, text);
       setKV(this.sql, key, JSON.stringify(facts), now);
       return facts;
     } catch (e) {
@@ -2334,7 +2391,25 @@ ${postmortem}`,
     // One attempt per candidate (like the court): a failing Clef call must not block the queue behind it.
     this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", row.candidate_id);
     const started = this.deps.now();
-    const result = await clef.run("clef", req.state, req.questions);
+    let result: ClefResult;
+    try {
+      result = await clef.run("clef", req.state, req.questions);
+    } catch (e) {
+      // Audit W2-10: the candidate was already dequeued; record the loss instead of dropping it silently.
+      this.rejectCandidate(
+        {
+          candidateId: row.candidate_id,
+          symbol: ev.evidence.symbol,
+          arena: ev.evidence.arena,
+          source: "tier2",
+        },
+        "TIER2",
+        [`Clef error: ${errText(e).slice(0, 120)}`],
+        { bid: ev.evidence.quote.bid, atr: ev.evidence.technicals.atr14 },
+        now,
+      );
+      throw e;
+    }
     const neurons = neuronsFor("clef", result.usage.input_tokens ?? est, this.d);
     this.budget.add("neurons_tier2", neurons, now);
     const dcs = interpretTier2(result, this.d, { exception: ev.evidence.regimeException });
@@ -2644,7 +2719,20 @@ ${postmortem}`,
       await close("⏸ Clef budget for today is spent — synthesis skipped", false);
       return 0;
     }
-    const synthRes = await clef.run("clef", synthReq.state, synthReq.questions);
+    let synthRes: ClefResult;
+    try {
+      synthRes = await clef.run("clef", synthReq.state, synthReq.questions);
+    } catch (e) {
+      this.rejectCandidate(
+        cand,
+        "SYNTH",
+        [`Clef error: ${errText(e).slice(0, 120)}`],
+        { ...checked.bull },
+        now,
+      );
+      await close(`❌ Clef judge unavailable: ${errText(e).slice(0, 120)}`, false);
+      return 0;
+    }
     this.budget.add("neurons_tier2", neuronsFor("clef", synthRes.usage.input_tokens ?? est, this.d), now);
     const synth = interpretSynth(synthRes);
     if (!synth) {

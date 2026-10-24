@@ -66,6 +66,8 @@ export class DiscordNotifier implements Notifier {
     private readonly channels: Partial<Record<ChannelKey, string>>,
     private readonly guard: () => void,
     private readonly fetcher: Fetcher = (u, i) => fetch(u, i),
+    /** Called with each send's outcome so the host can surface a failing Discord path (audit 2026-10-24). */
+    private readonly report: (ok: boolean) => void = () => undefined,
   ) {}
 
   private async send(method: "POST" | "PATCH", path: string, msg: DiscordMessage): Promise<Response | null> {
@@ -87,6 +89,7 @@ export class DiscordNotifier implements Notifier {
     const id = this.channels[channel];
     if (!id) return null;
     const res = await this.send("POST", `/channels/${id}/messages`, msg);
+    this.report(res?.ok ?? false);
     if (!res?.ok) return null;
     const body = (await res.json()) as { id?: string };
     return body.id ?? null;
@@ -96,6 +99,7 @@ export class DiscordNotifier implements Notifier {
     const id = this.channels[channel];
     if (!id) return false;
     const res = await this.send("PATCH", `/channels/${id}/messages/${messageId}`, msg);
+    this.report(res?.ok ?? false);
     return res?.ok ?? false;
   }
 }

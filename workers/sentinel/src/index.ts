@@ -86,24 +86,86 @@ async function killAll(env: SentinelEnv, accounts: Acct[], by: string, reason: s
   return msg;
 }
 
-async function brainAgeMinutes(env: SentinelEnv, now: number): Promise<{ age: number; detail: string }> {
+async function brainAgeMinutes(
+  env: SentinelEnv,
+  now: number,
+): Promise<{ age: number; detail: string; discordFailStreak: number }> {
   if (!env.CORTEX_HEALTH_URL)
-    return { age: Number.POSITIVE_INFINITY, detail: "CORTEX_HEALTH_URL not configured" };
+    return {
+      age: Number.POSITIVE_INFINITY,
+      detail: "CORTEX_HEALTH_URL not configured",
+      discordFailStreak: 0,
+    };
   try {
     const res = await fetch(env.CORTEX_HEALTH_URL, { signal: AbortSignal.timeout(5_000) });
-    const body = (await res.json()) as { last_pulse_at: number | null };
+    const body = (await res.json()) as { last_pulse_at: number | null; discord_fail_streak?: number };
     const age = body.last_pulse_at === null ? Number.POSITIVE_INFINITY : (now - body.last_pulse_at) / 60_000;
     return {
       age,
       detail: `HTTP ${res.status}, last pulse ${Number.isFinite(age) ? age.toFixed(1) : "never"} min ago`,
+      discordFailStreak: Number(body.discord_fail_streak ?? 0),
     };
   } catch (e) {
-    return { age: Number.POSITIVE_INFINITY, detail: `health fetch failed: ${String(e)}` };
+    return {
+      age: Number.POSITIVE_INFINITY,
+      detail: `health fetch failed: ${String(e)}`,
+      discordFailStreak: 0,
+    };
+  }
+}
+
+/**
+ * Converging flatten (audit W1-10): while the kill flag is set, check the accounts it names and re-flatten anything
+ * still open, up to 5 attempts, then escalate every 15 minutes. A kill that did not flatten used to stay silent.
+ */
+async function enforceKill(env: SentinelEnv, raw: string, now: number): Promise<void> {
+  let p: { at?: number; by?: string; reason?: string; accounts?: Acct[]; attempts?: number } = {};
+  try {
+    p = JSON.parse(raw);
+  } catch {
+    return; // a bare flag (older format): nothing to verify
+  }
+  const open: string[] = [];
+  for (const a of p.accounts ?? []) {
+    if (!creds(env, a)) continue;
+    try {
+      const [pos, ord] = await Promise.all([
+        alpaca(env, a, "GET", "/v2/positions"),
+        alpaca(env, a, "GET", "/v2/orders?status=open"),
+      ]);
+      const n =
+        (pos.ok ? ((await pos.json()) as unknown[]).length : 0) +
+        (ord.ok ? ((await ord.json()) as unknown[]).length : 0);
+      if (n > 0) open.push(`${a}: ${n} open`);
+    } catch (e) {
+      open.push(`${a}: check failed ${String(e).slice(0, 80)}`);
+    }
+  }
+  if (open.length === 0) return;
+  const attempts = (p.attempts ?? 0) + 1;
+  if (attempts <= 5) {
+    await env.FLAGS.put("killed", JSON.stringify({ ...p, attempts }));
+    for (const a of p.accounts ?? []) {
+      if (!creds(env, a)) continue;
+      await alpaca(env, a, "DELETE", "/v2/orders").catch(() => undefined);
+      await alpaca(env, a, "DELETE", "/v2/positions?cancel_orders=true").catch(() => undefined);
+    }
+    await alert(
+      env,
+      `🛑 SENTINEL: kill still has exposure (${open.join("; ")}) — flatten retry ${attempts}/5`,
+    );
+  } else if (new Date(now).getUTCMinutes() % 15 === 0) {
+    await alert(
+      env,
+      `🚨 SENTINEL KILL DIVERGENCE: still exposed after 5 flatten attempts (${open.join("; ")}). Close by hand.`,
+    );
   }
 }
 
 async function cron(env: SentinelEnv, now: number): Promise<void> {
-  const killed = (await env.FLAGS.get("killed")) !== null;
+  const flag = await env.FLAGS.get("killed");
+  const killed = flag !== null;
+  if (flag !== null) await enforceKill(env, flag, now);
 
   // 1. Independent LIVE daily-loss check.
   if (!killed && creds(env, "LIVE")) {
@@ -130,7 +192,14 @@ async function cron(env: SentinelEnv, now: number): Promise<void> {
   }
 
   // 2. Brain heartbeat.
-  const { age, detail } = await brainAgeMinutes(env, now);
+  const { age, detail, discordFailStreak } = await brainAgeMinutes(env, now);
+  // The brain's own Discord path failing (revoked token, missing permission) can't report itself: say it here,
+  // through the separate webhook (audit 2026-10-24: notifier failures were silent).
+  if (discordFailStreak >= 5 && new Date(now).getUTCMinutes() % 30 === 0)
+    await alert(
+      env,
+      `📵 SENTINEL: the brain's Discord messages are failing (${discordFailStreak} in a row). Check the bot token and channel permissions.`,
+    );
   const staleAfter = Number(env.STALE_ALERT_MINUTES) || 3;
   if (age <= staleAfter) return;
   const minute = new Date(now).getUTCMinutes();

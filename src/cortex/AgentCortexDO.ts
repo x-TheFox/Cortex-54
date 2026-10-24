@@ -20,7 +20,7 @@ import { Brain, type StatusView } from "./Brain.ts";
 import { GitHubDispatcher } from "./dispatch.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "./hot-schema.ts";
 import { LabNotifier, labDoctrine } from "./lab.ts";
-import { getKV, type Row, type SqlLike, type SqlValue } from "./store.ts";
+import { getKV, type Row, type SqlLike, type SqlValue, setKV } from "./store.ts";
 
 export interface Health {
   name: string;
@@ -31,6 +31,8 @@ export interface Health {
   doctrine_sha256: string;
   hot_schema_version: number;
   accounts_configured: AccountId[];
+  /** Consecutive failed Discord sends; the sentinel alerts through its own webhook at ≥ 5. */
+  discord_fail_streak: number;
 }
 
 /**
@@ -87,7 +89,13 @@ export class AgentCortexDO extends DurableObject<Env> {
       brokers,
       market: dataKey ? new AlpacaMarketData(dataKey, guard) : null,
       notifier: env.DISCORD_BOT_TOKEN
-        ? new DiscordNotifier(env.DISCORD_BOT_TOKEN, parseChannels(env.DISCORD_CHANNELS), guard)
+        ? new DiscordNotifier(
+            env.DISCORD_BOT_TOKEN,
+            parseChannels(env.DISCORD_CHANNELS),
+            guard,
+            undefined,
+            discordReport(this.sql),
+          )
         : new NullNotifier(),
       d1: env.DB,
       readKillFlag: async () => (await env.FLAGS.get("killed")) !== null,
@@ -145,8 +153,17 @@ export class AgentCortexDO extends DurableObject<Env> {
     try {
       const report = await this.brain.pulse();
       next = report.nextPulseSeconds;
+      if ((getKV(this.sql, "pulse_error_streak") ?? "0") !== "0")
+        setKV(this.sql, "pulse_error_streak", "0", Date.now());
     } catch (e) {
-      console.error("[cortex] pulse failed", e);
+      // Back off while broken (audit W1-15): retrying at the fastest cadence burned budget during incidents.
+      const n = Number(getKV(this.sql, "pulse_error_streak") ?? 0) + 1;
+      setKV(this.sql, "pulse_error_streak", String(n), Date.now());
+      next = Math.min(
+        DOCTRINE.cadence.pulse_seconds_exposed * 2 ** Math.min(n, 6),
+        DOCTRINE.cadence.pulse_seconds_flat,
+      );
+      console.error("[cortex] pulse failed", n, e);
     } finally {
       // Always re-arm: a pulse error must never stop the heart.
       await this.ctx.storage.setAlarm(Date.now() + next * 1000);
@@ -163,6 +180,7 @@ export class AgentCortexDO extends DurableObject<Env> {
       constitution_sha256: CONSTITUTION_SHA256,
       doctrine_sha256: DOCTRINE_SHA256,
       hot_schema_version: HOT_SCHEMA_VERSION,
+      discord_fail_streak: Number(getKV(this.sql, "discord_fail_streak") ?? 0),
       accounts_configured: this.brain
         .status()
         .accounts.filter((a) => a.configured)
@@ -304,7 +322,13 @@ function labBrain(sql: SqlLike, env: Env, guard: () => void): Brain {
     market: key ? new AlpacaMarketData(key, guard) : null,
     notifier: env.DISCORD_BOT_TOKEN
       ? new LabNotifier(
-          new DiscordNotifier(env.DISCORD_BOT_TOKEN, parseChannels(env.DISCORD_CHANNELS), guard),
+          new DiscordNotifier(
+            env.DISCORD_BOT_TOKEN,
+            parseChannels(env.DISCORD_CHANNELS),
+            guard,
+            undefined,
+            discordReport(sql),
+          ),
         )
       : new NullNotifier(),
     d1: env.DB_LAB,
@@ -322,4 +346,14 @@ function labBrain(sql: SqlLike, env: Env, guard: () => void): Brain {
 /** The LAB brain's Durable Object class (ADR-045): same code, different wiring. */
 export class LabCortexDO extends AgentCortexDO {
   static override readonly lab = true;
+}
+
+/** Track consecutive Discord send failures in hot KV; /health exposes it so the sentinel can alert (its own path). */
+function discordReport(sql: SqlLike): (ok: boolean) => void {
+  return (ok) => {
+    const now = Date.now();
+    const prev = Number(getKV(sql, "discord_fail_streak") ?? 0);
+    const next = ok ? 0 : prev + 1;
+    if (next !== prev) setKV(sql, "discord_fail_streak", String(next), now);
+  };
 }
