@@ -1,7 +1,7 @@
 import type { DecisionContract } from "../contracts/decision-contract.ts";
 import type { Doctrine } from "../contracts/doctrine.ts";
 import { roundPrice } from "../lib/num.ts";
-import { atr, type Bar, ema, priorHigh } from "./indicators.ts";
+import { atr, type Bar, ema } from "./indicators.ts";
 
 /**
  * CRYPTO_BREAKOUT_BASELINE_V1 — Phase 1 plumbing strategy. Deterministic, no LLM (origin RULE).
@@ -56,8 +56,12 @@ export function baselineSignal(
   p: BaselineParams,
 ): { contract: DecisionContract | null; reason: string } {
   if (!i.regimeRiskOn) return { contract: null, reason: "regime proxy risk-off" };
-  const a = atr(i.bars, p.atr_period);
-  const hi = priorHigh(i.bars, p.lookback_days);
+  // Completed bars only (audit 2026-10-24): the forming bar used to feed the ATR, and priorHigh dropped the last
+  // bar even when it was complete — now identical to the backtest lab's replay (ADR-046).
+  const done = i.bars.filter((b) => b.t < Math.floor(i.now / 86_400_000) * 86_400_000);
+  const a = atr(done, p.atr_period);
+  const hi =
+    done.length >= p.lookback_days ? Math.max(...done.slice(-p.lookback_days).map((b) => b.h)) : null;
   if (a === null || hi === null) return { contract: null, reason: "not enough bars" };
   if (!(i.bid > hi)) return { contract: null, reason: `no breakout (bid ${i.bid} ≤ prior high ${hi})` };
 

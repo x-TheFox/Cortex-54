@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { STRATEGY_PARAMS } from "../strategy/params.ts";
 import type { Constitution } from "./constitution.ts";
 
 const Fraction = z.number().gte(0).lte(1);
@@ -235,6 +236,17 @@ export function doctrineViolations(d: Doctrine, c: Constitution): string[] {
   for (const s of d.strategies) {
     if (s.accounts.includes("LIVE") && !c.allowed.live_arenas.includes(s.arena)) {
       v.push(`strategy ${s.id} trades ${s.arena} on LIVE, which the constitution forbids`);
+    }
+    const schema = STRATEGY_PARAMS[s.id];
+    if (schema) {
+      const r = schema.safeParse(s.params ?? {});
+      if (!r.success)
+        v.push(
+          `strategy ${s.id}: bad params — ${r.error.issues
+            .slice(0, 3)
+            .map((i) => `${i.path.join(".") || "params"}: ${i.message}`)
+            .join("; ")}`,
+        );
     }
     if (s.params?.instrument === "inverse_etf_1x") {
       for (const sym of s.universe ?? [])

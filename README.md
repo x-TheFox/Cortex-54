@@ -18,6 +18,8 @@ pnpm install
 pnpm typecheck && pnpm test
 ```
 
-**Status:** Phase 0 (foundations). No trading logic yet.
+**Status:** all roadmap phases (0–6) are built and deployed. PAPER trades autonomously; a second paper account
+(LAB) forward-tests new strategies; LIVE (real money) stays dormant until PAPER passes the 30-day graduation gate
+and the operator ratifies it. Current state and history: `CLAUDE.md` §11 and `docs/DECISIONS.md`.
 
 > This is an experiment with a very small amount of real money. Nothing here is financial advice.

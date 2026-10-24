@@ -49,6 +49,19 @@ describe("config", () => {
     expect(constitution.forbidden).toContain("leveraged_etf");
   });
 
+  it("rejects a strategy whose params don't match its schema (a doctrine typo fails the build, not a pulse)", () => {
+    const d = clone();
+    const s = d.strategies.find((x) => x.id === "CRYPTO_BREAKOUT_BASELINE_V1");
+    if (!s?.params) throw new Error("baseline missing");
+    s.params.atr_stop_multple = s.params.atr_stop_multiple; // typo: the real key goes missing
+    delete s.params.atr_stop_multiple;
+    expect(doctrineViolations(d, constitution).some((v) => v.includes("atr_stop_multiple"))).toBe(true);
+    const k = d.strategies.find((x) => x.id === "CRYPTO_KRONOS_FORECAST_V1");
+    if (!k?.params) throw new Error("kronos missing");
+    k.params.lookback_hours = 4 * 600; // 600 candles > the 512 context
+    expect(doctrineViolations(d, constitution).some((v) => v.includes("context"))).toBe(true);
+  });
+
   it("rejects LIVE autonomy above the unratified maximum", () => {
     const d = clone();
     const live = d.accounts.LIVE;

@@ -95,5 +95,7 @@ Manual last resort: Alpaca dashboard → "Close all positions" + "Cancel all ord
    equity and posts to #alarms; the 30-day clock restarts.
 
 ## D. Drills
-- Weekly (paper): `/kill` via SENTINEL, verify flat within 2 pulses, re-arm with `/dial`.
+- Weekly (paper): `gh workflow run kill-switch -f action=kill -f reason="drill"` (ADR-022), verify flat within
+  2 pulses (the sentinel now re-flattens up to 5 times if anything stays open), then
+  `gh workflow run kill-switch -f action=rearm`.
 - Monthly: revoke paper keys to simulate auth failure; verify REDUCE_ONLY + alarm.
