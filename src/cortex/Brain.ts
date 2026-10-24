@@ -7,6 +7,7 @@ import {
 } from "../broker/types.ts";
 import { DO_MEMORY_GB, FreeTierBudget, SubrequestBudgetExceeded, utcDay } from "../budget/FreeTierBudget.ts";
 import { CLEF_CONTEXT_TOKENS, type ClefApi, estimateTokens } from "../clef/ClefClient.ts";
+import { type CatalystFacts, type ClairicApi, FACT_FIELDS, interpretFacts } from "../clef/clairic.ts";
 import { buildTier2, interpretTier2, TIER2_PROMPT_VERSION } from "../clef/tier2.ts";
 import {
   buildTier1,
@@ -194,6 +195,7 @@ export interface BrainDeps {
   now: () => number;
   /** Workers AI Clef (Tier 1/2). Null disables the funnel; trading is unaffected. */
   clef?: ClefApi | null;
+  clairic?: ClairicApi | null;
   /** Free-tier LLM chains for the court (Tier 3). Null disables the court. */
   llm?: LlmRouter | null;
   /** Governor-produced calibration maps (config/calibration.json). */
@@ -1892,6 +1894,49 @@ ${postmortem}`,
     return { open: true, exception: false };
   }
 
+  /**
+   * Clairic catalyst facts (ADR-043): one extraction per candidate, cached in hot KV so Tier 2 and the court share it.
+   * Budgeted like any Workers AI call; any failure means "no facts", never a blocked candidate.
+   */
+  private async catalystFacts(
+    candidateId: string,
+    text: string,
+    createdAt: number,
+    now: number,
+  ): Promise<CatalystFacts | null> {
+    const cfg = this.d.funnel.facts;
+    const api = this.deps.clairic;
+    if (!api || !cfg.enabled || text.length < cfg.min_chars) return null;
+    const key = `facts:${candidateId}`;
+    const cached = getKV(this.sql, key);
+    if (cached !== null) return cached === "none" ? null : (JSON.parse(cached) as CatalystFacts);
+    if (this.daily("clairic", now) >= cfg.max_per_day) return null;
+    const est = Math.ceil((text.length + JSON.stringify(FACT_FIELDS).length) / 3.2);
+    const cost = (est * (this.d.budgets.neurons_per_mtok.clairic ?? 9091)) / 1_000_000;
+    if (!this.budget.canSpendNeurons("neurons_clairic", cost, now)) return null;
+    this.bumpDaily("clairic", now);
+    this.sql.exec("DELETE FROM settings WHERE key LIKE 'facts:%' AND updated_at < ?", now - 2 * 86_400_000);
+    try {
+      const r = await api.run(
+        text.slice(0, 4000),
+        FACT_FIELDS,
+        new Date(createdAt).toISOString().slice(0, 10),
+      );
+      const used = r.usage?.input_tokens ?? est;
+      this.budget.add(
+        "neurons_clairic",
+        (used * (this.d.budgets.neurons_per_mtok.clairic ?? 9091)) / 1_000_000,
+        now,
+      );
+      const facts = interpretFacts(r, cfg.min_confidence);
+      setKV(this.sql, key, JSON.stringify(facts), now);
+      return facts;
+    } catch (e) {
+      setKV(this.sql, key, "none", now);
+      throw e;
+    }
+  }
+
   /** Exception-lane contracts currently held or working on any account. */
   private openExceptions(): number {
     const ids = new Set<string>();
@@ -1945,6 +1990,12 @@ ${postmortem}`,
     }
     if (!q || !b) return { ok: false, reason: "no quote or bars", symbol, arena };
     const created = typeof p.createdAt === "number" ? p.createdAt : row.enqueued_at;
+    const facts = await this.catalystFacts(
+      row.candidate_id,
+      `${String(p.headline ?? "")}\n${String(p.summary ?? "")}`.trim(),
+      created,
+      now,
+    ).catch(() => null);
     const evidence = buildEvidence({
       symbol,
       arena,
@@ -1966,6 +2017,7 @@ ${postmortem}`,
       held: this.symbolsInPlay(),
       memory: this.memoryFor(symbol, arena, now),
       regimeException: gate.exception,
+      facts,
       forecast: ((f) =>
         f
           ? {

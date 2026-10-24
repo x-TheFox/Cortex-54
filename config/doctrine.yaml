@@ -124,6 +124,11 @@ funnel:
     model: "@cf/cloudflare/clef"
     pass_threshold: 0.72
     max_per_day: 40
+  facts: # ADR-043: Clairic pulls typed numbers out of each promoted catalyst (~6 neurons each)
+    enabled: true
+    min_confidence: 0.8 # below this a value is listed as uncertain, never shown as a fact
+    max_per_day: 60
+    min_chars: 60
   tier3:
     max_sprints_per_day: 12
     min_structural_score: 78
@@ -140,8 +145,9 @@ budgets:
     tier1: 3000
     tier2: 4000
     tier3_fallback: 1500
-    reserve: 1500
-  neurons_per_mtok: { clef-flash: 3455, clef: 21818 } # Workers AI pricing, input tokens (output not billed)
+    clairic: 500 # ADR-043, carved from the reserve
+    reserve: 1000
+  neurons_per_mtok: { clef-flash: 3455, clef: 21818, clairic: 9091 } # Workers AI pricing, input tokens (output not billed)
   daily_limits:
     worker_requests: 100000
     do_requests: 100000

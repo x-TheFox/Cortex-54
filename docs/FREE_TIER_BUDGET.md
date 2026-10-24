@@ -32,7 +32,8 @@ puts the system in `REDUCE_ONLY` at 90% of any limit (constitution untouchable #
 | Tier 1 triage | clef-flash | 3,455 | 3,000 | one item per call ≈ 350 tokens ≈ 1.2 neurons → ~2,500 items/day (ADR-027) |
 | Tier 2 structure + court synth | clef | 21,818 | 4,000 | ≈ 1.2–1.5k tokens ≈ 25–30 neurons per call → ~130 calls/day; caps 40 tier-2 + 12 synth |
 | Tier 3 fallback | gpt-oss-120b | 31,818 in / 68,182 out | 1,500 | ~9 calls at 3k in / 1k out |
-| Reserve | — | — | 1,500 | exits/postmortems never starve |
+| Catalyst facts (ADR-043) | clairic | 9,091 ($0.10/M) | 500 | ≈ 650 tokens ≈ 6 neurons per promoted catalyst, cached per candidate; capped at 60/day |
+| Reserve | — | — | 1,000 | exits/postmortems never starve |
 
 The meter estimates neurons from token counts *before* the call (chars/3.5 heuristic, then corrected with
 `usage` from the response when provided). If an allocation is exhausted, that tier pauses until reset; Tier

@@ -126,7 +126,11 @@ fit; *not* 64K as third parties claimed). ≤64 questions/request. Request
 `{type:"noul", noul}` | `{type:"choice", choice, probabilities, confidence}` | `{type:"score", score (0..n-1),
 probabilities, legend, confidence}`, plus `usage.input_tokens`. clef-flash ≈ $0.038/M input tokens (= 3,455
 neurons/M); output free. **Batching several items into one state compresses and reorders scores — score one
-item per call (ADR-027).** `clef-omni` is not in the official changelog — do not depend on it.
+item per call (ADR-027).** `clef-omni` (30B MoE, 3B active) appeared in our Workers AI catalog by 2026-10-24 but is
+unused. **Clairic** `@cf/cloudflare/clairic` (preview, verified live 2026-10-24): extraction model, request
+`{model:"clairic", state, fields:{id:{type: text|date|number|list|estimate, instructions, …}}, reference_date}`,
+answers carry `value` + `confidence` (estimates: mean/p10/p90), 65,536-token context, $0.10/M input ≈ 9,091
+neurons/M, no output billing (ADR-043). **Jev** (TypeSafe AI) is not in our Workers AI catalog (2026-10-24).
 
 **Alpaca**
 - Crypto: market / limit / stop_limit, TIF gtc / ioc, all fractional. **No `post_only` flag.** **Minimum order
@@ -397,5 +401,6 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   paths) → a LOW-confidence `forecast` block in court evidence only (operator: Kronos never trades by itself;
   CRYPTO_KRONOS_FORECAST_V1 is SHADOW).
 - 2026-10-24: first buy attempts (Kronos BTC/DOT) refused by Alpaca's $10 crypto minimum → ADR-042 min-ticket rule.
+- 2026-10-24: ADR-043: Clairic extracts typed catalyst facts (once per promoted candidate) into Tier 2/court evidence.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

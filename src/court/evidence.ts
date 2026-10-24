@@ -1,3 +1,4 @@
+import type { CatalystFacts } from "../clef/clairic.ts";
 import type { Receipt } from "../contracts/decision-contract.ts";
 import type { Doctrine } from "../contracts/doctrine.ts";
 import { reputationKey } from "../risk/scar.ts";
@@ -44,6 +45,8 @@ export interface Evidence {
   regimeException: boolean;
   /** Operator-merged scar lessons and decayed Governor beliefs (data, not instructions). ADR-033. */
   memory: { lessons: string[]; beliefs: string[] };
+  /** Typed numbers Clairic extracted from the catalyst text (ADR-043), or null. */
+  facts: CatalystFacts | null;
   /** Fresh Kronos forecast for this symbol (ADR-041), or null. Sampled-path probabilities, not advice. */
   forecast: {
     /** Plain description of what Kronos is and how little to trust it (operator, 2026-10-24). */
@@ -96,6 +99,7 @@ export function buildEvidence(i: {
   memory?: { lessons: string[]; beliefs: string[] };
   regimeException?: boolean;
   forecast?: Omit<NonNullable<Evidence["forecast"]>, "about" | "confidence" | "view"> | null;
+  facts?: CatalystFacts | null;
 }): Evidence | null {
   const closes = i.bars.map((b) => b.c);
   const a = atr(i.bars, 14);
@@ -181,6 +185,13 @@ export function buildEvidence(i: {
       metric_value: reputationKey(i.catalyst.kind, i.catalyst.source),
       as_of: i.now,
     },
+    ...Object.entries(i.facts?.values ?? {}).map(([k, v]) => ({
+      evidence_id: `fact_${k}`,
+      source_skill: "clairic-facts",
+      metric: k,
+      metric_value: v,
+      as_of: i.now,
+    })),
     ...(i.forecast
       ? [
           {
@@ -216,6 +227,7 @@ export function buildEvidence(i: {
     portfolio: { held: i.held },
     memory: i.memory ?? { lessons: [], beliefs: [] },
     regimeException: i.regimeException ?? false,
+    facts: i.facts ?? null,
     forecast: i.forecast ? { ...kronosContext(i.forecast), ...i.forecast } : null,
     receipts,
   };

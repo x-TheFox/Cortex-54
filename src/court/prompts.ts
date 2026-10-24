@@ -2,8 +2,8 @@
  * Court prompts (versioned; the version is journaled with every LLM call — CLAUDE.md §9).
  * Kept as TS constants so they bundle without loaders. Changing a prompt means bumping its version.
  */
-export const BULL_PROMPT_VERSION = "bull@2";
-export const BEAR_PROMPT_VERSION = "bear@2";
+export const BULL_PROMPT_VERSION = "bull@3";
+export const BEAR_PROMPT_VERSION = "bear@3";
 
 const RULES = `Hard rules:
 - Use ONLY the evidence JSON you are given. Never invent prices, events or numbers.
@@ -12,6 +12,9 @@ const RULES = `Hard rules:
 - All prices you output must be consistent with evidence.quote and evidence.technicals.
 - evidence.forecast (Kronos, when present) is LOW-confidence context from a small chart-pattern model: read its
   "about" note, mention it at most as a minor point, and never make it the reason for (or against) a trade.
+- evidence.facts.values are numbers an extraction model (Clairic) read from the catalyst text with high confidence;
+  cite them by their fact_* ids. facts.uncertain lists fields it could not read reliably: do not guess them.
+  facts.move_estimate is a LOW-confidence guess, like Kronos.
 - Output exactly one JSON object and nothing else.`;
 
 export const BULL_SYSTEM = `You are the Bull Advocate in a trading court for a tiny, fee-sensitive account

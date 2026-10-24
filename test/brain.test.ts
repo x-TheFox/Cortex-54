@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ClefAnswer, ClefApi, ClefQuestion, ClefResult } from "../src/clef/ClefClient.ts";
+import type { ClairicApi } from "../src/clef/clairic.ts";
 import type { DecisionContract } from "../src/contracts/decision-contract.ts";
 import type { Doctrine } from "../src/contracts/doctrine.ts";
 import { Brain, equityChartUrl, terminalLine } from "../src/cortex/Brain.ts";
@@ -49,6 +50,7 @@ function setup(
     llm?: LlmRouter;
     dispatcher?: WorkflowDispatcher;
     scar?: ScarTissue;
+    clairic?: ClairicApi;
   } = {},
 ) {
   let now = T0;
@@ -80,6 +82,7 @@ function setup(
     llm: opts.llm ?? null,
     dispatcher: opts.dispatcher ?? null,
     scar: opts.scar ?? null,
+    clairic: opts.clairic ?? null,
   });
   brain.init({ test: true });
   return {
@@ -1651,5 +1654,34 @@ describe("Kronos forecasts (ADR-041)", () => {
     expect((await t.brain.ingestBatch(kronosBatch([fc("BTC/USD", 100)]))).ok).toBe(true);
     expect(t.brain.kronosFor("BTC/USD", T0)?.p_win).toBe(0.7);
     expect(t.brain.kronosFor("BTC/USD", T0 + 6 * HOUR)).toBeNull();
+  });
+});
+
+describe("Clairic in the funnel (ADR-043)", () => {
+  it("extracts each candidate once, caches it, and fails soft", async () => {
+    let calls = 0;
+    const clairic: ClairicApi = {
+      async run() {
+        calls++;
+        return {
+          answers: { eps_surprise_pct: { value: 4.8, confidence: 0.95 } },
+          usage: { input_tokens: 500 },
+        };
+      },
+    };
+    const t = setup({ clairic });
+    const b = t.brain as unknown as {
+      catalystFacts(id: string, text: string, at: number, now: number): Promise<{ values: object } | null>;
+    };
+    const text =
+      "NVIDIA beat EPS estimates by 4.8% and raised guidance well above consensus for next quarter.";
+    expect((await b.catalystFacts("c1", text, T0, T0))?.values).toEqual({ eps_surprise_pct: 4.8 });
+    await b.catalystFacts("c1", text, T0, T0);
+    expect(calls).toBe(1);
+    expect(await b.catalystFacts("c2", "too short", T0, T0)).toBeNull();
+    const broken = setup({ clairic: { run: async () => Promise.reject(new Error("503")) } });
+    const bb = broken.brain as unknown as typeof b;
+    await expect(bb.catalystFacts("c3", text, T0, T0)).rejects.toThrow("503");
+    expect(await bb.catalystFacts("c3", text, T0, T0)).toBeNull(); // cached as "none", never retried
   });
 });
