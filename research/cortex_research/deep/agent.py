@@ -29,9 +29,13 @@ def _tokens(s: str) -> set[str]:
 
 
 def near_duplicate(a: str, b: str, threshold: float = 0.6) -> bool:
-    """Token-Jaccard similarity: the agent restates the same fact with small edits ("(undated report)")."""
+    """Same fact restated: token-Jaccard ≥ threshold, or one claim's tokens almost all inside the other's (the agent
+    often re-notes a fact with extra detail appended)."""
     ta, tb = _tokens(a), _tokens(b)
-    return bool(ta and tb) and len(ta & tb) / len(ta | tb) >= threshold
+    if not ta or not tb:
+        return False
+    inter = len(ta & tb)
+    return inter / len(ta | tb) >= threshold or inter / min(len(ta), len(tb)) >= 0.85
 
 
 @dataclass(frozen=True)
@@ -110,6 +114,7 @@ class Run:
     history: list[str] = field(default_factory=list)
     steps: int = 0
     stop_reason: str = ""
+    wrap: bool = False  # set when ≥ 65% of the wall clock or token budget is gone
 
     def _add_notes(self, raw: Any) -> None:
         if not isinstance(raw, list):
@@ -133,7 +138,9 @@ class Run:
         hist = "\n".join(self.history[-14:]) or "(no steps yet)"
         res = "\n\n".join(last) or "(none yet)"
         tail = ("You are out of research budget: reply with the Finish shape NOW, using your notebook."
-                if final_now else f"Steps left: {remaining}. Finish when the picture is clear.")
+                if final_now else
+                f"Steps left: {remaining}. Time is nearly up: close the biggest gap, then Finish."
+                if remaining <= 4 or self.wrap else f"Steps left: {remaining}. Finish when the picture is clear.")
         return (f"Task: research {self.task.symbol} {self.task.name_hint}. Why the court convened: {self.task.context}\n\n"
                 f"Notebook ({len(self.notes)} notes):\n{book}\n\nSteps so far:\n{hist}\n\nLatest tool results:\n{res}\n\n{tail}")
 
@@ -150,6 +157,7 @@ class Run:
             if final_now:
                 self.stop_reason = "budget"
                 break
+            self.wrap = elapsed > self.limits.max_wall_s * 0.65 or self.chain.tokens > self.limits.max_tokens * 0.65
             reply, by = self.chain.ask(sys_p, self._user(last, self.limits.max_steps - self.steps, False))
             if reply is None:
                 self.stop_reason = "every model failed"
@@ -177,13 +185,28 @@ class Run:
             final = self._write_up(sys_p)
         return final
 
-    def _write_up(self, sys_p: str) -> dict[str, Any] | None:
-        """Budget ran out (or the models stalled): one small call that turns the notebook into the dossier."""
-        for _ in range(2):
-            reply, _by = self.chain.ask(sys_p, self._user(["(research is over; no more tool calls)"], 0, True), 3000)
-            if reply and isinstance(reply.get("final"), dict):
+    def _write_up(self, _sys_p: str) -> dict[str, Any] | None:
+        """Budget ran out (or the models stalled): a separate, small call that turns the notebook into the dossier.
+        Its own prompt (no tool talk) and either reply shape is accepted: {"final": {...}} or the dossier itself."""
+        book = "\n".join(f"- [{n['stance']}] {n['claim']} ({n['published'] or 'undated'}) <{n['source_url']}>"
+                         for n in self.notes[-45:])
+        sys_w = (f"You write the research dossier for a trading court from an analyst's notebook. Today is "
+                 f"{datetime.now().strftime('%Y-%m-%d')}. Use ONLY the notebook; keep every date and number exact; "
+                 "cite only URLs that appear in it. Reply with ONE JSON object and nothing else.")
+        user_w = (f"Asset: {self.task.symbol}. Why the court convened: {self.task.context}\n\nNotebook:\n{book}\n\n"
+                  'Return {"summary": "≤150 words, dated", "bull_case": "≤90 words", "bear_case": "≤90 words", '
+                  '"catalysts": [{"event": "...", "date": "YYYY-MM-DD or null", "source_url": "..."}], '
+                  '"risks": ["..."], "open_questions": ["..."], "findings": [{"claim": "...", "source_url": "...", '
+                  '"published": "YYYY-MM-DD or null", "stance": "BULL|BEAR|NEUTRAL"}]} with the 6-16 most decision-'
+                  "relevant findings.")
+        for _ in range(3):
+            reply, _by = self.chain.ask(sys_w, user_w, 3500)
+            if not reply:
+                continue
+            out = reply.get("final") if isinstance(reply.get("final"), dict) else reply
+            if isinstance(out.get("summary"), str) and out["summary"].strip():
                 self.stop_reason += " → written from notebook"
-                return reply["final"]
+                return out
         return None
 
 

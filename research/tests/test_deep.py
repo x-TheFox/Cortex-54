@@ -139,3 +139,19 @@ def test_read_url_refuses_local_addresses():
     tb = Toolbox(now=NOW, http=lambda *a, **k: (_ for _ in ()).throw(AssertionError("no fetch")))
     assert "refused" in tb.run("read_url", {"url": "http://localhost:8787/admin"})["error"]
     assert "not an http" in tb.run("read_url", {"url": "file:///etc/passwd"})["error"]
+
+
+def test_near_duplicate_catches_a_restated_fact_with_extra_detail():
+    short = "Ethereum staking hit record 43.8M ETH (35.9% of supply) in Q3 2026, yield fell to 2.63%"
+    long_ = short + " from 2.81% in Q2; net inflow 7.96M ETH in first 9 months of 2026 (6x YoY)"
+    assert near_duplicate(short, long_)
+
+
+def test_write_up_accepts_a_bare_dossier_reply():
+    step = {"thought": "x", "notes": [{"claim": "Devcon 8 runs Nov 3-6, 2026", "source_url": "https://example.com/d"}],
+            "actions": [{"tool": "web_search", "args": {"query": "d"}}]}
+    bare = {"summary": "Devcon next week.", "bull_case": "b", "findings": []}
+    run = Run(Task("ETH/USD", "CRYPTO", "t"), ScriptedChain([step, {"oops": 1}, bare]), FakeTools(now=NOW),
+              Limits(max_steps=2))
+    final = run.go(NOW)
+    assert final == bare and run.stop_reason == "budget → written from notebook"
