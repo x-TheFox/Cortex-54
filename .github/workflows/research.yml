@@ -15,13 +15,14 @@ on:
     - cron: "40 19 * * 1-5" # options shadow lab before the close
     - cron: "45 14 * * *" # setup screeners during the session (crypto only on weekends)
     - cron: "37 */4 * * *" # Kronos forecasts (ADR-041), ~5 min of CPU
+    - cron: "13 7 * * 0" # backtest lab (ADR-046), Sundays
   workflow_dispatch:
     inputs:
       job:
         description: "Which job"
         required: true
         type: choice
-        options: [crypto, equity, world, options, screeners, kronos]
+        options: [crypto, equity, world, options, screeners, kronos, backtest]
 
 permissions:
   contents: read
@@ -53,6 +54,7 @@ jobs:
           elif [ "${{ github.event.schedule }}" = "50 14 * * 1-5" ] || [ "${{ github.event.schedule }}" = "40 19 * * 1-5" ]; then echo "job=options" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "45 14 * * *" ]; then echo "job=screeners" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "37 */4 * * *" ]; then echo "job=kronos" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.event.schedule }}" = "13 7 * * 0" ]; then echo "job=backtest" >> "$GITHUB_OUTPUT";
           else echo "job=equity" >> "$GITHUB_OUTPUT"; fi
       - name: Skip if the brain already dispatched this job
         id: dedupe
@@ -102,8 +104,9 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
-          ALPACA_KEY_ID: ${{ secrets.ALPACA_PAPER_KEY_ID }}
-          ALPACA_SECRET: ${{ secrets.ALPACA_PAPER_SECRET }}
+          # the backtest pages ~3 years × 25 symbols: use the LAB key's own 200/min data budget
+          ALPACA_KEY_ID: ${{ steps.pick.outputs.job == 'backtest' && secrets.ALPACA_LAB_KEY_ID || secrets.ALPACA_PAPER_KEY_ID }}
+          ALPACA_SECRET: ${{ steps.pick.outputs.job == 'backtest' && secrets.ALPACA_LAB_SECRET || secrets.ALPACA_PAPER_SECRET }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: uv run python -m cortex_research.run "${{ steps.pick.outputs.job }}"
       - name: Options shadow lab (virtual ledger, never sent to a broker)

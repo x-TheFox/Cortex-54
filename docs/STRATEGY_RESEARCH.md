@@ -35,6 +35,21 @@ are not encoded as rules. They already reach the court as setup candidates throu
 | 10 | Funding/basis carry | Real edge for funds | Needs perp shorts or margin | Impossible at $54 |
 | 11 | News/catalyst trading | What the court already does | Built (Tier 1–3) | Keep; Clairic could make its numbers exact (see below) |
 
+## Backtest results (2026-10-24, 3 years, fees and slippage included — ADR-046)
+
+| Strategy | Trades | Win | Expectancy | Profit factor | q (BH-FDR) | Latest third | Verdict |
+|---|---|---|---|---|---|---|---|
+| EQUITY_RSI2_PULLBACK_V1 | 104 | 78% | +0.27R | 2.51 | 0.000 | +0.17R | **PASS → ACTIVE on PAPER** |
+| CRYPTO_BREAKOUT_BASELINE_V1 | 545 | 47% | +0.05R | 1.17 | 0.21 | −0.04R | UNPROVEN (kept as plumbing) |
+| EQUITY_INVERSE_BREAKOUT_V1 | 109 | 46% | −0.06R | 0.85 | 0.98 | −0.11R | LOSES → LAB only |
+| CRYPTO_OVERSOLD_BOUNCE_V1 | 184 | 44% | −0.08R | 0.68 | 0.98 | −0.01R | LOSES → LAB only |
+| CRYPTO_TREND_V1 | 174 | 43% | −0.08R | 0.83 | 0.98 | −0.23R | LOSES (LAB) |
+| CRYPTO_TURN_OF_MONTH_V1 | 70 | 46% | −0.14R | 0.59 | 0.98 | −0.07R | LOSES (LAB) |
+
+The surprise is crypto trend: after 0.35% per side and pessimistic fills, this simple version loses. The literature
+measures monthly rebalanced portfolios; ours trades a stop and target. It stays in LAB as a forward check, and a
+lower-turnover variant is the next thing to test. The lab re-runs every Sunday and posts to #governor.
+
 ## Build queue (proposed)
 
 1. **Backtest lab** (GitHub Actions, Python, free): replay each candidate rule over 3+ years of Alpaca daily bars

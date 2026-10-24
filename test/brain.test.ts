@@ -1638,8 +1638,8 @@ describe("Falling-market strategies (ADR-040)", () => {
       return { t: T0 - (n - i) * 86_400_000, o: c, h: c + 1, l: c - 1, c, v: 1 };
     });
 
-  it("oversold bounce → RULE contract → passive PAPER buy, even with the risk-on gate closed", async () => {
-    const t = setup();
+  it("oversold bounce (LAB) → RULE contract → passive buy, even with the risk-on gate closed", async () => {
+    const t = setup({ d: labDoctrine(doctrine) }); // ADR-046: LAB-only since the backtest
     t.market.bars["BTC/USD"] = slide(30, 130, 100); // BTC under its EMA: breakout baseline stays off
     t.market.bars["ETH/USD"] = slide(25, 130, 100);
     t.market.set("ETH/USD", 102, 102.02); // back above yesterday's high (101)
@@ -1656,8 +1656,8 @@ describe("Falling-market strategies (ADR-040)", () => {
     expect((await t.brain.pulse()).contracts).toBe(0);
   });
 
-  it("inverse ETF breakout buys only in a bearish equity posture, during the session", async () => {
-    const t = setup();
+  it("inverse ETF breakout (LAB) buys only in a bearish equity posture, during the session", async () => {
+    const t = setup({ d: labDoctrine(doctrine) }); // ADR-046: LAB-only since the backtest
     t.market.bars.SH = slide(30, 36, 40);
     t.market.set("SH", 41.6, 41.61);
     t.sql.exec(
@@ -1820,5 +1820,48 @@ describe("LAB pulse (ADR-045)", () => {
     ).map((x) => x.strategy_id);
     expect(ids).toContain("CRYPTO_TREND_V1");
     expect(ids).not.toContain("CRYPTO_BREAKOUT_BASELINE_V1"); // PAPER strategies never run in LAB
+  });
+});
+
+describe("Backtest lab report (ADR-046)", () => {
+  it("stores the report, posts the card and journals the verdicts; refuses a bad payload", async () => {
+    const t = setup();
+    const batch = (results: unknown) => ({
+      schema_version: 1,
+      job: "backtest",
+      produced_at: T0,
+      run_url: null,
+      items: [
+        {
+          skill_id: "backtest-lab",
+          version: "bt@1",
+          as_of: T0,
+          inputs_sha256: "d".repeat(64),
+          payload: { years: 3, start: "2023-10-24", results, limits: "daily bars" },
+        },
+      ],
+      posture: null,
+    });
+    const ok = await t.brain.ingestBatch(
+      batch({
+        EQUITY_RSI2_PULLBACK_V1: {
+          n: 104,
+          win_rate: 0.779,
+          expectancy_r: 0.271,
+          profit_factor: 2.5,
+          q_value: 0,
+          last_third_r: 0.17,
+          verdict: "PASS",
+        },
+        CRYPTO_TREND_V1: { n: 174, expectancy_r: -0.084, verdict: "LOSES", lab: true },
+      }),
+    );
+    expect(ok.ok).toBe(true);
+    const card = t.notifier.sent.find((m) => m.channel === "governor");
+    expect(card?.msg.embeds?.[0]?.description).toMatch(/🟢 `EQUITY_RSI2_PULLBACK_V1` \*\*PASS\*\*/);
+    expect(card?.msg.embeds?.[0]?.description?.indexOf("RSI2")).toBeLessThan(
+      card?.msg.embeds?.[0]?.description?.indexOf("TREND") ?? 0,
+    );
+    expect((await t.brain.ingestBatch(batch({ X: { n: 1, verdict: "GREAT" } }))).ok).toBe(false);
   });
 });

@@ -48,6 +48,7 @@ export const BatchSchema = z
       "options-lab",
       "screeners",
       "kronos",
+      "backtest",
     ]),
     produced_at: z.number().int(),
     run_url: z.url().nullable(),
@@ -56,7 +57,7 @@ export const BatchSchema = z
   })
   .refine(
     (b) =>
-      ["world-intel", "governor", "options-lab", "screeners", "kronos"].includes(b.job) ===
+      ["world-intel", "governor", "options-lab", "screeners", "kronos", "backtest"].includes(b.job) ===
       (b.posture === null),
     {
       message:
@@ -166,4 +167,28 @@ export const ScreenerCandidateSchema = z.object({
   entry_reference: z.number().positive().nullable(),
   stop_reference: z.number().positive().nullable(),
   as_of: z.number().int(),
+});
+
+/** ADR-046: backtest lab report (research job `backtest`). */
+const BacktestResult = z
+  .object({
+    n: z.number().int().nonnegative(),
+    win_rate: z.number().nullable().optional(),
+    expectancy_r: z.number().nullable().optional(),
+    profit_factor: z.number().nullable().optional(),
+    p_value: z.number().nullable().optional(),
+    q_value: z.number().nullable().optional(),
+    max_dd_r: z.number().nullable().optional(),
+    first_two_thirds_r: z.number().nullable().optional(),
+    last_third_r: z.number().nullable().optional(),
+    status: z.string().optional(),
+    lab: z.boolean().optional(),
+    verdict: z.enum(["PASS", "UNPROVEN", "LOSES", "TOO FEW TRADES"]),
+  })
+  .loose();
+export const BacktestPayloadSchema = z.object({
+  years: z.number().positive(),
+  start: z.string().max(20),
+  results: z.record(z.string().max(60), BacktestResult),
+  limits: z.string().max(1000),
 });
