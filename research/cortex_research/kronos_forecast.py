@@ -129,6 +129,34 @@ def crypto_bars(symbols: list[str], timeframe: str, days: int) -> dict[str, list
     return out
 
 
+def stock_daily_bars(symbols: list[str], days: int) -> dict[str, list[dict]]:
+    """Split/dividend-adjusted daily bars (free IEX feed), one request series per symbol."""
+    start = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    out: dict[str, list[dict]] = {}
+    for sym in symbols:
+        params = {"timeframe": "1Day", "start": start, "limit": 10000, "feed": "iex", "adjustment": "all"}
+        for _ in range(5):
+            r = requests.get(f"{DATA}/v2/stocks/{sym}/bars", params=params, headers=_h(), timeout=30)
+            r.raise_for_status()
+            d = r.json()
+            out.setdefault(sym, []).extend(d.get("bars") or [])
+            tok = d.get("next_page_token")
+            if not tok:
+                break
+            params["page_token"] = tok
+    return out
+
+
+def equity_universe(doctrine_path: Path) -> list[str]:
+    w = (yaml.safe_load(doctrine_path.read_text()) or {}).get("watchlists", {})
+    seen: list[str] = []
+    for k in ("crypto_proxies", "equities_core", "equities_catalyst"):
+        for sym in w.get(k) or []:
+            if sym not in seen:
+                seen.append(sym)
+    return seen
+
+
 def load_predictor(kronos_dir: Path):
     sys.path.insert(0, str(kronos_dir))
     import torch  # noqa: PLC0415 - heavy, only in the kronos job
@@ -141,7 +169,7 @@ def load_predictor(kronos_dir: Path):
     return KronosPredictor(model, tok, device="cpu", max_context=MAX_CONTEXT)
 
 
-def forecast_paths(predictor, bars: list[dict], horizon: int, n_paths: int, candle_hours: int = 4):
+def forecast_paths(predictor, bars: list[dict], horizon: int, n_paths: int, candle_hours: int = 4, freq: str | None = None):
     """n_paths independent single-sample forecasts in one batch → (highs, lows, closes) arrays (n_paths, horizon)."""
     import pandas as pd  # noqa: PLC0415
 
@@ -151,7 +179,10 @@ def forecast_paths(predictor, bars: list[dict], horizon: int, n_paths: int, cand
     ).astype("float64")
     df["amount"] = df["volume"] * df[["open", "high", "low", "close"]].mean(axis=1)
     ts = pd.Series(pd.to_datetime([b["t"] for b in bars], utc=True)).dt.tz_localize(None)
-    future = pd.Series(pd.date_range(ts.iloc[-1] + pd.Timedelta(hours=candle_hours), periods=horizon, freq=f"{candle_hours}h"))
+    if freq == "B":  # stocks: the next trading days (weekends skipped; holidays are rare enough to ignore)
+        future = pd.Series(pd.bdate_range(ts.iloc[-1] + pd.Timedelta(days=1), periods=horizon))
+    else:
+        future = pd.Series(pd.date_range(ts.iloc[-1] + pd.Timedelta(hours=candle_hours), periods=horizon, freq=f"{candle_hours}h"))
     preds = predictor.predict_batch(
         [df] * n_paths, [ts] * n_paths, [future] * n_paths, pred_len=horizon, T=1.0, top_p=0.9, sample_count=1,
         verbose=False,
@@ -199,6 +230,40 @@ def kronos_job(kronos_dir: Path, doctrine_path: Path, now_ms: int, version: str,
             print(f"{sym}: p_win {f['p_win']:.2f} target-first {f['p_target_first']:.2f} stop-first {f['p_stop_first']:.2f} "
                   f"exp {f['exp_ret'] * 100:+.2f}%")
         except Exception as e:  # noqa: BLE001 - one pair failing never drops the batch
+            failed.append(f"{sym}: {str(e)[:120]}")
+    # Stocks (operator 2026-10-24: FCST showed crypto only): daily candles, the next 2 trading days, same stop/target
+    # maths. Panel and court context only — the Kronos strategy trades its crypto universe and nothing else.
+    eq_days = int(p.get("equity_horizon_days", 2))
+    eq_context = int(p.get("equity_lookback_days", 250))
+    stocks = equity_universe(doctrine_path)
+    try:
+        sbars = stock_daily_bars(stocks, int(eq_context * 1.5) + 10)
+    except requests.RequestException as e:
+        sbars = {}
+        failed.append(f"stocks: {str(e)[:120]}")
+    for sym in stocks:
+        try:
+            db = (sbars.get(sym) or [])[-eq_context:]
+            if len(db) < 120:
+                failed.append(f"{sym}: not enough daily bars")
+                continue
+            a = atr(np.array([b["h"] for b in db]), np.array([b["l"] for b in db]), np.array([b["c"] for b in db]))
+            last = float(db[-1]["c"])
+            if not a or a <= 0:
+                failed.append(f"{sym}: no ATR")
+                continue
+            stop, target = last - p["atr_stop_multiple"] * a, last + p["atr_target_multiple"] * a
+            hi, lo, cl = forecast_paths(predictor, db, eq_days, p["paths"], 24, freq="B")
+            k = vol_scale(np.array([b["c"] for b in db], dtype=float), cl[:, -1], last, eq_days)
+            raw = summarize(hi, lo, cl, last, stop, target)
+            f = {"symbol": sym, "last": last, "last_bar_at": db[-1]["t"], "atr": round(a, 8), "stop": stop,
+                 "target": target, "vol_scale": round(k, 3), "raw_p_up": raw["p_up"], "raw_exp_ret": raw["exp_ret"],
+                 "candle_hours": 24, "horizon_label": f"{eq_days} trading days",
+                 **summarize(rescale(hi, last, k), rescale(lo, last, k), rescale(cl, last, k), last, stop, target)}
+            f.update(fan_chart(db, rescale(cl, last, k)))
+            forecasts.append(f)
+            print(f"{sym}: p_win {f['p_win']:.2f} exp {f['exp_ret'] * 100:+.2f}% ({eq_days} trading days)")
+        except Exception as e:  # noqa: BLE001 - one symbol failing never drops the batch
             failed.append(f"{sym}: {str(e)[:120]}")
     if not forecasts:
         print(f"kronos: no forecasts ({failed[:3]})", file=sys.stderr)

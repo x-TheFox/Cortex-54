@@ -655,3 +655,14 @@ panel@2, synth@5 tell every role the dossier is the best view of current events 
 overrides code-computed prices. Nothing in the dossier can size or place an order (U2 unchanged).
 **Cost:** $0 — public-repo Actions minutes, keyless web sources, free LLM tiers. ≈ 15–30 LLM calls and ≈ 100–300K
 tokens per dossier, almost all on NIM.
+
+## ADR-052 — Kronos forecasts for stocks too (2026-10-24)
+**Context:** the operator asked why the web terminal's FCST page showed only crypto. ADR-041 ran Kronos on 4 h
+candles, which only exist around the clock for crypto.
+**Decision:** the same `kronos` job now also forecasts every stock in the watchlists (crypto proxies, core ETFs,
+catalyst mega-caps: 18 symbols) from split/dividend-adjusted **daily** IEX candles (~250 days of context), 2 trading
+days ahead, with the same ATR stop/target maths, volatility rescaling and fan chart. Each stock forecast carries
+`candle_hours: 24` and `horizon_label: "2 trading days"`, so the court's Kronos line and the FCST page say so; the
+picker is split into Crypto and Stocks. Stock forecasts are panel and court context only (LOW confidence, ADR-041):
+`CRYPTO_KRONOS_FORECAST_V1` still trades its crypto universe and nothing else. Cost: ~1–2 extra minutes of free CPU
+per run (2 steps per stock).

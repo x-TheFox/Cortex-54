@@ -1142,6 +1142,15 @@ textarea.field {
   gap: 6px;
   margin-bottom: 10px;
 }
+.fcst-legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim, #8a94a6);
+}
 .chip {
   font: 600 11px / 1 var(--num);
   letter-spacing: 0.06em;

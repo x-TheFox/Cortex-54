@@ -68,6 +68,9 @@ export const STRATEGY_PARAMS: Record<string, z.ZodType> = {
       max_price_drift: z.number().positive().max(0.1),
       conviction,
       crash_floor: z.number().min(0).max(100),
+      // stocks (panel + court context only): daily candles
+      equity_horizon_days: int.max(10).optional(),
+      equity_lookback_days: int.min(120).max(512).optional(),
     })
     .refine((p) => p.horizon_hours % p.candle_hours === 0, "horizon must be whole candles")
     .refine(

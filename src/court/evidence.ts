@@ -57,6 +57,8 @@ export interface Evidence {
     view: string;
     model: string;
     horizon_hours: number;
+    /** "48 h" for crypto (4 h candles), "2 trading days" for stocks (daily candles) */
+    horizon_label?: string;
     age_minutes: number;
     p_up: number;
     p_win: number;
@@ -307,11 +309,18 @@ export function buildEvidence(i: {
 
 export const KRONOS_ABOUT =
   "Kronos-base is a mid-sized (102M-parameter) open-source model trained only on past candlestick charts: it sees no news, " +
-  "fundamentals or order flow. The numbers are shares of 24 randomly sampled 48 h price paths, stretched to match recent " +
+  "fundamentals or order flow. The numbers are shares of 24 randomly sampled price paths (48 h of 4 h candles for crypto, " +
+  "2 trading days of daily candles for stocks), stretched to match recent " +
   "volatility. It has not been validated on this account. LOW confidence: treat it as a weak tiebreaker at most, " +
   "never as a reason to trade, and let any real evidence overrule it.";
 
-function kronosContext(f: { p_up: number; p_win: number; exp_ret: number; horizon_hours: number }): {
+function kronosContext(f: {
+  p_up: number;
+  p_win: number;
+  exp_ret: number;
+  horizon_hours: number;
+  horizon_label?: string;
+}): {
   about: string;
   confidence: "LOW";
   view: string;
@@ -320,7 +329,7 @@ function kronosContext(f: { p_up: number; p_win: number; exp_ret: number; horizo
   return {
     about: KRONOS_ABOUT,
     confidence: "LOW",
-    view: `Kronos ${lean}: ${Math.round(f.p_up * 100)}% of sampled paths end higher after ${f.horizon_hours} h, average ${(f.exp_ret * 100).toFixed(1)}%; ${Math.round(f.p_win * 100)}% would end profitable for a 1.5/2.25 ATR stop/target.`,
+    view: `Kronos ${lean}: ${Math.round(f.p_up * 100)}% of sampled paths end higher after ${f.horizon_label ?? `${f.horizon_hours} h`}, average ${(f.exp_ret * 100).toFixed(1)}%; ${Math.round(f.p_win * 100)}% would end profitable for a 1.5/2.25 ATR stop/target.`,
   };
 }
 

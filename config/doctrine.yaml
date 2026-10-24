@@ -345,6 +345,8 @@ strategies:
       max_price_drift: 0.0075 # skip when the bid moved this far from the forecast's last price
       conviction: 5
       crash_floor: 15
+      equity_horizon_days: 2 # stocks: daily candles, the next 2 trading days (panel + court context only)
+      equity_lookback_days: 250 # ~1 year of daily context (Kronos max 512)
     accounts: [PAPER]
   # ADR-045: strategies from docs/STRATEGY_RESEARCH.md. SHADOW on PAPER; they run only in the LAB brain (lab: above).
   - id: CRYPTO_TREND_V1

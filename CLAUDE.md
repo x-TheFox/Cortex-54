@@ -421,5 +421,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   ADR-049 (learning loop), ADR-050 (property tests, param schemas, doc reconciliation). Rejections recorded there.
 - 2026-10-24: ADR-051: web research desk — a multi-step agent on GitHub Actions (read-only web tools, free LLM chain,
   code-checked citations) builds a dossier per court case; the court waits ≤ 25 min for it and cites it (`res_*`).
+- 2026-10-24: ADR-052: Kronos also forecasts the 18 watchlist stocks (daily candles, 2 trading days) for the court and
+  the FCST page; they never trade on it.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

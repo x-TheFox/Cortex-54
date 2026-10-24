@@ -25,6 +25,10 @@ export const KronosForecastSchema = z.object({
   exp_ret: z.number().min(-1).max(10),
   q10_ret: z.number().optional(),
   q90_ret: z.number().optional(),
+  /** Stocks forecast from daily candles (24); crypto from the payload's candle size. */
+  candle_hours: z.number().positive().optional(),
+  /** e.g. "2 trading days" for stocks; crypto uses the payload's horizon_hours. */
+  horizon_label: z.string().max(40).optional(),
   /** ADR-047 panel: recent candle closes and the 10/50/90% band of sampled future closes. */
   hist: z.array(z.number().positive()).max(120).optional(),
   fan: z
