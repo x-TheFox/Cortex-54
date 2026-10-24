@@ -49,10 +49,19 @@ def run_url() -> str | None:
 
 
 def run_skill(skill: str, script: str, args: list[str], out_dir: Path) -> None:
-    """Run an upstream skill script from its own directory (it imports sibling modules)."""
+    """Run an upstream skill script from its own directory (it imports sibling modules).
+
+    One retry after a short pause: upstream skills fetch public APIs and a single TLS/connect timeout used to drop the
+    whole batch (2026-10-23 crypto run)."""
     upstream = Path(os.environ["UPSTREAM_DIR"]) / "skills" / skill / "scripts"
     cmd = [sys.executable, script, *args]
-    res = subprocess.run(cmd, cwd=upstream, capture_output=True, text=True, timeout=TIMEOUT_S, env=os.environ.copy())
+    for attempt in range(2):
+        res = subprocess.run(cmd, cwd=upstream, capture_output=True, text=True, timeout=TIMEOUT_S, env=os.environ.copy())
+        if res.returncode == 0:
+            return
+        if attempt == 0:
+            print(f"{skill} failed ({res.returncode}); retrying once in 20 s", file=sys.stderr)
+            time.sleep(20)
     if res.returncode != 0:
         tail = (res.stderr or res.stdout)[-800:]
         fmp = os.environ.get("FMP_API_KEY")

@@ -30,6 +30,8 @@ export const ConstitutionSchema = z.object({
     order_sides: z.array(z.string()),
     options_structures_paper: z.array(z.string()),
     options_structures_live: z.array(z.string()),
+    /** 1x inverse ETFs a cash account may buy long as a bearish position (ADR-040). Never leveraged. */
+    inverse_etfs_1x: z.array(z.string()).default([]),
   }),
   forbidden: z.array(z.string()).min(1),
 });

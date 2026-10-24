@@ -1510,3 +1510,58 @@ describe("exception lane (ADR-039)", () => {
     expect(stage(t2, "news:9")?.reason_codes).toContain("stale");
   });
 });
+
+describe("Falling-market strategies (ADR-040)", () => {
+  const slide = (n: number, from: number, to: number): Bar[] =>
+    Array.from({ length: n }, (_, i) => {
+      const c = from + ((to - from) * i) / (n - 1);
+      return { t: T0 - (n - i) * 86_400_000, o: c, h: c + 1, l: c - 1, c, v: 1 };
+    });
+
+  it("oversold bounce → RULE contract → passive PAPER buy, even with the risk-on gate closed", async () => {
+    const t = setup();
+    t.market.bars["BTC/USD"] = slide(30, 130, 100); // BTC under its EMA: breakout baseline stays off
+    t.market.bars["ETH/USD"] = slide(25, 130, 100);
+    t.market.set("ETH/USD", 102, 102.02); // back above yesterday's high (101)
+    const r = await t.brain.pulse();
+    expect(r.contracts).toBe(1);
+    expect(r.entries).toBe(1);
+    const k = t.d1.db.prepare("SELECT strategy_id, symbol FROM decision_contracts").get();
+    expect(k).toEqual({ strategy_id: "CRYPTO_OVERSOLD_BOUNCE_V1", symbol: "ETH/USD" });
+    const entry = [...t.paper.orders.values()][0];
+    expect(entry?.side).toBe("buy");
+    expect(Number(entry?.qty) * 102).toBeLessThanOrEqual(54 * 0.35);
+    // once per symbol per day, hourly cadence
+    t.advance(2 * HOUR);
+    expect((await t.brain.pulse()).contracts).toBe(0);
+  });
+
+  it("inverse ETF breakout buys only in a bearish equity posture, during the session", async () => {
+    const t = setup();
+    t.market.bars.SH = slide(30, 36, 40);
+    t.market.set("SH", 41.6, 41.61);
+    t.sql.exec(
+      "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('earnings_as_of', ?, ?)",
+      String(T0),
+      T0,
+    );
+    const posture = (p: string, at: number) =>
+      t.sql.exec(
+        "INSERT OR REPLACE INTO regime_state (arena, posture, score, ceiling, payload_json, as_of) VALUES ('EQUITIES', ?, NULL, NULL, '{}', ?)",
+        p,
+        at,
+      );
+    posture("NEW_ENTRY_ALLOWED", T0);
+    expect((await t.brain.pulse()).contracts).toBe(0); // bullish market: no hedge
+    t.advance(2 * HOUR);
+    posture("REDUCE_ONLY", T0 + 2 * HOUR);
+    t.paper.isOpen = false;
+    expect((await t.brain.pulse()).contracts).toBe(0); // market closed: the hourly slot is not spent
+    t.paper.isOpen = true;
+    const r = await t.brain.pulse();
+    expect(r.contracts).toBe(1);
+    expect(r.entries).toBe(1);
+    const k = t.d1.db.prepare("SELECT strategy_id, symbol FROM decision_contracts").get();
+    expect(k).toEqual({ strategy_id: "EQUITY_INVERSE_BREAKOUT_V1", symbol: "SH" });
+  });
+});

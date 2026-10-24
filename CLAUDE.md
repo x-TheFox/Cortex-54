@@ -33,7 +33,7 @@ No model, no Governor, no Discord button can change them at runtime.
    price come exclusively from `PositionSizer` + `PreTradeValidator`.
 3. **Hard caps.** Per-trade risk, total heat, per-position notional, daily loss and drawdown caps from the
    constitution can only be tightened by doctrine, never loosened. Cash only: no margin, no shorting, no naked
-   options, no leveraged/inverse ETFs.
+   options, no leveraged ETFs. Bearish exposure only by buying the constitution's 1x inverse ETFs (ADR-040).
 4. **Every position has an exit.** Each position carries a stop; a broker-side stop wherever Alpaca accepts
    one, and a synthetic stop checked on every pulse otherwise.
 5. **The kill-switch and Red breaker are sacred.** No model or Governor can override them. LIVE unlocks only with
@@ -389,5 +389,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   The 7-day and 30-day autonomous clocks restart from this RESET.
 - 2026-10-23: ADR-039 exception lane: exceptional catalysts (Tier 1 ≥ 0.85 / 2.2, Tier 2 ≥ 0.85) may trade through a
   REDUCE_ONLY gate at half size, one at a time; gate refusals are now graded; Tier 2 is one attempt per candidate.
+- 2026-10-24: ADR-040: constitution v2 allows buying 1x inverse ETFs (SH, PSQ, RWM, BITI); new PAPER strategies
+  EQUITY_INVERSE_BREAKOUT_V1 and CRYPTO_OVERSOLD_BOUNCE_V1 trade falling markets. True shorting needs a margin
+  account (≥ $2,000), so it stays impossible at $54.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.
