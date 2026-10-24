@@ -1,5 +1,5 @@
 import type { Doctrine } from "../contracts/doctrine.ts";
-import { clamp, floorToIncrement } from "../lib/num.ts";
+import { ceilToIncrement, clamp, floorToIncrement } from "../lib/num.ts";
 import type { Rung } from "./rungs.ts";
 
 /**
@@ -35,7 +35,7 @@ export type SizingResult =
       riskUsd: number;
       rEff: number;
       dStop: number;
-      binding: "risk" | "concentration" | "cash" | "heat";
+      binding: "risk" | "concentration" | "cash" | "heat" | "venue_min";
     }
   | { ok: false; reasons: string[] };
 
@@ -87,14 +87,37 @@ export function sizePosition(i: SizingInput, d: Doctrine): SizingResult {
   const qty = floorToIncrement(targetNotional / i.entry, i.qtyIncrement);
   const qtyNum = Number(qty);
   const notionalUsd = qtyNum * i.entry;
-  if (qtyNum <= 0 || qtyNum < i.minQty) {
-    return { ok: false, reasons: [`size below minimum quantity (binding: ${binding})`] };
+  if (notionalUsd >= i.minNotionalUsd && qtyNum > 0 && qtyNum >= i.minQty) {
+    return { ok: true, qty, notionalUsd, riskUsd: notionalUsd * dStop, rEff, dStop, binding };
   }
-  if (notionalUsd < i.minNotionalUsd) {
+  // ADR-042 min ticket: only a *risk*-bound order may be lifted to the venue minimum (never one bound by
+  // concentration, cash or heat), by at most max_upscale, and only while the lifted risk stays inside the rung cap.
+  const floorQty = Math.max(i.minQty, (i.minNotionalUsd * 1.005) / i.entry);
+  const lifted = ceilToIncrement(floorQty, i.qtyIncrement);
+  const liftedNotional = Number(lifted) * i.entry;
+  const why: string[] = [];
+  if (binding !== "risk") why.push(`binding: ${binding}`);
+  if (liftedNotional > caps.risk * d.sizing.min_ticket.max_upscale)
+    why.push(`needs ${(liftedNotional / Math.max(caps.risk, 1e-9)).toFixed(1)}× the risk size`);
+  if (liftedNotional * dStop > i.equityUsd * i.rung.per_trade_risk)
+    why.push("would exceed the per-trade risk cap");
+  if (liftedNotional > Math.min(caps.concentration, caps.cash, caps.heat))
+    why.push("no room under concentration, cash or heat");
+  if (why.length > 0) {
     return {
       ok: false,
-      reasons: [`notional $${notionalUsd.toFixed(2)} below minimum (binding: ${binding})`],
+      reasons: [
+        `size $${notionalUsd.toFixed(2)} below the $${i.minNotionalUsd} venue minimum (${why.join("; ")})`,
+      ],
     };
   }
-  return { ok: true, qty, notionalUsd, riskUsd: notionalUsd * dStop, rEff, dStop, binding };
+  return {
+    ok: true,
+    qty: lifted,
+    notionalUsd: liftedNotional,
+    riskUsd: liftedNotional * dStop,
+    rEff,
+    dStop,
+    binding: "venue_min",
+  };
 }

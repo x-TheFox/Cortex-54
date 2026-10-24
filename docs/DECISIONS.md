@@ -443,3 +443,16 @@ and Workers AI does not host it.
 **Honest limit:** Kronos is a pattern model with no news awareness, and 24 samples carry ±0.1 sampling error. The
 Governor grades it like any other source; the strategy is demoted by PR if it does not pay.
 
+## ADR-042 — Venue minimum ticket: lift risk-sized orders to Alpaca's $10 crypto floor inside the caps (2026-10-24)
+**Context:** The first Kronos contracts (BTC, DOT) were sized $3.90 and $2.61 — a calibrated-down edge on $54 — and
+Alpaca refused both: crypto orders need a cost basis of at least $10 (`403 40310000`). With the doctrine prior and the
+calibration shrink, nearly every crypto entry at $54 sizes below $10, so the agent could never buy crypto.
+**Decision:** `execution.min_order_notional_usd` = {CRYPTO 10, EQUITIES 1}. When the *risk* cap binds and the order
+falls under the venue minimum, the sizer may lift it to the minimum (+0.5%, quantity rounded up) only if all hold:
+the lift is ≤ `sizing.min_ticket.max_upscale` (4×) of the risk-sized notional; the lifted order's risk
+(notional × d_stop) stays ≤ the rung's per-trade cap (R1: 2.5% = $1.35); and it fits concentration, cash and heat.
+Orders bound by concentration, cash or heat are never lifted. Otherwise the entry is refused before submission.
+**Effect:** at a ~4% stop distance a $10 crypto order risks ~$0.45 (0.8% of equity), well under the constitution's cap.
+The constitution is unchanged; per-trade risk can rise above r_eff up to the rung cap, which is the price of trading
+at all on a $54 account. Revisit when equity grows enough that risk-sized orders clear $10 on their own.
+

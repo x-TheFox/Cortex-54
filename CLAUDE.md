@@ -129,7 +129,8 @@ neurons/M); output free. **Batching several items into one state compresses and 
 item per call (ADR-027).** `clef-omni` is not in the official changelog — do not depend on it.
 
 **Alpaca**
-- Crypto: market / limit / stop_limit, TIF gtc / ioc, all fractional. **No `post_only` flag.** Fee tier
+- Crypto: market / limit / stop_limit, TIF gtc / ioc, all fractional. **No `post_only` flag.** **Minimum order
+  cost basis $10** (403 40310000, verified 2026-10-24; ADR-042 lifts risk-sized orders to it inside the caps). Fee tier
   <$100k 30-day volume: 0.15% maker / 0.25% taker. Paper does not charge fees.
 - Equities: $0 commission; regulatory fees on sells round up to the cent (meaningful on $18 sells).
   Fractional supports market, limit, **stop, stop_limit** (regular hours). Extended hours: limit orders only
@@ -394,5 +395,6 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   account (≥ $2,000), so it stays impossible at $54.
 - 2026-10-24: ADR-041: Kronos-small forecasts (research job `kronos`, every 4 h on GitHub CPU, vol-rescaled sampled
   paths) → CRYPTO_KRONOS_FORECAST_V1 on PAPER + a `forecast` block in court evidence.
+- 2026-10-24: first buy attempts (Kronos BTC/DOT) refused by Alpaca's $10 crypto minimum → ADR-042 min-ticket rule.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.
