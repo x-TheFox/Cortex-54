@@ -167,7 +167,7 @@ describe("CRYPTO_KRONOS_FORECAST_V1", () => {
     p_stop_first: 0.08,
     exp_ret: 0.01,
     produced_at: now - 3_600_000,
-    model: "NeoQuasar/Kronos-small",
+    model: "NeoQuasar/Kronos-base",
   };
   const base = {
     symbol: "BTC/USD",

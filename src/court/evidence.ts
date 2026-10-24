@@ -222,7 +222,7 @@ export function buildEvidence(i: {
 }
 
 export const KRONOS_ABOUT =
-  "Kronos-small is a small (25M-parameter) open-source model trained only on past candlestick charts: it sees no news, " +
+  "Kronos-base is a mid-sized (102M-parameter) open-source model trained only on past candlestick charts: it sees no news, " +
   "fundamentals or order flow. The numbers are shares of 24 randomly sampled 48 h price paths, stretched to match recent " +
   "volatility. It has not been validated on this account. LOW confidence: treat it as a weak tiebreaker at most, " +
   "never as a reason to trade, and let any real evidence overrule it.";

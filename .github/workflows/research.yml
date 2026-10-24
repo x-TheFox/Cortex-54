@@ -40,7 +40,7 @@ env:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45 # Kronos-base: ~25 s per pair on CPU
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -80,7 +80,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: kronos-weights-small-v1
+          key: kronos-weights-base-v1
       - name: Kronos forecasts and ingest
         if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job == 'kronos'
         working-directory: research

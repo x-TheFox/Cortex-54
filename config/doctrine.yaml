@@ -298,7 +298,7 @@ strategies:
         ADA/USD,
       ]
     params:
-      candle_hours: 4 # 4h candles: 12 steps cover 48 h at ~12 s per pair on a free CPU runner
+      candle_hours: 4 # 4h candles: 12 steps cover 48 h; Kronos-base ~25 s per pair on a free CPU runner
       lookback_hours: 720 # 180 candles (30 days) of context
       horizon_hours: 48
       paths: 24 # independent sampled futures per pair, vol-rescaled to realized 48 h volatility
