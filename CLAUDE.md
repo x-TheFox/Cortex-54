@@ -409,5 +409,6 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   research strategies (trend, RSI(2) pullback, turn-of-month); PAPER only runs strategies that graduate by PR.
 - 2026-10-24: ADR-046: backtest lab (weekly). RSI(2) pullback PASSES → ACTIVE on PAPER; bounce and inverse ETFs lose
   net of costs → moved to LAB; trend and turn-of-month lose too (LAB only).
+- 2026-10-24: ADR-047: web terminal FCST page (key 7): Kronos forecast band vs the robot's own plan per symbol.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
  * Steps point at `data-guide` attributes; a step may first switch the lower display to a page.
  */
 
-export type GuidePage = "ACCT" | "FUNNEL" | "MEM" | "OPT" | "GOV" | "STS";
+export type GuidePage = "ACCT" | "FUNNEL" | "MEM" | "OPT" | "GOV" | "STS" | "FCST";
 
 interface Step {
   target?: string; // data-guide value; none = centred card
@@ -94,7 +94,7 @@ const STEPS: Step[] = [
     target: "ecp",
     title: "The six system pages",
     body: [
-      "These keys switch the lower screen between six pages. Keys 1 to 6 on your keyboard do the same. The lit bar shows which page is open.",
+      "These keys switch the lower screen between seven pages. Keys 1 to 7 on your keyboard do the same. The lit bar shows which page is open.",
     ],
   },
   {
@@ -164,6 +164,19 @@ const STEPS: Step[] = [
       "In a falling market it switches tools rather than sitting still: it can buy inverse funds that rise as the market drops, and buy coins that fell too far, too fast, once they start bouncing.",
       "The exception: truly huge news (rated near the top of the scale by two AI checks and then the court) can still be traded, at half size and only one at a time. In the danger posture (CASH_PRIORITY) or when its data is out of date, it buys nothing.",
       "Below that are today's free-service usage and the diary's status.",
+    ],
+  },
+  {
+    target: "sd",
+    page: "FCST",
+    title: "FCST: two views of what comes next",
+    body: [
+      "The white line is the real price over the last week. The amber cloud is Kronos, a small pattern-reading model: the shaded area is where most of its imagined futures end up over the next two days, and the dashed line is its middle guess. It reads charts only, no news, so treat it as a rough hint.",
+      "The blue lines are the robot's own view: where it bought or plans to buy, where it would cut the loss (stop) and where it would take profit (target), with the odds it acted on written underneath. The robot never trades on Kronos alone.",
+    ],
+    terms: [
+      ["Forecast band", "The range most of the model's sampled futures fall inside. Wider means less sure."],
+      ["Low confidence", "Shown for context, never trusted on its own."],
     ],
   },
   {

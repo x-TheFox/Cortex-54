@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type AccountView, command, consumeLoginHash, type StatusView, useNow, useResource } from "./api.ts";
 import { drawdown, ecam } from "./ecam.ts";
+import { FcstPage } from "./forecast.tsx";
 import { GUIDE_SEEN_KEY, Guide } from "./guide.tsx";
 import { ago, Dial, heat, pct, Trend, usd, utc } from "./instruments.tsx";
 import { AccountPanel, CourtPanel } from "./overhead.tsx";
@@ -13,6 +14,7 @@ const PAGES = [
   { id: "OPT", title: "OPTIONS SHADOW LAB" },
   { id: "GOV", title: "GOVERNOR" },
   { id: "STS", title: "STATUS" },
+  { id: "FCST", title: "FORECAST · KRONOS VS THE ROBOT" },
 ] as const;
 type PageId = (typeof PAGES)[number]["id"];
 
@@ -344,6 +346,8 @@ export function App() {
             <OptPage />
           ) : page === "GOV" ? (
             <GovPage now={now} />
+          ) : page === "FCST" ? (
+            <FcstPage now={now} />
           ) : (
             <StsPage s={s} now={now} />
           )}
@@ -367,7 +371,7 @@ export function App() {
           </button>
         ))}
         <span className="spacer" />
-        <span className="note">Keys 1–6 · ? for the guide</span>
+        <span className="note">Keys 1–7 · ? for the guide</span>
         <button type="button" className="key guide-key" onClick={() => setGuide(true)} aria-haspopup="dialog">
           <span>GUIDE</span>
           <span className="lamp" />

@@ -320,6 +320,65 @@ const options = (now: number, empty: boolean) =>
         },
       ];
 
+/** Synthetic /api/forecast (ADR-047): a drifting price, a widening amber fan, and a robot plan on BTC. */
+function forecast(now: number, symbol: string, empty: boolean) {
+  const symbols = ["BTC/USD", "ETH/USD", "SOL/USD", "XRP/USD", "LINK/USD", "AVAX/USD", "DOGE/USD", "LTC/USD"];
+  const base = { "BTC/USD": 80_500, "ETH/USD": 2_360, "SOL/USD": 142 }[symbol] ?? 12;
+  const hist = Array.from(
+    { length: 42 },
+    (_, i) => +(base * (1 + 0.02 * Math.sin(i / 6) - 0.0006 * (42 - i))).toPrecision(6),
+  );
+  const last = hist[hist.length - 1] as number;
+  const mid = Array.from({ length: 12 }, (_, i) => +(last * (1 + 0.0012 * (i + 1))).toPrecision(6));
+  const spread = (i: number) => last * 0.006 * Math.sqrt(i + 1) * 2.2;
+  const hasPlan = symbol === "BTC/USD";
+  return {
+    symbol,
+    symbols: empty ? [] : symbols,
+    now,
+    kronos: empty
+      ? null
+      : {
+          model: "NeoQuasar/Kronos-base",
+          produced_at: now - 75 * 60_000,
+          stale: false,
+          horizon_hours: 48,
+          candle_hours: 4,
+          confidence: "LOW",
+          about:
+            "Kronos-base is a mid-sized (102M-parameter) open-source model trained only on past candlestick charts: it sees no news, fundamentals or order flow. The numbers are shares of 24 randomly sampled 48 h price paths, stretched to match recent volatility. It has not been validated on this account. LOW confidence: treat it as a weak tiebreaker at most, never as a reason to trade, and let any real evidence overrule it.",
+          last,
+          hist,
+          fan: {
+            p10: mid.map((v, i) => +(v - spread(i)).toPrecision(6)),
+            p50: mid,
+            p90: mid.map((v, i) => +(v + spread(i)).toPrecision(6)),
+          },
+          p_up: 0.71,
+          p_win: 0.62,
+          exp_ret: 0.0144,
+        },
+    robot: {
+      position: null,
+      plan: hasPlan
+        ? {
+            strategy: "CRYPTO_CATALYST_COURT_V1",
+            origin: "COURT",
+            created_at: now - 3 * 3_600_000,
+            entry_low: last * 0.998,
+            entry_high: last * 1.002,
+            stop: last * 0.962,
+            target: last * 1.045,
+            win_prob: 0.39,
+            bear_lethality: 0.56,
+            thesis: "ETF inflows support a rebound toward the EMA20.",
+          }
+        : null,
+      regime: { posture: "NEW_ENTRY_ALLOWED", score: 60.7 },
+    },
+  };
+}
+
 export function mockApi(): Plugin {
   return {
     name: "cortex-mock-api",
@@ -386,6 +445,8 @@ export function mockApi(): Plugin {
             return send(memory(now, empty));
           case "/api/options":
             return send(options(now, empty));
+          case "/api/forecast":
+            return send(forecast(now, url.searchParams.get("symbol") ?? "BTC/USD", empty));
           case "/api/equity":
             return send(empty ? {} : { PAPER: curve(now, 54, 24 * 14, 0.7) });
           case "/api/command":

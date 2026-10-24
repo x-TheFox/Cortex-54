@@ -541,3 +541,16 @@ stays ACTIVE as the plumbing strategy but is flagged. The court and Kronos are n
 **Honest limit:** a backtest that agrees with the literature is still a backtest. LAB forward results and live PAPER
 grading decide what stays.
 
+## ADR-047 — Panel forecast page: Kronos's sampled future beside the robot's own plan (2026-10-24)
+**Context:** The operator asked for the panel to show "what the market might look like" according to Kronos and
+"what the robot thinks the market would look like".
+**Decision:** the Kronos job also sends, per pair, the last 42 four-hour closes and the 10/50/90% quantiles of its
+(volatility-rescaled) sampled closes for each future step (~12 KB per batch). The brain stores them with the forecast
+and serves `GET /api/forecast?symbol=` (session-protected, read-only): the Kronos block (fan, p_up, mean, staleness,
+the LOW-confidence `about` text) and the robot block — its open position or latest contract for the symbol (entry,
+stop, target, the calibrated probability it acted on, bear lethality) and the regime. The web terminal's new FCST page
+(key 7) draws both on one axis: price in white, Kronos as an amber band with a dashed middle path labelled low
+confidence, the robot's entry/stop/target as cyan/red/green lines, and plain-English text under each.
+**Why not a robot price path:** the robot does not forecast prices; drawing one would invent a number it never used.
+Its honest "view" is the plan and the probability behind it. Synthetic data for `pnpm web:dev` is in `mock-api.ts`.
+

@@ -28,6 +28,7 @@ function fakeBrain() {
     status: async () => ({ ok: true }),
     memory: async () => ({ beliefs: [], reputation: {}, scars: [] }),
     equity: async () => ({}),
+    forecast: async (sym) => ({ symbol: sym }),
     consumeOnce: async (id) => {
       if (used.has(id)) return false;
       used.add(id);
