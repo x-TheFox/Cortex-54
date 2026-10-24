@@ -77,6 +77,9 @@ sizing:
   reputation_weight: { min: 0.5, max: 1.2, min_signals_before_adjusting: 20 }
   edge_gate: { p_zero: 0.5, p_full: 0.75 } # g(p) ramps from 0 at p_zero to 1 at p_full
   correlation_guard: { lookback_days: 60, max_corr: 0.7 }
+  # ADR-042: a risk-sized order under the venue minimum may be lifted to it (≤ 4× the risk-sized notional), only while
+  # the lifted order still risks no more than the rung's per-trade cap and fits concentration, cash and heat.
+  min_ticket: { max_upscale: 4.0 }
 
 fees:
   crypto_maker: 0.0015
@@ -94,6 +97,7 @@ execution:
   earnings_blackout_hours: 72
   max_spread_bps: { CRYPTO: 30, EQUITIES: 25, OPTIONS: 500 }
   reservation_ttl_seconds: 120
+  min_order_notional_usd: { CRYPTO: 10, EQUITIES: 1, OPTIONS: 0 } # Alpaca: crypto cost basis ≥ $10
 
 cadence:
   pulse_seconds_exposed: 60

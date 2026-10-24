@@ -28,6 +28,28 @@ const base: SizingInput = {
 };
 
 describe("PositionSizer", () => {
+  describe("venue minimum ticket (ADR-042)", () => {
+    // the 2026-10-24 BTC case: a calibrated-down Kronos edge sized ~$4, under Alpaca's $10 crypto minimum
+    const small = { ...base, conviction: 5, pWin: 0.56, bearLethality: 0, minNotionalUsd: 10 };
+    it("lifts a risk-bound order to the minimum while risk stays inside the rung cap", () => {
+      const r = sizePosition(small, d);
+      if (!r.ok) throw new Error(r.reasons.join("; "));
+      expect(r.binding).toBe("venue_min");
+      expect(r.notionalUsd).toBeGreaterThanOrEqual(10);
+      expect(r.notionalUsd).toBeLessThan(10.2);
+      expect(r.riskUsd).toBeLessThanOrEqual(54 * d.rungs.R1.per_trade_risk);
+    });
+    it("refuses lifts beyond max_upscale, past the risk cap, or without cash", () => {
+      const weak = sizePosition({ ...small, pWin: 0.505 }, d);
+      expect(weak.ok).toBe(false);
+      if (!weak.ok) expect(weak.reasons[0]).toMatch(/venue minimum.*risk size/);
+      const wide = sizePosition({ ...small, stop: 80, atr: 10 }, d); // 20% stop: $10 would risk > $1.35
+      expect(wide.ok).toBe(false);
+      const broke = sizePosition({ ...small, availableCashUsd: 8 }, d);
+      expect(broke.ok).toBe(false);
+    });
+  });
+
   it("the exception-lane multiplier only ever shrinks risk", () => {
     const full = sizePosition(base, d);
     const half = sizePosition({ ...base, regimeMultiplier: 0.5 }, d);

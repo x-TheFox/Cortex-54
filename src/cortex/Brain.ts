@@ -2982,7 +2982,7 @@ ${postmortem}`,
         : contract.arena === "CRYPTO"
           ? 1e-9
           : 1e-9,
-      minNotionalUsd: 1,
+      minNotionalUsd: Math.max(1, this.d.execution.min_order_notional_usd[contract.arena] ?? 1),
     };
     const v = validateEntry(
       {

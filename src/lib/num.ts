@@ -30,6 +30,13 @@ export function floorToIncrement(qty: number, increment: number): string {
   return (steps * increment).toFixed(decimalsOf(increment));
 }
 
+/** Ceil `qty` to a multiple of `increment` (venue minimums: the order must reach the floor, not fall short). */
+export function ceilToIncrement(qty: number, increment: number): string {
+  if (!(increment > 0)) throw new Error("increment must be > 0");
+  const steps = Math.ceil(qty / increment - 1e-9);
+  return (Math.max(steps, 0) * increment).toFixed(decimalsOf(increment));
+}
+
 /** Round a price to a tick in the conservative direction for the order side. */
 export function roundPrice(price: number, tick: number, mode: "down" | "up"): string {
   const steps = mode === "down" ? Math.floor(price / tick + 1e-9) : Math.ceil(price / tick - 1e-9);

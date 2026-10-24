@@ -47,6 +47,8 @@ export const DoctrineSchema = z.object({
     }),
     edge_gate: z.object({ p_zero: Fraction, p_full: Fraction }),
     correlation_guard: z.object({ lookback_days: z.number().int().positive(), max_corr: Fraction }),
+    /** ADR-042: lift a risk-sized order to the venue minimum, never past the rung's per-trade risk cap. */
+    min_ticket: z.object({ max_upscale: z.number().min(1).max(10) }).default({ max_upscale: 1 }),
   }),
   fees: z.object({
     crypto_maker: Fraction,
@@ -64,6 +66,8 @@ export const DoctrineSchema = z.object({
     earnings_blackout_hours: z.number().int().nonnegative(),
     max_spread_bps: z.record(Arena, z.number().positive()),
     reservation_ttl_seconds: z.number().int().positive(),
+    /** Venue minimum order cost per arena (Alpaca crypto: $10, verified 2026-10-24 from a 403). */
+    min_order_notional_usd: z.record(Arena, z.number().nonnegative()),
   }),
   cadence: z.object({
     pulse_seconds_exposed: z.number().int().min(30),
