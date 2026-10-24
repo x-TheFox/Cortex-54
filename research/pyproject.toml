@@ -14,6 +14,24 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8"]
+# Kronos forecasts (ADR-041), only for `run kronos`; torch comes from the CPU-only index on Linux runners.
+kronos = [
+  "torch>=2.4",
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "einops==0.8.1",
+  "huggingface_hub==0.33.1",
+  "safetensors==0.6.2",
+  "tqdm>=4.66",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

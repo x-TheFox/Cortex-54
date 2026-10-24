@@ -89,6 +89,13 @@ import {
   regimeProxyRiskOn,
 } from "../strategy/CryptoBreakoutBaseline.ts";
 import { atr, type Bar } from "../strategy/indicators.ts";
+import {
+  KRONOS_ID,
+  type KronosForecast,
+  KronosPayloadSchema,
+  kronosParams,
+  kronosSignal,
+} from "../strategy/KronosForecast.ts";
 import { dueJobs, type WorkflowDispatcher } from "./dispatch.ts";
 import { getKV, one, type SqlLike, setKV } from "./store.ts";
 
@@ -445,6 +452,7 @@ export class Brain {
           () => this.runBaseline(quotes),
           () => this.runBounce(quotes),
           () => this.runInverse(),
+          () => this.runKronos(quotes),
         ]) {
           const r = await run();
           report.contracts += r.contracts;
@@ -1488,6 +1496,124 @@ ${postmortem}`,
     return { contracts, entries };
   }
 
+  /** Store the latest Kronos forecasts (ADR-041). Whole-batch replace; each forecast is validated. */
+  private ingestKronos(b: Batch, now: number): { ok: boolean; message: string } {
+    const p = kronosParams(this.d);
+    const age = p ? p.max_forecast_age_hours : 5;
+    if (now - b.produced_at > age * 3_600_000) return { ok: false, message: "kronos batch is stale" };
+    const r = KronosPayloadSchema.safeParse(b.items.find((x) => x.skill_id === "kronos-forecast")?.payload);
+    if (!r.success) return { ok: false, message: "kronos payload failed the schema" };
+    setKV(
+      this.sql,
+      "kronos:forecasts",
+      JSON.stringify({
+        produced_at: b.produced_at,
+        model: r.data.model,
+        horizon_hours: r.data.horizon_hours,
+        forecasts: r.data.forecasts,
+      }),
+      now,
+    );
+    const best = [...r.data.forecasts].sort((x, y) => y.p_win - x.p_win).slice(0, 3);
+    this.journal.append(
+      "SYSTEM",
+      "KRONOS",
+      null,
+      {
+        model: r.data.model,
+        n: r.data.forecasts.length,
+        best: best.map((f) => `${f.symbol} ${f.p_win}`),
+      },
+      now,
+    );
+    return { ok: true, message: `stored ${r.data.forecasts.length} kronos forecasts` };
+  }
+
+  /** The stored Kronos forecast for a symbol while it is fresh, else null. */
+  kronosFor(
+    symbol: string,
+    now: number,
+  ): (KronosForecast & { produced_at: number; model: string; horizon_hours: number }) | null {
+    const p = kronosParams(this.d);
+    if (!p) return null;
+    try {
+      const v = JSON.parse(getKV(this.sql, "kronos:forecasts") ?? "null") as {
+        produced_at: number;
+        model: string;
+        horizon_hours: number;
+        forecasts: KronosForecast[];
+      } | null;
+      if (!v || now - v.produced_at > p.max_forecast_age_hours * 3_600_000) return null;
+      const f = v.forecasts.find((x) => x.symbol === symbol);
+      return f ? { ...f, produced_at: v.produced_at, model: v.model, horizon_hours: v.horizon_hours } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private resolvedStrategyOutcomes(strategyId: string): number {
+    return (
+      one<{ n: number }>(
+        this.sql,
+        "SELECT COUNT(*) AS n FROM exits e JOIN contracts c ON c.contract_id = e.contract_id WHERE json_extract(c.json, '$.strategy_id') = ?",
+        strategyId,
+      )?.n ?? 0
+    );
+  }
+
+  /** CRYPTO_KRONOS_FORECAST_V1 (ADR-041): trade fresh Kronos forecasts; probability calibrated, never a size. */
+  private async runKronos(quotes: Record<string, Quote>): Promise<{ contracts: number; entries: number }> {
+    const now = this.deps.now();
+    const p = kronosParams(this.d);
+    const m = this.deps.market;
+    if (!p || !m || !getKV(this.sql, "kronos:forecasts")) return { contracts: 0, entries: 0 };
+    const due = this.ruleStrategyDue(KRONOS_ID, now);
+    if (!due) return { contracts: 0, entries: 0 };
+    const symbols = due.universe.filter(
+      (s) => this.kronosFor(s, now) && !getKV(this.sql, `${KRONOS_ID}:${s}:${utcDay(now)}`),
+    );
+    if (symbols.length === 0) return { contracts: 0, entries: 0 };
+    const bars = await m.cryptoDailyBars(symbols, 40, now);
+    const missing = symbols.filter((s) => !quotes[s]);
+    const fresh = missing.length > 0 ? { ...quotes, ...(await m.cryptoQuotes(missing)) } : quotes;
+    const reg = this.freshRegime("CRYPTO", now);
+    const resolved = this.resolvedStrategyOutcomes(KRONOS_ID);
+    let contracts = 0;
+    let entries = 0;
+    for (const symbol of symbols) {
+      const f = this.kronosFor(symbol, now);
+      const q = fresh[symbol];
+      const b = bars[symbol];
+      if (!f || !q || !b) continue;
+      const asset = await this.assetMeta(symbol, due.accounts[0] as AccountId);
+      const tick = asset?.price_increment ? Number(asset.price_increment) : defaultTick(q.bid, "CRYPTO");
+      const { contract } = kronosSignal(
+        {
+          symbol,
+          bars: b,
+          bid: q.bid,
+          ask: q.ask,
+          now,
+          contractId: uuidv7(now),
+          tick,
+          forecast: f,
+          calibratedWin: calibrate(
+            f.p_win,
+            resolved,
+            this.d,
+            this.deps.calibration?.maps["kronos.p_win"] ?? null,
+          ),
+          regimeScore: reg?.score ?? null,
+        },
+        p,
+      );
+      if (!contract) continue;
+      contracts++;
+      entries += await this.emitRule(KRONOS_ID, contract, due.accounts, fresh, now);
+    }
+    return { contracts, entries };
+  }
+
   /** Symbols whose news we watch: held positions + all doctrine watchlists, in Alpaca news format (no slash). */
   private newsSymbols(): string[] {
     const s = new Set<string>(this.symbolsInPlay());
@@ -1840,6 +1966,19 @@ ${postmortem}`,
       held: this.symbolsInPlay(),
       memory: this.memoryFor(symbol, arena, now),
       regimeException: gate.exception,
+      forecast: ((f) =>
+        f
+          ? {
+              model: f.model,
+              horizon_hours: f.horizon_hours,
+              age_minutes: Math.round((now - f.produced_at) / 60_000),
+              p_up: f.p_up,
+              p_win: f.p_win,
+              p_target_first: f.p_target_first,
+              p_stop_first: f.p_stop_first,
+              exp_ret: f.exp_ret,
+            }
+          : null)(this.kronosFor(symbol, now)),
     });
     return evidence ? { ok: true, evidence } : { ok: false, reason: "not enough bar history", symbol, arena };
   }
@@ -2343,6 +2482,7 @@ ${postmortem}`,
     if (b.job === "governor") return this.ingestGovernor(b, now);
     if (b.job === "options-lab") return this.ingestOptionsLab(b, now);
     if (b.job === "screeners") return this.ingestScreeners(b, now);
+    if (b.job === "kronos") return this.ingestKronos(b, now);
     if (b.job === "world-intel" || b.posture === null) {
       const pulse = b.items.find((x) => x.skill_id === "gdelt-world-pulse")?.payload as
         | {

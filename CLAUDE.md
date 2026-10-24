@@ -276,7 +276,7 @@ pnpm web:dev              # web terminal on localhost with synthetic data (/?ale
 pnpm deploy:cortex        # builds web/ then wrangler deploy (CI does this on main once CLOUDFLARE_API_TOKEN exists). NOT `pnpm deploy` (pnpm builtin)
 pnpm deploy:sentinel      # deploy the independent watchdog/kill-switch worker
 pnpm discord:setup        # idempotent: CORTEX-54 category + 8 channels, sentinel webhook, guild slash commands
-gh workflow run research -f job=crypto    # or job=equity | world | options | screeners: run a research batch now
+gh workflow run research -f job=crypto    # or job=equity | world | options | screeners | kronos: run a research batch now
 pnpm court:smoke BTC/USD ["headline"] [--post]   # real bull/bear/Clef run on live evidence; never trades
 # Discord /court SYMBOL convenes a real session (PAPER, all gates apply); cards go to #bull-vs-bear-court
 pnpm discord:register     # (global) slash commands for both Discord apps (needs app ids + bot tokens in env)
@@ -392,5 +392,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-24: ADR-040: constitution v2 allows buying 1x inverse ETFs (SH, PSQ, RWM, BITI); new PAPER strategies
   EQUITY_INVERSE_BREAKOUT_V1 and CRYPTO_OVERSOLD_BOUNCE_V1 trade falling markets. True shorting needs a margin
   account (≥ $2,000), so it stays impossible at $54.
+- 2026-10-24: ADR-041: Kronos-small forecasts (research job `kronos`, every 4 h on GitHub CPU, vol-rescaled sampled
+  paths) → CRYPTO_KRONOS_FORECAST_V1 on PAPER + a `forecast` block in court evidence.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

@@ -42,7 +42,7 @@ The meter estimates neurons from token counts *before* the call (chars/3.5 heuri
 
 | Resource | Limit | Use |
 |---|---|---|
-| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research: crypto ~4 min × 6/day + equity ~8 min × 2/weekday; governor ~2 min/day (daily + Sunday weekly); options lab ~3 min × 2/weekday |
+| Minutes (public repo, standard runners) | free | CI ~3 min/push; watchdog <1 min × 48/day; research: crypto ~4 min × 6/day + equity ~8 min × 2/weekday; governor ~2 min/day (daily + Sunday weekly); options lab ~3 min × 2/weekday; Kronos ~8 min (torch install + 13 pairs × ~18 s CPU) × 6/day |
 | Schedule granularity | ≥5 min, UTC, may delay 15–30 min or skip | batch jobs carry `produced_at`; brain checks staleness |
 | Inactivity | schedules auto-disable after 60 days of no repo activity | Governor PRs + a monthly keepalive commit; brain alarms on stale batch |
 | Secrets | free | `CLOUDFLARE_API_TOKEN`, `INGEST_HMAC_SECRET`, `DISCORD_WEBHOOK_GOVERNOR`, data API keys |
@@ -59,7 +59,11 @@ and visible it polls `/api/state` every 15 s: 240 Worker + 240 DO requests per h
 The batch dispatcher (ADR-032) adds ~35 GitHub API calls/day from the brain (one subrequest each, inside the pulse's
 existing budget). GitHub allows 5,000 requests/hour per token.
 
-If the repo ever goes private: 2,000 min/month free still covers this (~1,700 min/month projected).
+Kronos (ADR-041) adds one ingest every 4 h (one Worker + one DO request, one KV row write) and no Workers AI neurons:
+the model runs on the GitHub runner. Weights (~100 MB) are cached between runs with `actions/cache`.
+
+If the repo ever goes private: 2,000 min/month free would no longer cover this (~3,100 min/month projected with Kronos);
+cut Kronos to every 8 h first.
 
 ## LLM providers (Tier 3) — all $0, all volatile (3p)
 

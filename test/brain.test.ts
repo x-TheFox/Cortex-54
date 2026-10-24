@@ -1565,3 +1565,59 @@ describe("Falling-market strategies (ADR-040)", () => {
     expect(k).toEqual({ strategy_id: "EQUITY_INVERSE_BREAKOUT_V1", symbol: "SH" });
   });
 });
+
+describe("Kronos forecasts (ADR-041)", () => {
+  const kronosBatch = (forecasts: Record<string, unknown>[], producedAt = T0) => ({
+    schema_version: 1,
+    job: "kronos",
+    produced_at: producedAt,
+    run_url: null,
+    items: [
+      {
+        skill_id: "kronos-forecast",
+        version: "67b630e67f6a18c9e9be918d9b4337c960db1e9a",
+        as_of: producedAt,
+        inputs_sha256: "b".repeat(64),
+        payload: { model: "NeoQuasar/Kronos-small", horizon_hours: 48, paths: 24, forecasts },
+      },
+    ],
+    posture: null,
+  });
+  const fc = (symbol: string, last: number, over: Record<string, number> = {}) => ({
+    symbol,
+    last,
+    atr: 2,
+    paths: 24,
+    p_up: 0.7,
+    p_win: 0.7,
+    p_target_first: 0.25,
+    p_stop_first: 0.05,
+    exp_ret: 0.012,
+    ...over,
+  });
+
+  it("ingests forecasts, trades the favourable one on PAPER, and ignores the weak one", async () => {
+    const t = setup();
+    t.market.bars["ETH/USD"] = flat(30, 100);
+    t.market.set("ETH/USD", 100, 100.02);
+    const r = await t.brain.ingestBatch(
+      kronosBatch([fc("ETH/USD", 100), fc("SOL/USD", 100, { p_win: 0.45, exp_ret: -0.01 })]),
+    );
+    expect(r.ok).toBe(true);
+    const pulse = await t.brain.pulse();
+    expect(pulse.entries).toBeGreaterThanOrEqual(1);
+    const rows = t.d1.db
+      .prepare("SELECT symbol FROM decision_contracts WHERE strategy_id = 'CRYPTO_KRONOS_FORECAST_V1'")
+      .all();
+    expect(rows).toEqual([{ symbol: "ETH/USD" }]);
+  });
+
+  it("rejects stale or malformed batches and feeds fresh forecasts to the court evidence", async () => {
+    const t = setup();
+    expect((await t.brain.ingestBatch(kronosBatch([fc("BTC/USD", 100)], T0 - 6 * HOUR))).ok).toBe(false);
+    expect((await t.brain.ingestBatch(kronosBatch([{ symbol: "BTC/USD" }]))).ok).toBe(false);
+    expect((await t.brain.ingestBatch(kronosBatch([fc("BTC/USD", 100)]))).ok).toBe(true);
+    expect(t.brain.kronosFor("BTC/USD", T0)?.p_win).toBe(0.7);
+    expect(t.brain.kronosFor("BTC/USD", T0 + 6 * HOUR)).toBeNull();
+  });
+});

@@ -14,13 +14,14 @@ on:
     - cron: "50 14 * * 1-5" # options shadow lab after the open (10:50 EDT / 09:50 EST)
     - cron: "40 19 * * 1-5" # options shadow lab before the close
     - cron: "45 14 * * *" # setup screeners during the session (crypto only on weekends)
+    - cron: "37 */4 * * *" # Kronos forecasts (ADR-041), ~5 min of CPU
   workflow_dispatch:
     inputs:
       job:
         description: "Which job"
         required: true
         type: choice
-        options: [crypto, equity, world, options, screeners]
+        options: [crypto, equity, world, options, screeners, kronos]
 
 permissions:
   contents: read
@@ -33,6 +34,8 @@ concurrency:
 env:
   UPSTREAM_REPO: tradermonty/claude-trading-skills
   UPSTREAM_SHA: cb0f3aadffed6d1089db4b224162c964368baa46
+  KRONOS_REPO: shiyu-coder/Kronos # MIT; run from a pinned checkout, never copied (NOTICE.md)
+  KRONOS_SHA: 67b630e67f6a18c9e9be918d9b4337c960db1e9a
 
 jobs:
   run:
@@ -49,6 +52,7 @@ jobs:
           elif [ "${{ github.event.schedule }}" = "17 * * * *" ]; then echo "job=world" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "50 14 * * 1-5" ] || [ "${{ github.event.schedule }}" = "40 19 * * 1-5" ]; then echo "job=options" >> "$GITHUB_OUTPUT";
           elif [ "${{ github.event.schedule }}" = "45 14 * * *" ]; then echo "job=screeners" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.event.schedule }}" = "37 */4 * * *" ]; then echo "job=kronos" >> "$GITHUB_OUTPUT";
           else echo "job=equity" >> "$GITHUB_OUTPUT"; fi
       - name: Skip if the brain already dispatched this job
         id: dedupe
@@ -66,8 +70,30 @@ jobs:
         run: |
           git clone --filter=blob:none "https://github.com/${UPSTREAM_REPO}" research/.vendor/upstream
           git -C research/.vendor/upstream checkout --quiet "${UPSTREAM_SHA}"
+      - name: Checkout pinned Kronos
+        if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job == 'kronos'
+        run: |
+          git clone --filter=blob:none "https://github.com/${KRONOS_REPO}" research/.vendor/kronos
+          git -C research/.vendor/kronos checkout --quiet "${KRONOS_SHA}"
+      - name: Cache Kronos weights
+        if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job == 'kronos'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: kronos-weights-small-v1
+      - name: Kronos forecasts and ingest
+        if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job == 'kronos'
+        working-directory: research
+        env:
+          KRONOS_DIR: ${{ github.workspace }}/research/.vendor/kronos
+          CORTEX_URL: ${{ vars.CORTEX_URL }}
+          INGEST_HMAC_SECRET: ${{ secrets.INGEST_HMAC_SECRET }}
+          ALPACA_KEY_ID: ${{ secrets.ALPACA_PAPER_KEY_ID }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_PAPER_SECRET }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: uv run --group kronos python -m cortex_research.run kronos
       - name: Run and ingest
-        if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job != 'options'
+        if: steps.dedupe.outputs.skip != 'true' && steps.pick.outputs.job != 'options' && steps.pick.outputs.job != 'kronos'
         working-directory: research
         env:
           UPSTREAM_DIR: ${{ github.workspace }}/research/.vendor/upstream

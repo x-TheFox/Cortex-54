@@ -3,6 +3,7 @@ import { contractViolations, DecisionContractSchema } from "../src/contracts/dec
 import { bounceParams, bounceSignal, inverseParams, inverseSignal } from "../src/strategy/BearAndBounce.ts";
 import { baselineParams, baselineSignal, regimeProxyRiskOn } from "../src/strategy/CryptoBreakoutBaseline.ts";
 import { atr, type Bar, ema, priorHigh } from "../src/strategy/indicators.ts";
+import { kronosParams, kronosSignal } from "../src/strategy/KronosForecast.ts";
 import { doctrine } from "./helpers.ts";
 
 const flatBars = (n: number, price = 100, range = 2): Bar[] =>
@@ -148,5 +149,58 @@ describe("EQUITY_INVERSE_BREAKOUT_V1", () => {
     expect(Number(contract.invalidation_criteria.stop_price)).toBeLessThan(41.6);
     expect(inverseSignal({ ...base, bid: 41.6, bearish: false }, p).contract).toBeNull();
     expect(inverseSignal({ ...base, bid: 40.5, bearish: true }, p).reason).toMatch(/no breakout/);
+  });
+});
+
+describe("CRYPTO_KRONOS_FORECAST_V1", () => {
+  const p = kronosParams(doctrine);
+  if (!p) throw new Error("kronos params missing");
+  const now = 30 * DAY;
+  const f = {
+    symbol: "BTC/USD",
+    last: 100,
+    atr: 2,
+    paths: 24,
+    p_up: 0.7,
+    p_win: 0.67,
+    p_target_first: 0.2,
+    p_stop_first: 0.08,
+    exp_ret: 0.01,
+    produced_at: now - 3_600_000,
+    model: "NeoQuasar/Kronos-small",
+  };
+  const base = {
+    symbol: "BTC/USD",
+    bars: flatBars(30),
+    bid: 100.1,
+    ask: 100.12,
+    now,
+    contractId: "01928f4e-7b2a-7c3d-8e4f-5a6b7c8d9e0f",
+    tick: 0.01,
+    forecast: f,
+    calibratedWin: 0.55,
+    regimeScore: 40,
+  };
+
+  it("turns a fresh, favourable forecast into a RULE contract with the calibrated probability", () => {
+    const { contract } = kronosSignal(base, p);
+    if (!contract) throw new Error("no contract");
+    expect(DecisionContractSchema.parse(contract)).toBeTruthy();
+    expect(contractViolations(contract)).toEqual([]);
+    expect(contract.win_prob_used).toBe(0.55); // never the raw model probability
+    expect(Number(contract.invalidation_criteria.stop_price)).toBeCloseTo(100.1 - p.atr_stop_multiple * 2, 1);
+    expect(contract.models_used[0]?.provider).toBe("kronos");
+  });
+
+  it("refuses stale, drifted, weak or stop-leaning forecasts", () => {
+    expect(kronosSignal({ ...base, forecast: { ...f, produced_at: now - 6 * 3_600_000 } }, p).reason).toMatch(
+      /stale/,
+    );
+    expect(kronosSignal({ ...base, bid: 102 }, p).reason).toMatch(/moved away/);
+    expect(kronosSignal({ ...base, forecast: { ...f, p_win: 0.5 } }, p).reason).toMatch(/p_win/);
+    expect(kronosSignal({ ...base, forecast: { ...f, p_stop_first: 0.4 } }, p).reason).toMatch(
+      /stop more likely/,
+    );
+    expect(kronosSignal({ ...base, regimeScore: 10 }, p).reason).toMatch(/capitulation/);
   });
 });
