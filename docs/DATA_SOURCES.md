@@ -1,8 +1,9 @@
 # Data Sources (all free)
 
-Every source goes through the `DataRouter` (`src/data/`), which stamps `source`, `fetched_at`,
-`as_of`, and enforces staleness limits from doctrine. A source failure triggers its fallback; if the chain
-is exhausted the dependent decision is skipped (fail closed).
+There is no separate data-router module: live market data comes through `AlpacaMarketData`
+(`src/broker/AlpacaClient.ts`) inside the brain, and everything else arrives as HMAC-signed research batches
+(`research/`, `/ingest/batch`) stamped with `produced_at`. Staleness limits come from doctrine; stale or missing
+data skips the dependent decision (fail closed).
 
 ## Brain (Durable Object pulse)
 

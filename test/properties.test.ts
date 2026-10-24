@@ -1,0 +1,141 @@
+import fc from "fast-check";
+import { describe, expect, it } from "vitest";
+import { doctrineViolations } from "../src/contracts/doctrine.ts";
+import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
+import { Journal, verifyChain } from "../src/journal/Journal.ts";
+import { evaluateBreaker } from "../src/risk/CircuitBreakerLadder.ts";
+import { sizePosition } from "../src/risk/PositionSizer.ts";
+import { constitution, doctrine } from "./helpers.ts";
+import { memorySql } from "./sim/sqlite.ts";
+
+/**
+ * Property tests for the risk spine (audit W1-35; CLAUDE.md §9 promised them). Seeds are fixed so CI is
+ * deterministic; each property runs 500 random cases.
+ */
+const RUNS = { numRuns: 500, seed: 54 };
+const rung = doctrine.rungs.R1;
+
+describe("risk spine properties", () => {
+  it("P1: no sized order ever risks more than the rung's per-trade cap or breaks notional, cash and heat caps", () => {
+    fc.assert(
+      fc.property(
+        fc.record({
+          equity: fc.double({ min: 20, max: 500, noNaN: true }),
+          entry: fc.double({ min: 0.01, max: 100_000, noNaN: true }),
+          stopFrac: fc.double({ min: 0.005, max: 0.3, noNaN: true }),
+          atrFrac: fc.double({ min: 0.001, max: 0.2, noNaN: true }),
+          conviction: fc.integer({ min: 1, max: 10 }),
+          pWin: fc.double({ min: 0, max: 1, noNaN: true }),
+          lethality: fc.double({ min: 0, max: 1, noNaN: true }),
+          cashFrac: fc.double({ min: 0, max: 1, noNaN: true }),
+          heatFrac: fc.double({ min: 0, max: 0.12, noNaN: true }),
+          minNotional: fc.constantFrom(1, 10),
+        }),
+        (x) => {
+          const stop = x.entry * (1 - x.stopFrac);
+          const r = sizePosition(
+            {
+              equityUsd: x.equity,
+              rung,
+              conviction: x.conviction,
+              pWin: x.pWin,
+              bearLethality: x.lethality,
+              reputationWeight: 1.2,
+              breakerMultiplier: 1,
+              entry: x.entry,
+              stop,
+              atr: Math.min(x.atrFrac, x.stopFrac / doctrine.sizing.min_stop_atr_multiple) * x.entry,
+              feeRt: 0.004,
+              spreadFrac: 0.001,
+              availableCashUsd: x.equity * x.cashFrac,
+              heatRoomUsd: x.equity * x.heatFrac,
+              minNotionalUsd: x.minNotional,
+              minQty: 0,
+              qtyIncrement: 1e-9,
+            },
+            doctrine,
+          );
+          if (!r.ok) return true;
+          const eps = 1e-6;
+          expect(r.riskUsd).toBeLessThanOrEqual(x.equity * rung.per_trade_risk + eps);
+          expect(r.notionalUsd).toBeLessThanOrEqual(x.equity * rung.max_position_notional + eps);
+          expect(r.notionalUsd).toBeLessThanOrEqual(x.equity * x.cashFrac + eps);
+          expect(r.riskUsd).toBeLessThanOrEqual(x.equity * x.heatFrac + eps);
+          return true;
+        },
+      ),
+      RUNS,
+    );
+  });
+
+  it("P2: loosening any rung limit above the constitution always fails the build gate", () => {
+    const h = constitution.hard_limits;
+    fc.assert(
+      fc.property(
+        fc.constantFrom("per_trade_risk", "max_position_notional", "total_heat"),
+        fc.double({ min: 0.0001, max: 0.5, noNaN: true }),
+        (field, extra) => {
+          const d = structuredClone(doctrine);
+          const cap =
+            field === "per_trade_risk"
+              ? h.max_per_trade_risk_pct
+              : field === "max_position_notional"
+                ? h.max_position_notional_pct
+                : h.max_total_heat_pct;
+          (d.rungs.R1 as Record<string, number>)[field] = cap + extra;
+          return doctrineViolations(d, constitution).length > 0;
+        },
+      ),
+      RUNS,
+    );
+  });
+
+  it("P3: the breaker never gets more permissive as equity falls", () => {
+    const order = { GREEN: 0, YELLOW: 1, ORANGE: 2, RED: 3 } as const;
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 20_000 }), fc.integer({ min: 1, max: 20_000 }), (a, b) => {
+        const band = (eq: number) =>
+          order[
+            evaluateBreaker(
+              {
+                equityCents: eq,
+                hwmCents: 20_000,
+                dayStartEquityCents: 20_000,
+                stopouts24h: 0,
+                locked: false,
+              },
+              doctrine,
+            ).band
+          ];
+        const [hi, lo] = a >= b ? [a, b] : [b, a];
+        return band(lo) >= band(hi);
+      }),
+      RUNS,
+    );
+  });
+
+  it("P4: any appended journal verifies, and changing any one payload breaks the chain", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.string({ maxLength: 30 }), { minLength: 2, maxLength: 25 }),
+        fc.nat(),
+        (texts, pick) => {
+          const sql = memorySql();
+          for (const s of HOT_SCHEMA) sql.exec(s);
+          const j = new Journal(sql);
+          for (const [i, t] of texts.entries()) j.append("SYSTEM", "K", null, { t }, 1_000 + i);
+          const rows = (
+            sql.exec("SELECT row_json FROM d1_outbox WHERE tbl = 'journal' ORDER BY id") as {
+              row_json: string;
+            }[]
+          ).map((r) => JSON.parse(r.row_json));
+          if (!verifyChain(rows).ok) return false;
+          const k = pick % rows.length;
+          rows[k] = { ...rows[k], payload_json: `${rows[k].payload_json} ` };
+          return !verifyChain(rows).ok;
+        },
+      ),
+      { numRuns: 200, seed: 54 },
+    );
+  });
+});

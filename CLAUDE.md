@@ -37,7 +37,7 @@ No model, no Governor, no Discord button can change them at runtime.
 4. **Every position has an exit.** Each position carries a stop; a broker-side stop wherever Alpaca accepts
    one, and a synthetic stop checked on every pulse otherwise.
 5. **The kill-switch and Red breaker are sacred.** No model or Governor can override them. LIVE unlocks only with
-   an operator-written postmortem. PAPER (fully autonomous) unlocks itself after a cooldown (≥12 h) once flat,
+   an operator-written postmortem. PAPER (fully autonomous) unlocks itself after a cooldown (constitution floor 12 h; doctrine 24 h) once flat,
    with a machine postmortem that counts against LIVE graduation. The `sentinel` worker can flatten everything
    independently of the brain.
 6. **Fail closed.** Stale data, unknown broker state, reconciliation mismatch, or any free-tier budget at
@@ -73,7 +73,8 @@ If you are about to write code that weakens any of these, stop and ask the opera
 │     • two BrokerAccounts: PAPER ($54) and LIVE ($54) — same contract, sized per account       │
 │     • hot SQLite: positions, orders, risk reservations, breakers, regime, scar rules, cursors │
 │     • Tier 0 math + Tier 1/2 Clef calls (Workers AI) + FreeTierBudget meter                   │
-│   ResearchSprintWorkflow — Tier 3 bull / bear / synth → DecisionContract (I/O-only steps)     │
+│   Tier 3 court runs in the pulse (ADR-028/044): bull → bear → rebuttal → panel → Clef judge   │
+│   LabCortexDO "CORTEX-54-LAB" — same Brain on the LAB paper account + D1 `cortex-lab` (045)  │
 │   D1 `cortex-journal` — append-only journal, contracts, rejections, beliefs, reputation       │
 │                                                                                               │
 │ worker `sentinel` (workers/sentinel) — separate deploy, cron * * * * * (+ GitHub backup tick │
@@ -89,7 +90,7 @@ Full detail: `docs/ARCHITECTURE.md`. Budget math: `docs/FREE_TIER_BUDGET.md`.
 | Tier | Engine | Where | Budget | Job |
 |---|---|---|---|---|
 | 0 Reflex | TypeScript | DO pulse | free | stops, breakers, staleness, spread/fee gates, dedupe, watchlist relevance, ALL arithmetic |
-| 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | one item per call (~1.2 neurons), ≤8 per pulse; promote P(material) ≥ 0.55 and priority ≥ 1.5 (ADR-029) |
+| 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | one item per call (~1.2 neurons), ≤8 per pulse; promote P(material) ≥ 0.45 and priority ≥ 1.2 (ADR-037) |
 | 2 Structure | `@cf/cloudflare/clef` (27B) | DO | ~4,000 neurons/day | Tier 0 evidence (code) → long_favored, regime fit, bear-lethality, setup, quality; ≤1/pulse, ≤40/day |
 | 3 Court | free LLM chains + Clef 27B synth | DO pulse (ADR-028) | free-tier RPD | bull → **cross-family** bear → bull rebuttal → expert panel (quant, risk, macro) → Clef synth → calibrated COURT contract; ≤1/pulse, ≤12/day (ADR-044) |
 
@@ -318,8 +319,9 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - **Budget discipline:** every call to Workers AI, an LLM provider, D1, or an external API goes through
   `FreeTierBudget.charge()` first. If it says no, degrade (skip tier, widen cadence, REDUCE_ONLY).
 - **Determinism:** risk/sizing/fee/indicator code is pure (no I/O, no Date.now inside). Tested with fixtures
-  and property tests (fast-check). Python parity fixtures for ported skills live in `test/fixtures/`.
-- Prompts are versioned files (`src/court/prompts/*.md`), and every LLM call logs prompt version + model +
+  and property tests (fast-check, `test/properties.test.ts`). Python↔TS twins (ATR, apply_map, the chain hash) are
+  pinned by tests on each side; strategy params are zod-checked at `config:build` (`src/strategy/params.ts`).
+- Prompts are versioned TS constants (`src/court/prompts.ts`, bump the version on any change), and every LLM call logs prompt version + model +
   provider to the journal. External text (news, filings) is wrapped as data and never given tool authority.
 - Keep the Worker bundle small. Before adding a dependency, check its size; target <2 MB compressed.
 
@@ -410,5 +412,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-24: ADR-046: backtest lab (weekly). RSI(2) pullback PASSES → ACTIVE on PAPER; bounce and inverse ETFs lose
   net of costs → moved to LAB; trend and turn-of-month lose too (LAB only).
 - 2026-10-24: ADR-047: web terminal FCST page (key 7): Kronos forecast band vs the robot's own plan per symbol.
+- 2026-10-24: external audit (operator-supplied ledger) triaged claim by claim: ADR-048 (safety/failure-path fixes),
+  ADR-049 (learning loop), ADR-050 (property tests, param schemas, doc reconciliation). Rejections recorded there.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

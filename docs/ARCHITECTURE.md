@@ -8,15 +8,16 @@ Status: authoritative. Supersedes spec §3, §4.3, §7, §12 where they conflict
 |---|---|---|---|
 | `cortex` worker | Workers Free | HTTP, cron `*/5 * * * *` | routing, Discord interactions, ingest, health, web API (later) |
 | `AgentCortexDO` (`CORTEX-54-PRIMARY`) | Durable Object (SQLite) | alarm, RPC from `cortex` | all trading state and decisions |
-| `ResearchSprintWorkflow` | Workflows Free | created by DO | Tier 3 court → `DecisionContract` |
+| `LabCortexDO` (`CORTEX-54-LAB`) | Durable Object (SQLite) | alarm, RPC from `cortex` | the LAB brain: same code, LAB paper account, forward-tests strategies (ADR-045) |
+| D1 `cortex-lab` | D1 Free | — | the LAB brain's own journal (same migrations) |
 | D1 `cortex-journal` | D1 Free | — | append-only history and analytics tables |
 | `sentinel` worker | Workers Free (separate deploy) | cron `* * * * *`, HTTP | watchdog, independent loss check, flatten-all |
 | GitHub Actions | public repo runners | push, schedule | CI/CD, Python research batch, weekly Governor |
 | Discord app **CORTEX** | — | interactions → `cortex` | C2 cockpit |
-| Discord app **SENTINEL** | — | interactions → `sentinel` | `/kill`, `/status-sentinel` only |
 
-Two Discord apps because one app has exactly one interactions endpoint; the kill path must not depend on
-the brain's worker being healthy.
+The Tier 3 court runs inside the DO pulse (ADR-028), not in a Workflow; no Workflow class exists. There is one
+Discord app (CORTEX): the independent kill path is `gh workflow run kill-switch` → sentinel (ADR-022), not a second
+Discord app.
 
 ## 2. The pulse (heart of the system)
 
@@ -34,7 +35,7 @@ alarm() ─┬─ 0. load hot state; if KILLED → reconcile only, re-arm, retur
          │      → exit orders go out first, before any new-entry work
          ├─ 5. intake: news since cursor (1 call) + ingested batch candidates (D1)
          │      → Tier 0 relevance/dedupe → Tier 1 Clef-flash (batched) → Tier 2 Clef
-         │      → promote top candidates: create ResearchSprintWorkflow (bounded per day)
+         │      → Tier 3 court in the pulse: ≤ 1 hearing per pulse, ≤ 12 per day (ADR-028/044)
          ├─ 6. execute ready contracts: reserve → size → validate → submit (per account, per dial)
          ├─ 7. journal writes (batched D1), heartbeat, HUD patch (debounced ≥5 s)
          └─ 8. next alarm: 60 s if any position/open order or an equity session is open; else 300 s
@@ -117,25 +118,23 @@ externally-queryable record (Actions read it via `wrangler d1 execute --remote`)
 staleness, spread ≤ doctrine max, fee hurdle (`expected_move ≥ 3 × (fee_rt + spread/2)`), regime gate
 (crypto composite < 40 → no long crypto entries; equity posture REDUCE_ONLY/CASH_PRIORITY → no entries).
 
-**Tier 1 (clef-flash):** one request carries a *batch* state (`items: [...]` up to ~16) and per-item
-questions (≤64 total): `material_catalyst` (noul), `direction` (choice), `already_priced` (noul),
-`escalate` (score: Reject / Watchlist / Shadow / Deep). Threshold from doctrine (default 0.70).
+**Tier 1 (clef-flash):** one item per request (batching compressed scores — ADR-027) with questions
+`material_catalyst` (noul), `direction` (choice), `already_priced` (noul), `escalate` (score: Reject / Watchlist /
+Shadow / Deep). Promotion bar from doctrine: P(material) ≥ 0.45 and escalate ≥ 1.2 (ADR-037).
 
 **Tier 2 (clef):** one candidate per request with full JSON state: regime posture, technicals (computed in
 Tier 0), batch skill outputs, scar rules. Questions: `regime_alignment`, `setup_class`,
 `bear_lethality`, `structural_quality` (score). Pass → Tier 3 if daily court quota remains.
 
-**Tier 3 (ResearchSprintWorkflow):**
-1. `gather-evidence` — read batch skill outputs + live quotes → `EvidenceBundle` with provenance.
-2. `bull-advocate` — provider A (default Gemini). JSON: thesis ≤280c, instrument, entry zone, stop, targets,
-   horizon, conviction 1–10, receipts referencing evidence ids only.
-3. `bear-prosecutor` — provider B from a **different model family** (default Groq gpt-oss-120b). JSON:
-   fatal flaws, kill criteria, `bear_lethality` 0–1.
-4. `synthesize` — Clef scores both briefs; disagreement penalty `D_bear` computed in code from the gap.
-5. `emit-contract` — schema-validate; persist to D1; hand to DO via RPC. Rejected → `rejections`.
-
-Every step is I/O-bound (≤10 ms CPU). Retries: 2 with backoff; provider failover via the routing chain in
-`doctrine.yaml`.
+**Tier 3 (the court, in the DO pulse — ADR-028/044):**
+1. Evidence — Tier 0 fact sheet in code (technicals, regime, world pulse, Clairic facts, Kronos view, memory).
+2. Bull Advocate (default Gemini): thesis, entry zone, stop, targets, horizon, conviction, evidence receipts;
+   `checkBull` repairs or rejects any number that doesn't fit the evidence before anyone else sees it.
+3. Bear Prosecutor from a **different model family** (default Groq gpt-oss-120b): fatal flaws, kill criteria,
+   lethality. No cross-family bear → no trade.
+4. Rebuttal by the bull (may concede or withdraw), then an expert panel (quant, risk, macro) in parallel.
+5. Clef 27B judges the whole hearing → calibrated win probability → `DecisionContract` → the same validator and
+   sizer as every other entry. Every LLM call is journaled with prompt version, model and provider.
 
 ## 8. Memory
 

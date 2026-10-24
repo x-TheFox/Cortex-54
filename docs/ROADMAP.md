@@ -49,7 +49,7 @@ Remaining for the Phase 3 exit: ≥10 COURT contracts produced and executed/decl
 - Clef-flash Tier 1 (batched) and Clef Tier 2 with typed questions; neuron metering.
 - Rejection shadow ledger from the first rejection.
 - Calibration layer (shrinkage until ≥50 outcomes).
-- LLM router with families + fallbacks; prompts versioned; ResearchSprintWorkflow (bull/bear/synth).
+- LLM router with families + fallbacks; prompts versioned; court in the DO pulse (bull/bear/synth; no Workflow class — ADR-028).
 - ⚠️ Prompt-injection hardening and schema-only outputs.
 - DecisionContract end-to-end; PAPER fully autonomous at Stop 2; LIVE dormant (Stop 0, contracts shadowed).
 - **Exit:** ≥10 contracts produced and executed on PAPER without human input; zero budget breaches; zero

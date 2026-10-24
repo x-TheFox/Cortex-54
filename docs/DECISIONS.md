@@ -610,3 +610,20 @@ already struck by the audit itself. (d) A per-append journal tail ring (W1-04) �
 Bayesian source reputation (D-10) and conformal abstention (W2-20) (need graded outcomes that don't exist yet),
 belief dedupe/TTL ladders (memory is near-empty), locked-window replay (large; after a month of journaled decisions).
 
+## ADR-050 — External audit, part 3: tests, parameter schemas, documentation (2026-10-24)
+**Done:** (1) fast-check property tests (`test/properties.test.ts`, fixed seeds): the sizer never exceeds the rung's
+per-trade risk, notional, cash or heat caps across 500 random cases (including ADR-042 lifts); loosening any rung
+limit above the constitution always fails the build gate; the breaker never gets more permissive as equity falls; any
+appended journal verifies and any one-byte payload change breaks it. (2) Strategy params are zod-checked at
+`config:build` (`src/strategy/params.ts`) — a doctrine typo now fails CI instead of producing NaN stops. (3) The
+breakout baseline uses completed bars only, identical to the backtest replay. (4) Docs reconciled with the code:
+README status; ARCHITECTURE (no `ResearchSprintWorkflow`, no SENTINEL Discord app, in-pulse court, LAB brain, current
+Tier 1 bar); DATA_SOURCES (no `DataRouter`); RUNBOOK kill drill via `kill-switch.yml`; CLAUDE.md diagram, Tier 1
+bar, RED-unlock floor vs doctrine, prompt and parity wording.
+**Not taken from the audit (and why):** splitting `Brain.ts` (large refactor, no behaviour gain now; revisit before
+LIVE); per-capability HMAC secrets (needs coordinated rotation across GitHub and both workers; low risk while LIVE is
+dormant); external dead-man pings (needs an operator-created Healthchecks.io account); provenance-tainted contract
+fields (worthwhile, medium effort; after the panel A/B data exists); participation caps and square-root impact
+(irrelevant at $10 tickets); HMM/BOCPD regime features and funding-rate vetoes (research ideas — they enter through
+the backtest lab like any strategy).
+
