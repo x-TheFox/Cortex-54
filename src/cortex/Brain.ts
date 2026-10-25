@@ -92,6 +92,7 @@ import {
 } from "../lib/ids.ts";
 import { dec, defaultTick, roundPrice, toCents } from "../lib/num.ts";
 import { sha256Hex } from "../lib/sha256.ts";
+import { weekdayMsBetween } from "../lib/time.ts";
 import { type Band, evaluateBreaker, withHysteresis } from "../risk/CircuitBreakerLadder.ts";
 import { correlation, correlationVeto } from "../risk/correlation.ts";
 import { type Arena, modeledPaperCostCents, roundTripFeeRate } from "../risk/fees.ts";
@@ -3762,10 +3763,15 @@ ${postmortem}`,
     for (const arena of ["CRYPTO", "EQUITIES"] as const) {
       const row = one<{ as_of: number }>(this.sql, "SELECT as_of FROM regime_state WHERE arena = ?", arena);
       if (!row || this.freshRegime(arena, now)) continue;
-      const hours = ((now - row.as_of) / 3_600_000).toFixed(1);
+      // Equity batches only run Mon–Fri, so weekend hours don't count toward the alarm (the trading gate above
+      // still uses wall-clock age and fails closed).
+      const ageMs = arena === "EQUITIES" ? weekdayMsBetween(row.as_of, now) : now - row.as_of;
+      const limit = this.d.staleness.regime_batch_hours[arena] ?? 24;
+      if (ageMs <= limit * 3_600_000) continue;
+      const hours = (ageMs / 3_600_000).toFixed(1);
       await this.alertOnce(
         `stale-batch:${arena}`,
-        `⏳ ${arena} regime batch is ${hours}h old (limit ${this.d.staleness.regime_batch_hours[arena]}h). Check the research workflow in GitHub Actions.`,
+        `⏳ ${arena} regime batch is ${hours}h old${arena === "EQUITIES" ? " (weekday hours)" : ""} (limit ${limit}h). Check the research workflow in GitHub Actions.`,
       );
     }
   }

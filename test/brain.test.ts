@@ -647,6 +647,23 @@ describe("research batch ingest (Phase 2)", () => {
     expect(r.contracts).toBe(1); // proxy says risk-on; stale batch is ignored
     expect(t.notifier.sent.filter((m) => m.msg.content?.includes("regime batch is"))).toHaveLength(1);
   });
+
+  it("does not call a weekday-only equity batch stale over the weekend", async () => {
+    const t = setup();
+    const fridayClose = Date.UTC(2026, 9, 23, 21, 20); // last equity run before the weekend
+    t.sql.exec(
+      "INSERT INTO regime_state (arena, posture, score, ceiling, payload_json, as_of) VALUES ('EQUITIES', 'NORMAL', 60, NULL, '{}', ?)",
+      fridayClose,
+    );
+    const equityAlarms = () =>
+      t.notifier.sent.filter((m) => m.msg.content?.includes("EQUITIES regime batch")).length;
+    t.advance(Date.UTC(2026, 9, 25, 9, 30) - T0); // Sunday morning: 36 wall-clock hours, ~2.7 weekday hours
+    await t.brain.pulse();
+    expect(equityAlarms()).toBe(0);
+    t.advance(Date.UTC(2026, 9, 27, 12, 0) - Date.UTC(2026, 9, 25, 9, 30)); // Tuesday noon with no new batch: ~38.7 weekday hours
+    await t.brain.pulse();
+    expect(equityAlarms()).toBe(1);
+  });
 });
 
 describe("news intake (Phase 2)", () => {
