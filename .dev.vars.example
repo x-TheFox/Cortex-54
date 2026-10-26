@@ -38,3 +38,9 @@ CUSTOM_LLM_BASE_URL=
 CUSTOM_LLM_API_KEY=
 CUSTOM_LLM_MODEL=
 RUNNER_MODE=
+# ADR-068 community hub (optional): cortex hub keygen prints a key
+HUB_URL=
+HUB_AGENT_KEY=
+HUB_AGENT_NAME=
+HUB_PUBLISH=
+HUB_FOLLOW=

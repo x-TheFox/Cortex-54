@@ -50,6 +50,12 @@ export interface Env {
   RUNNER_MODE?: string;
   /** HMAC key for web-terminal login links and session cookies (ADR-034). */
   WEB_SESSION_SECRET?: string;
+  /** ADR-068 community hub (optional): hub URL, the agent's Ed25519 key, display name, publish flag, followed agents */
+  HUB_URL?: string;
+  HUB_AGENT_KEY?: string;
+  HUB_AGENT_NAME?: string;
+  HUB_PUBLISH?: string;
+  HUB_FOLLOW?: string;
   /** ADR-062: ntfy push alerts (topic = 16–64 url-safe chars; optional self-hosted https base). Absent → off. */
   NTFY_TOPIC?: string;
   NTFY_URL?: string;

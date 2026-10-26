@@ -16,6 +16,7 @@ import {
   DOCTRINE_SHA256,
   SCAR_TISSUE,
 } from "../generated/config.ts";
+import { hubFromEnv } from "../hub/client.ts";
 import type { AccountId } from "../lib/ids.ts";
 import { ntfyUrl, PushNotifier } from "../notify/push.ts";
 import { Brain, parseKillFlag, type SloView, type StatusView } from "./Brain.ts";
@@ -132,6 +133,7 @@ export class AgentCortexDO extends DurableObject<Env> {
         guard();
         return fetch(u, i);
       },
+      hub: hubFromEnv(env as unknown as Record<string, string | undefined>),
       now: () => Date.now(),
     });
 

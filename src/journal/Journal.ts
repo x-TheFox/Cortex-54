@@ -53,6 +53,9 @@ export class Journal {
     kind: string;
     refId: string | null;
     payloadJson: string;
+    /** ADR-068: the row's hash and its predecessor's, so observers (the hub feed) can publish verifiable rows */
+    rowSha256?: string;
+    prevRowSha256?: string;
   }) => void;
 
   constructor(private readonly sql: SqlLike) {}
@@ -97,8 +100,17 @@ export class Journal {
     const prev = this.head();
     const seq = prev.seq + 1;
     const payloadJson = JSON.stringify(payload ?? {});
-    this.onAppend?.({ seq, ts: now, account, kind, refId, payloadJson });
     const sha = rowHash(prev.sha, seq, now, kind, payloadJson);
+    this.onAppend?.({
+      seq,
+      ts: now,
+      account,
+      kind,
+      refId,
+      payloadJson,
+      rowSha256: sha,
+      prevRowSha256: prev.sha,
+    });
     this.sql.exec(
       "INSERT INTO journal_head (id, seq, row_sha256) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET seq = excluded.seq, row_sha256 = excluded.row_sha256",
       seq,

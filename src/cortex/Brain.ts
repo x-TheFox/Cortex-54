@@ -80,6 +80,8 @@ import {
   REBUTTAL_SYSTEM,
 } from "../court/prompts.ts";
 import { COLORS, type DiscordMessage, type Notifier } from "../discord/notifier.ts";
+import { fetchFeed, type HubConfig, publishBatch } from "../hub/client.ts";
+import { PUBLIC_KINDS } from "../hub/protocol.ts";
 import { type D1Like, Journal } from "../journal/Journal.ts";
 import {
   type AccountId,
@@ -311,6 +313,8 @@ export interface BrainDeps {
   scar?: ScarTissue | null;
   /** ADR-067: plain HTTP for the public sanity sources (Coinbase ticker, Nasdaq halts). Null skips those checks. */
   http?: ((url: string, init?: RequestInit) => Promise<Response>) | null;
+  /** ADR-068: community hub (publish a signed track record, follow other agents). Null = off. */
+  hub?: HubConfig | null;
 }
 
 export interface PulseReport {
@@ -401,6 +405,21 @@ export class Brain {
     this.journal.onAppend = (r) => {
       try {
         this.noteWhy(r);
+        if (deps.hub?.publish && PUBLIC_KINDS.has(r.kind) && r.rowSha256 && r.prevRowSha256)
+          deps.sql.exec(
+            "INSERT OR IGNORE INTO hub_outbox (seq, row_json) VALUES (?, ?)",
+            r.seq,
+            JSON.stringify({
+              seq: r.seq,
+              ts: r.ts,
+              account: r.account,
+              kind: r.kind,
+              ref_id: r.refId,
+              payload_json: r.payloadJson,
+              prev_row_sha256: r.prevRowSha256,
+              row_sha256: r.rowSha256,
+            }),
+          );
       } catch {
         /* never break an append */
       }
@@ -714,6 +733,7 @@ export class Brain {
     await this.checkBatchStaleness(started).catch(() => undefined);
     await this.dispatchDue(started).catch(() => undefined);
     await this.bookReview().catch(() => undefined);
+    await this.hubSync(started).catch(() => undefined);
     await this.checkDispatchReceipts(started).catch(() => undefined);
 
     // 4. Persist, report, schedule.
@@ -3889,6 +3909,65 @@ ${postmortem}`,
     return sum;
   }
 
+  /**
+   * ADR-068 community hub: publish this agent's public journal rows (signed, hash-linked) and pull the court
+   * approvals of followed agents in as candidates. A followed idea is only a lead: it goes through Tier 2, the court,
+   * the risk engine and this account's own sizing like any headline. Every 30 min at most; failures retry later.
+   */
+  private async hubSync(now: number): Promise<void> {
+    const hub = this.deps.hub;
+    const http = this.deps.http;
+    if (!hub || !http) return;
+    if (now - Number(getKV(this.sql, "hub_sync_at") ?? 0) < 30 * 60_000) return;
+    setKV(this.sql, "hub_sync_at", String(now), now);
+    if (hub.publish) {
+      const rows = this.sql.exec<{ seq: number; row_json: string }>(
+        "SELECT seq, row_json FROM hub_outbox ORDER BY seq LIMIT 200",
+      );
+      const r = await publishBatch(
+        http,
+        hub,
+        rows.map((x) => JSON.parse(x.row_json)),
+        this.journal.head(),
+        now,
+      );
+      if (r.ok && rows.length) this.sql.exec("DELETE FROM hub_outbox WHERE seq <= ?", rows.at(-1)?.seq ?? 0);
+      if (!r.ok) await this.alertOnce("hub-publish", `⚠️ hub publish failed: HTTP ${r.status} ${r.body}`);
+    }
+    for (const agent of hub.follow.slice(0, 10)) {
+      const key = `hub_follow:${agent}`;
+      const rows = await fetchFeed(http, hub.url, agent, Number(getKV(this.sql, key) ?? 0));
+      for (const row of rows) {
+        setKV(this.sql, key, String(row.seq), now);
+        const p = JSON.parse(row.payload_json) as {
+          symbol?: string;
+          origin?: string;
+          thesis?: string;
+          win?: number;
+        };
+        if (p.origin !== "COURT" || !p.symbol || now - row.ts > 6 * 3_600_000) continue;
+        const id = `follow:${agent}:${row.seq}`;
+        if (!this.markSeen(id, now)) continue;
+        this.sql.exec(
+          "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 2, ?, ?, ?)",
+          id,
+          p.symbol,
+          JSON.stringify({
+            kind: "follow",
+            headline: `Followed agent ${agent}'s court approved a long in ${p.symbol}: ${String(p.thesis ?? "").slice(0, 200)}`,
+            summary: "",
+            symbols: [p.symbol],
+            source: `hub:${agent}`,
+            createdAt: row.ts,
+            tier1: { material: 0.7, direction: "up", escalate: 1.5 },
+          }),
+          now,
+        );
+        this.journal.append("SYSTEM", "FOLLOW_LEAD", id, { symbol: p.symbol, agent, seq: row.seq }, now);
+      }
+    }
+  }
+
   /** `/universe`: the dynamic universe right now. */
   universeView(): string {
     const now = this.deps.now();
@@ -4945,7 +5024,15 @@ ${postmortem}`,
       "SYSTEM",
       "CONTRACT",
       k.contract_id,
-      { symbol: k.symbol, strategy: k.strategy_id, origin: k.origin },
+      // thesis + plan are what followers read on the hub (ADR-068); prices are public, nothing here is secret
+      {
+        symbol: k.symbol,
+        strategy: k.strategy_id,
+        origin: k.origin,
+        thesis: k.thesis_summary,
+        arena: k.arena,
+        win: Math.round(k.win_prob_used * 100) / 100,
+      },
       now,
     );
   }

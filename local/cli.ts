@@ -7,6 +7,8 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { AlpacaClient } from "../src/broker/AlpacaClient.ts";
 import { buildProviders } from "../src/court/providers.ts";
+import { SCAR_TISSUE } from "../src/generated/config.ts";
+import { agentIdOf, canonical, generateAgentKey, publicKeyOf } from "../src/hub/protocol.ts";
 import {
   applyKeys,
   cortexHome,
@@ -19,9 +21,11 @@ import {
 } from "./config.ts";
 import { deploy } from "./deploy.ts";
 import { LocalJobs } from "./jobs.ts";
+import { applyPack, exportPack, loadLocalScar, mergeScar, stagePack } from "./memory.ts";
 import { claimOnce } from "./runner.ts";
 import { LocalCortex } from "./runtime.ts";
 import { install, plan, uninstall } from "./service.ts";
+import { fileSql } from "./store.ts";
 
 /**
  * `cortex` — the CORTEX-54 command line (ADR-064). Every command has a plain-text and a `--json` form so a human or
@@ -37,6 +41,8 @@ import { install, plan, uninstall } from "./service.ts";
  *   cortex keys                                                      list which key names are set (never values)
  *   cortex deploy [--name cortex]                                    deploy brain + sentinel to YOUR Cloudflare account
  *   cortex runner                                                    run the cloud brain's research jobs on this machine
+ *   cortex hub keygen [--name N] | hub id | hub follow <agent> | hub leaderboard     community hub (ADR-068)
+ *   cortex memory export [--title T] [--publish] | memory import <file|pack-id> | memory apply <id>
  */
 
 // CORTEX_ROOT points at the app's bundled resources (desktop app / packaged builds); from source it's the repo
@@ -378,6 +384,98 @@ async function main(): Promise<void> {
         setTimeout(() => void loop(), 60_000);
       };
       return loop();
+    }
+    case "hub": {
+      const cfg = loadConfig(home);
+      if (!cfg) throw new Error("no config");
+      const sub = args[1];
+      if (sub === "keygen") {
+        if (cfg.keys.HUB_AGENT_KEY && !flag("force"))
+          throw new Error("this agent already has a key (--force replaces it and starts a new identity)");
+        const k = await generateAgentKey();
+        const next = applyKeys(cfg, [
+          `HUB_AGENT_KEY=${k.privateKey}`,
+          ...(opt("name") ? [`HUB_AGENT_NAME=${opt("name")}`] : []),
+        ]);
+        saveConfig(next, home);
+        return out(
+          `Agent id ${k.agentId} (key saved in config.json; back it up: it is this agent's identity)`,
+          { ok: true, agent_id: k.agentId },
+        );
+      }
+      if (!cfg.keys.HUB_AGENT_KEY) throw new Error("no agent key: run `cortex hub keygen` first");
+      const id = agentIdOf(await publicKeyOf(cfg.keys.HUB_AGENT_KEY));
+      if (sub === "id") return out(id, { agent_id: id });
+      if (sub === "follow") {
+        const a = args[2] ?? "";
+        if (!/^[0-9a-f]{16}$/.test(a)) throw new Error("give a 16-hex agent id");
+        const list = [...new Set([...(cfg.keys.HUB_FOLLOW ?? "").split(",").filter(Boolean), a])];
+        saveConfig(applyKeys(cfg, [`HUB_FOLLOW=${list.join(",")}`]), home);
+        return out(`Following ${list.join(", ")} (restart cortex to apply)`, { ok: true, follow: list });
+      }
+      if (sub === "leaderboard") {
+        const url = cfg.keys.HUB_URL;
+        if (!url) throw new Error("set HUB_URL first");
+        const lb = await (await fetch(`${url.replace(/\/$/, "")}/v1/leaderboard`)).json();
+        return out(JSON.stringify(lb, null, 2), lb);
+      }
+      throw new Error("cortex hub keygen | id | follow <agent> | leaderboard");
+    }
+    case "memory": {
+      const cfg = loadConfig(home);
+      if (!cfg) throw new Error("no config");
+      const sub = args[1];
+      if (sub === "export") {
+        if (!cfg.keys.HUB_AGENT_KEY) throw new Error("no agent key: run `cortex hub keygen` first");
+        const sql = fileSql(join(home, "hot.sqlite"));
+        const pack = await exportPack(
+          sql,
+          mergeScar(SCAR_TISSUE, loadLocalScar(home)),
+          cfg.keys.HUB_AGENT_KEY,
+          opt("title") ?? "CORTEX memory",
+          opt("description") ?? "",
+          Date.now(),
+        );
+        const file = opt("out") ?? join(home, `memory-${Date.now()}.cortexpack.json`);
+        writeFileSync(file, canonical(pack));
+        let published: unknown = null;
+        if (flag("publish")) {
+          if (!cfg.keys.HUB_URL) throw new Error("set HUB_URL to publish");
+          const r = await fetch(`${cfg.keys.HUB_URL.replace(/\/$/, "")}/v1/packs`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: canonical(pack),
+          });
+          published = await r.json();
+        }
+        return out(`Wrote ${file}${published ? `\nPublished: ${JSON.stringify(published)}` : ""}`, {
+          ok: true,
+          file,
+          published,
+        });
+      }
+      if (sub === "import") {
+        const src = args[2] ?? "";
+        let raw: unknown;
+        if (/^[0-9a-f]{16}$/.test(src)) {
+          if (!cfg.keys.HUB_URL) throw new Error("set HUB_URL to import from the hub");
+          raw = await (await fetch(`${cfg.keys.HUB_URL.replace(/\/$/, "")}/v1/packs/${src}`)).json();
+        } else raw = JSON.parse((await import("node:fs")).readFileSync(src, "utf8"));
+        const st = await stagePack(home, raw);
+        return out(
+          `Staged pack ${st.id} from agent ${st.author}: ${st.rules} scar rule(s), ${st.beliefs} belief(s).\nNothing changed yet. Review ${join(home, "proposals", `${st.id}.json`)}, then: cortex memory apply ${st.id}`,
+          { ok: true, ...st },
+        );
+      }
+      if (sub === "apply") {
+        const sql = fileSql(join(home, "hot.sqlite"));
+        const r = applyPack(home, sql, args[2] ?? "", Date.now());
+        return out(
+          `Applied: ${r.rules} scar rule(s) (they only ever remove trades), ${r.beliefs} belief(s) at half confidence. Restart cortex to load the rules.`,
+          { ok: true, ...r },
+        );
+      }
+      throw new Error("cortex memory export | import <file|pack-id> | apply <id>");
     }
     case "keys": {
       const cfg = loadConfig(home);

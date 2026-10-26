@@ -26,6 +26,7 @@ import {
   DOCTRINE_SHA256,
   SCAR_TISSUE,
 } from "../src/generated/config.ts";
+import { hubFromEnv } from "../src/hub/client.ts";
 import { verifySignedBody } from "../src/lib/hmac.ts";
 import type { AccountId } from "../src/lib/ids.ts";
 import { ntfyUrl, PushNotifier } from "../src/notify/push.ts";
@@ -33,6 +34,7 @@ import { handleWeb, loginLink, type WebBrain } from "../src/web/api.ts";
 import { pill, pillAuthorized, swiftbar } from "../src/web/pill.ts";
 import type { LocalConfig } from "./config.ts";
 import { LocalJobs } from "./jobs.ts";
+import { loadLocalScar, mergeScar } from "./memory.ts";
 import { SimBroker } from "./simbroker.ts";
 import { fileD1, fileSql, type LocalD1 } from "./store.ts";
 
@@ -129,7 +131,13 @@ export interface LocalOptions {
   cfg: LocalConfig;
   now?: () => number;
   /** tests: inject fakes instead of real network clients */
-  overrides?: { broker?: BrokerApi; market?: MarketDataApi; clef?: ClefApi | null; quiet?: boolean };
+  overrides?: {
+    broker?: BrokerApi;
+    market?: MarketDataApi;
+    clef?: ClefApi | null;
+    quiet?: boolean;
+    http?: (u: string, i?: RequestInit) => Promise<Response>;
+  };
 }
 
 export class LocalCortex {
@@ -208,9 +216,10 @@ export class LocalCortex {
       clairic,
       llm: Object.keys(providers).length ? new LlmRouter(providers, d) : null,
       calibration: CALIBRATION,
-      scar: SCAR_TISSUE,
+      scar: mergeScar(SCAR_TISSUE, loadLocalScar(home)), // + memory packs the operator applied (ADR-068)
       dispatcher: cfg.research.enabled ? this.jobs : null,
-      http: o.overrides?.market ? null : (u, i) => fetch(u, i),
+      http: o.overrides?.http ?? (o.overrides?.market ? null : (u, i) => fetch(u, i)),
+      hub: hubFromEnv(k),
     });
     this.brain.init({
       constitution_sha256: CONSTITUTION_SHA256,

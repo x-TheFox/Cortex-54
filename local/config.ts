@@ -34,6 +34,11 @@ export const KEY_NAMES = [
   "SEC_USER_AGENT",
   "FMP_API_KEY",
   "FRED_API_KEY",
+  "HUB_URL",
+  "HUB_AGENT_KEY",
+  "HUB_AGENT_NAME",
+  "HUB_PUBLISH",
+  "HUB_FOLLOW",
 ] as const;
 export type KeyName = (typeof KEY_NAMES)[number];
 

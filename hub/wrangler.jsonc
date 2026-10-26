@@ -1,0 +1,17 @@
+// CORTEX community hub (ADR-068) — hosted by the publisher. Create the D1 database, paste its id, then:
+//   pnpm wrangler d1 migrations apply cortex-hub --remote -c hub/wrangler.jsonc && pnpm wrangler deploy -c hub/wrangler.jsonc
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "cortex-hub",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cortex-hub",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
