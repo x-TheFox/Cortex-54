@@ -187,16 +187,19 @@ llm_routing:
   # Probe 2026-10-26 (bull prompt, live BTC): gemini-3.5 ok in ~14 s (503 at peak), qwen ok in ~2 s, gpt-oss-20b ok in
   # ~2 s; nemotron (NIM and OpenRouter) answers in prose, not JSON; deepseek times out at 60 s, so it is out of both
   # chains (one timeout ate 40% of the hearing deadline).
+  # Canary 2026-10-26 (ADR-070): both Gemini models 503 "high demand", Qwen hit Groq's JSON validation and TPM caps,
+  # Nemotron is reliable once NIM gets a 4,096-token output budget (it reasons first). Ordered so a cross-family
+  # pair always exists: if only Groq's gpt-oss family answers for the bull, Nemotron (nvidia) takes the bear.
   bull_chain:
     - { provider: gemini, model: gemini-3.5-flash }
     - { provider: groq, model: qwen/qwen3.8-27b }
-    - { provider: gemini, model: gemini-3.8-flash }
     - { provider: groq, model: openai/gpt-oss-20b }
+    - { provider: nim, model: nvidia/nemotron-3-ultra-550b-a55b }
   bear_chain:
     - { provider: groq, model: openai/gpt-oss-120b }
-    - { provider: groq, model: qwen/qwen3.8-27b }
-    - { provider: gemini, model: gemini-3.5-flash }
     - { provider: nim, model: nvidia/nemotron-3-ultra-550b-a55b }
+    - { provider: gemini, model: gemini-3.5-flash }
+    - { provider: groq, model: qwen/qwen3.8-27b }
   panel: # ADR-044: the bull answers the bear, then three experts weigh in (in parallel) before the Clef judge
     rebuttal: true
     seats: [quant, risk, macro]

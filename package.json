@@ -32,7 +32,8 @@
     "cortexd:build": "pnpm config:build && pnpm web:build && tsx scripts/build-cortexd.ts",
     "desktop:runtime": "tsx scripts/fetch-node-runtime.ts",
     "desktop:build": "pnpm cortexd:build && tauri build --config desktop/src-tauri/tauri.conf.json",
-    "desktop:dev": "pnpm cortexd:build && tauri build --debug --bundles app --config desktop/src-tauri/tauri.conf.json"
+    "desktop:dev": "pnpm cortexd:build && tauri build --debug --bundles app --config desktop/src-tauri/tauri.conf.json",
+    "canary": "pnpm config:build && tsx scripts/drift-canary.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

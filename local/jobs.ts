@@ -95,7 +95,7 @@ export function jobFor(
   if (job === "kronos")
     return {
       cmd: "uv",
-      args: uv(["cortex_research.run", "kronos"], ["kronos"]),
+      args: uv(["cortex_research.run", "kronos"], ["kronos", "chronos"]),
       env: { ...env, KRONOS_DIR: join(vendorDir, "kronos"), KRONOS_SHA: KRONOS.sha },
       vendor: "kronos",
       key: "kronos",

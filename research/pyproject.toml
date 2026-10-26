@@ -25,6 +25,9 @@ kronos = [
   "tqdm>=4.66",
 ]
 
+# Kronos companion (ADR-069): Chronos-2 (Apache-2.0), installed with the kronos group for `run kronos`
+chronos = ["chronos-forecasting>=2.1"]
+
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 

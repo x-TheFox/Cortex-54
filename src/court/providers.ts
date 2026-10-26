@@ -43,7 +43,7 @@ export function buildProviders(k: ProviderKeys, fetcher?: Fetcher): Partial<Reco
       "nim",
       "https://integrate.api.nvidia.com/v1",
       k.NVIDIA_API_KEY,
-      { jsonMode: false },
+      { jsonMode: false, minOutputTokens: 4096 },
       f,
     );
   if (k.OPENROUTER_API_KEY)

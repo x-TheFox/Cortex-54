@@ -203,6 +203,20 @@ def kronos_job(kronos_dir: Path, doctrine_path: Path, now_ms: int, version: str,
     candles = crypto_bars(universe, f"{p['candle_hours']}Hour", p["lookback_hours"] // 24 + 3)
     daily = crypto_bars(universe, "1Day", 40)
     predictor = load_predictor(kronos_dir)
+    from . import companions as C
+
+    companion = C.load()  # ADR-069: SHADOW second opinion; None when the chronos group isn't installed
+
+    def second_opinion(bars: list[dict], steps: int, freq: str) -> list[dict]:
+        if companion is None:
+            return []
+        try:
+            v = C.forecast(companion, bars, steps, freq)
+            return [v] if v else []
+        except Exception as e:  # noqa: BLE001 - the companion never costs Kronos its forecast
+            print(f"companion: {str(e)[:120]}")
+            return []
+
     forecasts: list[dict] = []
     failed: list[str] = []
     for sym in universe:
@@ -226,6 +240,7 @@ def kronos_job(kronos_dir: Path, doctrine_path: Path, now_ms: int, version: str,
                  "target": target, "vol_scale": round(k, 3), "raw_p_up": raw["p_up"], "raw_exp_ret": raw["exp_ret"],
                  **summarize(rescale(hi, last, k), rescale(lo, last, k), rescale(cl, last, k), last, stop, target)}
             f.update(fan_chart(hb, rescale(cl, last, k)))
+            f["companions"] = second_opinion(hb, steps, f"{p['candle_hours']}h")
             forecasts.append(f)
             print(f"{sym}: p_win {f['p_win']:.2f} target-first {f['p_target_first']:.2f} stop-first {f['p_stop_first']:.2f} "
                   f"exp {f['exp_ret'] * 100:+.2f}%")
@@ -261,6 +276,7 @@ def kronos_job(kronos_dir: Path, doctrine_path: Path, now_ms: int, version: str,
                  "candle_hours": 24, "horizon_label": f"{eq_days} trading days",
                  **summarize(rescale(hi, last, k), rescale(lo, last, k), rescale(cl, last, k), last, stop, target)}
             f.update(fan_chart(db, rescale(cl, last, k)))
+            f["companions"] = second_opinion(db, eq_days, "B")
             forecasts.append(f)
             print(f"{sym}: p_win {f['p_win']:.2f} exp {f['exp_ret'] * 100:+.2f}% ({eq_days} trading days)")
         except Exception as e:  # noqa: BLE001 - one symbol failing never drops the batch

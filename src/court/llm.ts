@@ -97,11 +97,38 @@ export class OpenAICompatProvider implements LlmProvider {
     private readonly name: string,
     private readonly baseUrl: string,
     private readonly key: string,
-    private readonly opts: { jsonMode: boolean; reasoningEffort?: "low" | "medium" } = { jsonMode: true },
+    private readonly opts: {
+      jsonMode: boolean;
+      reasoningEffort?: "low" | "medium";
+      /** reasoning models spend output tokens thinking before the JSON (canary 2026-10-26: Nemotron cut off at 1,500) */
+      minOutputTokens?: number;
+    } = { jsonMode: true },
     private readonly fetcher: Fetcher = (u, i) => fetch(u, i),
   ) {}
 
   async complete(model: string, req: LlmRequest, timeoutMs: number): Promise<LlmResponse> {
+    try {
+      return await this.call(model, req, timeoutMs, this.opts.jsonMode);
+    } catch (e) {
+      // ADR-070 (canary 2026-10-26): Groq's JSON mode rejects some models' valid-looking replies with a 400
+      // ("Failed to validate JSON"). One retry without JSON mode; the court's own parser and schema decide.
+      if (
+        this.opts.jsonMode &&
+        e instanceof ProviderError &&
+        e.status === 400 &&
+        /validate JSON|json_validate/i.test(e.message)
+      )
+        return this.call(model, req, timeoutMs, false);
+      throw e;
+    }
+  }
+
+  private async call(
+    model: string,
+    req: LlmRequest,
+    timeoutMs: number,
+    jsonMode: boolean,
+  ): Promise<LlmResponse> {
     const d = (await post(
       this.fetcher,
       this.name,
@@ -110,7 +137,7 @@ export class OpenAICompatProvider implements LlmProvider {
       {
         model,
         temperature: 0.2,
-        max_tokens: req.maxOutputTokens,
+        max_tokens: Math.max(req.maxOutputTokens, this.opts.minOutputTokens ?? 0),
         messages: [
           {
             role: "system",
@@ -118,7 +145,7 @@ export class OpenAICompatProvider implements LlmProvider {
           },
           { role: "user", content: req.user },
         ],
-        ...(this.opts.jsonMode ? { response_format: { type: "json_object" } } : {}),
+        ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
         ...(this.opts.reasoningEffort ? { reasoning_effort: this.opts.reasoningEffort } : {}),
       },
       timeoutMs,

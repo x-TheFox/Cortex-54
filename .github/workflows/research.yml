@@ -121,7 +121,7 @@ jobs:
           ALPACA_KEY_ID: ${{ secrets.ALPACA_PAPER_KEY_ID }}
           ALPACA_SECRET: ${{ secrets.ALPACA_PAPER_SECRET }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: uv run --group kronos python -m cortex_research.run kronos
+        run: uv run --group kronos --group chronos python -m cortex_research.run kronos
       - name: Deep research dossier (ADR-051; read-only web tools, free LLM chain)
         if: steps.pick.outputs.job == 'dossier'
         working-directory: research

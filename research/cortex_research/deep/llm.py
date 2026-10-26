@@ -138,7 +138,8 @@ class Chain:
         body: dict[str, Any] = {
             "model": hop.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            "max_tokens": max_out,
+            # NIM's Nemotron reasons before answering; at 1.5-2.5K tokens the JSON was often cut off (canary 2026-10-26)
+            "max_tokens": max(max_out, 6000) if hop.provider == "nim" else max_out,
             "temperature": 0.3,
         }
         if hop.provider in ("groq", "nim"):
