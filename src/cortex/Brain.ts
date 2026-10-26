@@ -92,6 +92,7 @@ import {
 import { dec, defaultTick, roundPrice, toCents } from "../lib/num.ts";
 import { sha256Hex } from "../lib/sha256.ts";
 import { weekdayMsBetween } from "../lib/time.ts";
+import { type BookLine, type BookSummary, beta, summarizeBook, worstWindow } from "../portfolio/book.ts";
 import {
   buildReview,
   type ExitState,
@@ -395,6 +396,11 @@ export class Brain {
     this.c = deps.c;
     this.journal = new Journal(deps.sql);
     this.journal.onAppend = (r) => {
+      try {
+        this.noteWhy(r);
+      } catch {
+        /* never break an append */
+      }
       const line = terminalLine(r);
       if (!line) return;
       this.termBuffer.push(line);
@@ -413,6 +419,99 @@ export class Brain {
         used: (p) => setKV(deps.sql, key(p), String(Number(getKV(deps.sql, key(p)) ?? 0) + 1), deps.now()),
       };
     }
+  }
+
+  // ------------------------------------------------------------------ /why memory (MLP0-011)
+
+  /** Per-symbol decision trail for `/why`, captured from the journal itself (no model, nothing invented). */
+  private noteWhy(r: { ts: number; account: string; kind: string; payloadJson: string }): void {
+    if (!WHY_KINDS.has(r.kind)) return;
+    const p = JSON.parse(r.payloadJson) as Record<string, unknown>;
+    const facts = (p.facts ?? {}) as Record<string, unknown>;
+    const symbol = String(p.symbol ?? facts.symbol ?? p.out ?? "");
+    if (!symbol) return;
+    const reasons = Array.isArray(p.reasons) ? (p.reasons as unknown[]).join("; ") : "";
+    const detail = [
+      p.stage,
+      p.reason,
+      p.action,
+      p.why,
+      reasons,
+      p.strategy,
+      p.from !== undefined ? `${p.from}→${p.to}` : null,
+      p.in ? `for ${p.in}` : null,
+      typeof p.pnl_cents === "number" ? `P&L $${(p.pnl_cents / 100).toFixed(2)}` : null,
+      typeof p.win_cal === "number" ? `win ${Math.round(p.win_cal * 100)}%` : null,
+    ]
+      .filter((x) => x !== null && x !== undefined && x !== "")
+      .map(String)
+      .join(" · ")
+      .slice(0, 220);
+    const key = `why:${symbol}`;
+    let list: { at: number; acct: string; kind: string; detail: string }[] = [];
+    try {
+      list = JSON.parse(getKV(this.sql, key) ?? "[]");
+    } catch {
+      list = [];
+    }
+    list.push({ at: r.ts, acct: r.account, kind: r.kind, detail });
+    setKV(this.sql, key, JSON.stringify(list.slice(-8)), r.ts);
+  }
+
+  /** `/why SYMBOL`: what the system did about a symbol and why, straight from the hot state and the journal trail. */
+  why(symbolInput: string): string {
+    const now = this.deps.now();
+    const sym =
+      this.universe.resolve([symbolInput], now)?.symbol ??
+      normalizeSymbol(symbolInput)?.symbol ??
+      symbolInput.toUpperCase();
+    const lines: string[] = [`**${sym}**`];
+    for (const a of ACCOUNTS) {
+      const pos = this.positions(a).find((x) => x.symbol === sym);
+      if (!pos) continue;
+      const k = this.contract(pos.contract_id);
+      const w = one<WatchRow>(
+        this.sql,
+        "SELECT * FROM position_watch WHERE account = ? AND symbol = ?",
+        a,
+        sym,
+      );
+      const st = w ? this.exitState(pos, w) : null;
+      lines.push(
+        `📌 ${a} holds it: entry ${pos.avg_entry}, stop ${pos.stop_price}${st ? ` (initial ${st.initialStop})` : ""}, target ${pos.target_price}, opened ${new Date(pos.opened_at).toISOString().slice(0, 16)}Z${w?.trailing ? ", trailing past target" : ""}${w?.reviews ? `, ${w.reviews} review(s)` : ""}`,
+      );
+      if (k)
+        lines.push(
+          `   why bought: ${k.thesis_summary} (${k.strategy_id}, win used ${Math.round(k.win_prob_used * 100)}%)`,
+        );
+    }
+    const resting = this.sql.exec<{ account: string; until_at: number; why: string }>(
+      "SELECT account, until_at, why FROM resting WHERE symbol = ?",
+      sym,
+    );
+    for (const r of resting)
+      lines.push(
+        `⏳ ${r.account} resting until ${new Date(r.until_at).toISOString().slice(5, 16)}Z (${r.why})`,
+      );
+    const u = this.universe.row(sym);
+    if (u && u.expires_at > now)
+      lines.push(`🌐 universe: ${u.status} via ${u.source} (${u.reason.slice(0, 120)})`);
+    let trail: { at: number; acct: string; kind: string; detail: string }[] = [];
+    try {
+      trail = JSON.parse(getKV(this.sql, `why:${sym}`) ?? "[]");
+    } catch {
+      trail = [];
+    }
+    if (trail.length) {
+      lines.push("Recent decisions:");
+      for (const t of trail.slice(-8))
+        lines.push(
+          `• ${new Date(t.at).toISOString().slice(5, 16)}Z ${t.kind}${t.acct === "SYSTEM" ? "" : ` ${t.acct}`}: ${t.detail}`,
+        );
+    }
+    if (lines.length === 1)
+      lines.push("Nothing on record in the last two weeks: no position, no contract, no refusal.");
+    return lines.join("\n").slice(0, 1900);
   }
 
   // ------------------------------------------------------------------ setup
@@ -611,6 +710,7 @@ export class Brain {
 
     await this.checkBatchStaleness(started).catch(() => undefined);
     await this.dispatchDue(started).catch(() => undefined);
+    await this.bookReview().catch(() => undefined);
     await this.checkDispatchReceipts(started).catch(() => undefined);
 
     // 4. Persist, report, schedule.
@@ -819,7 +919,8 @@ export class Brain {
     this.sql.exec(
       `DELETE FROM settings WHERE updated_at < ? AND (
          key LIKE 'count:%' OR key LIKE 'alert:%' OR key LIKE 'court_seen:%' OR key LIKE 'spreads:%'
-         OR key LIKE 't1_fail:%' OR key LIKE 'dispatch_stale:%' OR key LIKE 'ratify_request:%'
+         OR key LIKE 't1_fail:%' OR key LIKE 'dispatch_stale:%' OR key LIKE 'ratify_request:%' OR key LIKE 'why:%'
+         OR key LIKE 'watch_dispatched:%'
          OR key GLOB '*:20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' OR key GLOB '*:month:20[0-9][0-9]-[0-9][0-9]')`,
       now - 14 * day,
     );
@@ -3289,7 +3390,7 @@ ${postmortem}`,
     const lt = this.d.entry_timing.lateness;
     const a14d = atr(b, 14);
     const timing =
-      lt.enabled && p.kind !== "operator" && m.hourlyBars && a14d
+      lt.enabled && p.kind !== "operator" && p.kind !== "roast" && m.hourlyBars && a14d
         ? lateness(
             await m.hourlyBars(symbol, created - 26 * 3_600_000).catch(() => []),
             created,
@@ -3603,6 +3704,147 @@ ${postmortem}`,
     return n > 0
       ? `Court session for ${target.symbol} finished — see #bull-vs-bear-court.`
       : `Court session for ${target.symbol} ended without a contract — see #bull-vs-bear-court or the journal.`;
+  }
+
+  /**
+   * PSS-013 co-pilot (`/roast SYMBOL thesis`): the operator's own trade idea goes through Tier 0 and the full court
+   * (bull, cross-family bear, rebuttal, panel, judge) right now. It never trades: no contract, no order, ever.
+   */
+  async requestRoast(symbolInput: string, thesis: string, by: string): Promise<string> {
+    const now = this.deps.now();
+    const idea = thesis.replace(/\s+/g, " ").trim().slice(0, 280);
+    if (idea.length < 10)
+      return "Give the idea in a sentence, e.g. `/roast NVDA thesis: datacenter capex beats, buying the dip`.";
+    let target: { symbol: string; arena: "CRYPTO" | "EQUITIES" } | null = this.universe.resolve(
+      [symbolInput],
+      now,
+    );
+    if (!target && this.universe.enabled) {
+      const ported = await this.scoutPort([symbolInput], `operator /roast by ${by}`, now, "operator");
+      if ("reason" in ported) return `${symbolInput} can't be judged: ${ported.reason}.`;
+      target = ported;
+    }
+    if (!target) return `${symbolInput} isn't in the tradeable universe.`;
+    if ((await this.readKill()) !== "CLEAR") return "Kill flag is set; no court sessions.";
+    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day)
+      return "Daily court cap reached.";
+    const id = `roast:${target.symbol}:${now}`;
+    this.sql.exec(
+      "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 3, ?, ?, ?)",
+      id,
+      target.symbol,
+      JSON.stringify({
+        kind: "roast",
+        headline: `Operator's own trade idea (co-pilot roast, no order will be placed): ${idea}`,
+        symbols: [target.symbol],
+        source: by,
+        createdAt: now,
+      }),
+      now - 366 * 86_400_000,
+    );
+    const n = await this.runCourt();
+    await this.flushJournal();
+    return n > 0
+      ? `🔥 Roast of ${target.symbol} is in #bull-vs-bear-court (no order placed).`
+      : `The idea on ${target.symbol} didn't survive — the reasons are in #bull-vs-bear-court or \`/why ${target.symbol}\`.`;
+  }
+
+  /**
+   * ADR-061 weekly book review (Sundays from 18:00 UTC, or on demand with `/book`): R, age and stagnation per position,
+   * the strongest pairwise correlation, net beta to BTC and SPY in dollars, and a crash replay (each holding's worst
+   * 5-day drop in the past year, applied to today's notional). Measurement only.
+   */
+  async bookReview(force = false): Promise<BookSummary | null> {
+    const now = this.deps.now();
+    const d = new Date(now);
+    const week = `${d.getUTCFullYear()}-${Math.floor((now - Date.UTC(d.getUTCFullYear(), 0, 1)) / (7 * 86_400_000))}`;
+    if (
+      !force &&
+      (d.getUTCDay() !== 0 || d.getUTCHours() < 18 || getKV(this.sql, "book_review_week") === week)
+    )
+      return null;
+    if (!force) setKV(this.sql, "book_review_week", week, now);
+    const m = this.deps.market;
+    const account: AccountId = this.deps.brokers.PAPER ? "PAPER" : "LIVE";
+    const view = this.accountView(account, now);
+    const positions = this.positions(account);
+    if (!m || !view) return null;
+    const syms = positions.map((p) => p.symbol);
+    const crypto = [...new Set([...syms.filter(isCryptoSymbol), "BTC/USD"])];
+    const stocks = [...new Set([...syms.filter((x) => !isCryptoSymbol(x)), "SPY"])];
+    const [cb, sb, quotes] = await Promise.all([
+      m.cryptoDailyBars(crypto, 370, now).catch(() => ({}) as Record<string, Bar[]>),
+      m.stockDailyBars(stocks, 260, now).catch(() => ({}) as Record<string, Bar[]>),
+      this.quotesFor(syms).catch(() => ({}) as Record<string, Quote>),
+    ]);
+    const bars: Record<string, Bar[]> = { ...cb, ...sb };
+    const lines: BookLine[] = positions.map((p) => {
+      const q = quotes[p.symbol];
+      const w = this.watchRow(account, p, now);
+      const st = w ? this.exitState(p, w) : null;
+      const px = q?.bid ?? Number(p.avg_entry);
+      const b = bars[p.symbol] ?? [];
+      return {
+        symbol: p.symbol,
+        arena: p.arena,
+        notionalUsd: Math.round(Number(p.qty) * px * 100) / 100,
+        r: st ? Math.round(rMultiple(st, px) * 100) / 100 : 0,
+        horizonFraction:
+          Math.round(((now - p.opened_at) / Math.max(1, p.max_hold_until - p.opened_at)) * 100) / 100,
+        stagnant: st && q ? stagnant(st, q.bid, now, this.d.exits) : false,
+        betaBtc: bars["BTC/USD"] ? beta(b, bars["BTC/USD"]) : null,
+        betaSpy: bars.SPY ? beta(b, bars.SPY) : null,
+        worst5d: worstWindow(b, 5),
+      };
+    });
+    const pairs: { a: string; b: string; corr: number }[] = [];
+    for (let i = 0; i < syms.length; i++)
+      for (let j = i + 1; j < syms.length; j++) {
+        const x = bars[syms[i] as string];
+        const y = bars[syms[j] as string];
+        const c = x && y ? correlation(x, y, now - 60 * 86_400_000) : null;
+        if (c !== null)
+          pairs.push({ a: syms[i] as string, b: syms[j] as string, corr: Math.round(c * 100) / 100 });
+      }
+    const sum = summarizeBook(lines, view.equityUsd, pairs);
+    this.journal.append(
+      account,
+      "BOOK_REVIEW",
+      null,
+      { ...sum, lines: sum.lines.map((l) => ({ ...l })) },
+      now,
+    );
+    await this.deps.notifier.post("governor", bookCard(account, sum));
+    return sum;
+  }
+
+  /** `/universe`: the dynamic universe right now. */
+  universeView(): string {
+    const now = this.deps.now();
+    if (!this.universe.enabled) return "Dynamic universe is off (doctrine universe.enabled).";
+    const c = this.universe.counts(now);
+    const rows = this.universe.list(now);
+    const fmt = (st: string) =>
+      rows
+        .filter((r) => r.status === st)
+        .slice(0, 15)
+        .map((r) => r.symbol)
+        .join(", ") || "—";
+    return [
+      `🌐 Universe: ${c.trade} hot-ported · ${c.watch} watched · ${c.rejected} refused today (core watchlists always on)`,
+      `**Trade:** ${fmt("TRADE")}`,
+      `**Watch:** ${fmt("WATCH")}`,
+      `**Refused:** ${
+        rows
+          .filter((r) => r.status === "REJECTED")
+          .slice(0, 6)
+          .map((r) => `${r.symbol} (${r.reason.slice(0, 50)})`)
+          .join("; ") || "—"
+      }`,
+      `Today: ${this.daily("ports", now)}/${this.d.universe.max_ports_per_day} screens · ${this.daily("open_intake", now)}/${this.d.universe.max_open_intake_per_day} wire headlines into Tier 1`,
+    ]
+      .join("\n")
+      .slice(0, 1900);
   }
 
   /** Completed COURT trades so far (calibration weight). */
@@ -3925,6 +4167,28 @@ ${postmortem}`,
       this.rejectCandidate(cand, "CONTRACT", violations.slice(0, 6), { ...checked.bull }, now);
       await close(`🚫 Contract invalid: ${violations.slice(0, 3).join("; ")}`, false);
       return 0;
+    }
+    if (row.candidate_id.startsWith("roast:")) {
+      // PSS-013 co-pilot: the operator's own idea got the full hearing; it never becomes a contract or an order
+      this.journal.append(
+        "SYSTEM",
+        "ROAST",
+        row.candidate_id,
+        {
+          symbol: e.symbol,
+          win_cal: winUsed,
+          bear: bear.value.lethality,
+          entry: [contract.entry_plan.zone_low, contract.entry_plan.zone_high],
+          stop: contract.invalidation_criteria.stop_price,
+          targets: contract.entry_plan.targets,
+        },
+        now,
+      );
+      await close(
+        `🧪 Roast only — no order. The court would size this at a calibrated ${Math.round(winUsed * 100)}% win chance: buy ${contract.entry_plan.zone_low}–${contract.entry_plan.zone_high}, stop ${contract.invalidation_criteria.stop_price}, target ${contract.entry_plan.targets[0]}.`,
+        false,
+      );
+      return 1;
     }
     this.recordContract(contract, now);
     this.journal.append(
@@ -4845,7 +5109,13 @@ ${postmortem}`,
       },
       now,
     );
-    this.journal.append(account, "REJECT", contract.contract_id, { stage, reasons }, now);
+    this.journal.append(
+      account,
+      "REJECT",
+      contract.contract_id,
+      { symbol: contract.symbol, stage, reasons },
+      now,
+    );
   }
 
   private async submit(
@@ -5593,6 +5863,28 @@ ${postmortem}`,
 
 // ---------------------------------------------------------------------- helpers
 
+/** Journal kinds that feed the `/why` trail (each must carry a symbol, facts.symbol or out). */
+const WHY_KINDS = new Set([
+  "CANDIDATE_REJECT",
+  "REJECT",
+  "CONTRACT",
+  "COURT",
+  "ENTRY_FACTS",
+  "EXIT",
+  "STOP_MOVE",
+  "HARVEST_TRAIL",
+  "REVIEW",
+  "RESTING",
+  "RESTING_FILLED",
+  "RESTING_DROPPED",
+  "ROTATE",
+  "UNIVERSE_PORT",
+  "UNIVERSE_REJECT",
+  "DOSSIER",
+  "TIER2_PASS",
+  "ROAST",
+]);
+
 /** Earnings rows kept per calendar batch (ADR-058: the whole market for 4 days ≈ 1–3k rows in earnings season). */
 const EARNINGS_MAX_ROWS = 5000;
 /** An equity earnings calendar older than this blocks equity entries (fail closed, ADR-035). */
@@ -5985,6 +6277,50 @@ export function dossierCard(d: Dossier): DiscordMessage {
             300,
           ),
         },
+      },
+    ],
+  };
+}
+
+/** ADR-061: the weekly book review card (#governor). */
+export function bookCard(account: string, b: BookSummary): DiscordMessage {
+  const usd2 = (n: number | null) => (n === null ? "—" : `$${n.toFixed(2)}`);
+  const rows = b.lines
+    .map(
+      (l) =>
+        `• **${l.symbol}** ${usd2(l.notionalUsd)} · ${l.r >= 0 ? "+" : ""}${l.r} R · ${Math.round(l.horizonFraction * 100)}% of horizon${l.stagnant ? " · 💤 stagnant" : ""} · β BTC ${l.betaBtc ?? "—"} / SPY ${l.betaSpy ?? "—"} · worst 5d ${l.worst5d === null ? "—" : `${(l.worst5d * 100).toFixed(1)}%`}`,
+    )
+    .join("\n");
+  return {
+    embeds: [
+      {
+        title: `📒 Book review — ${account}`,
+        description: cut(rows || "Flat: no positions.", 3000),
+        color: COLORS.cyan,
+        fields: [
+          { name: "Gross / equity", value: `${usd2(b.grossUsd)} / ${usd2(b.equityUsd)}`, inline: true },
+          {
+            name: "By arena",
+            value: JSON.stringify(b.arenaShare).replace(/[{}"]/g, "") || "—",
+            inline: true,
+          },
+          {
+            name: "Net β (USD)",
+            value: `BTC ${usd2(b.netBetaBtcUsd)} · SPY ${usd2(b.netBetaSpyUsd)}`,
+            inline: true,
+          },
+          {
+            name: "Crash replay",
+            value: `${usd2(b.stressLossUsd)} if every holding repeated its worst 5 days`,
+            inline: true,
+          },
+          {
+            name: "Closest pair",
+            value: b.maxPairCorr ? `${b.maxPairCorr.a} ~ ${b.maxPairCorr.b} ρ ${b.maxPairCorr.corr}` : "—",
+            inline: true,
+          },
+        ],
+        footer: { text: "Measurement only — the risk engine's caps are what limit the book." },
       },
     ],
   };

@@ -44,6 +44,10 @@ function fakeBrain() {
     unlock: () => "unlocked",
     flatten: async () => "flattened",
     court: async (s) => `court ${s}`,
+    why: (s) => `why ${s}`,
+    roast: async (s, th) => `roast ${s} ${th}`,
+    book: async () => "book",
+    universe: () => "universe",
   };
   return { b, calls };
 }

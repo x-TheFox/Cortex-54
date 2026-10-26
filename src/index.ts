@@ -70,6 +70,7 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
     confirm: option(i, "confirm") === undefined ? undefined : String(option(i, "confirm")),
     postmortem: option(i, "postmortem") === undefined ? undefined : String(option(i, "postmortem")),
     symbol: option(i, "symbol") === undefined ? undefined : String(option(i, "symbol")),
+    thesis: option(i, "thesis") === undefined ? undefined : String(option(i, "thesis")),
   };
 
   switch (name) {
@@ -84,6 +85,8 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
       );
     }
     case "court":
+    case "roast":
+    case "book":
     case "flatten": {
       // Slow paths: answer within 3 s, finish in the background, follow up (ADR-008).
       if (!i.token || !env.DISCORD_APP_ID) return ephemeral("Discord app not configured.");

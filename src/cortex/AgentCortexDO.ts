@@ -285,6 +285,30 @@ export class AgentCortexDO extends DurableObject<Env> {
     return this.brain.requestCourt(symbol, by);
   }
 
+  why(symbol: string): string {
+    this.begin();
+    return this.brain.why(symbol);
+  }
+
+  async roast(symbol: string, thesis: string, by: string): Promise<string> {
+    this.begin();
+    return this.brain.requestRoast(symbol, thesis, by);
+  }
+
+  async book(): Promise<string> {
+    this.begin();
+    const b = await this.brain.bookReview(true);
+    await this.brain.flushJournal();
+    return b
+      ? `📒 Book review posted to #governor (${b.lines.length} position(s)).`
+      : "Book review unavailable (no market data).";
+  }
+
+  universe(): string {
+    this.begin();
+    return this.brain.universeView();
+  }
+
   async resetAccount(account: AccountId, by: string): Promise<{ ok: boolean; message: string }> {
     this.begin();
     return this.brain.resetAccount(account, by);

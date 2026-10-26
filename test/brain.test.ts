@@ -1070,6 +1070,66 @@ describe("court end-to-end (Phase 3)", () => {
     expect(await t.brain.requestCourt("PLTR", "test")).toMatch(/PLTR can't be traded: .*only 0 daily bars/);
   });
 
+  it("/roast: the operator's own idea gets the full hearing and never becomes a contract or an order", async () => {
+    const calls: string[] = [];
+    const llm = new LlmRouter(
+      { gemini: provider(bullJson, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => T0,
+    );
+    const t = setup({ clef: new ScriptedClef(answers), llm });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    expect(await t.brain.requestRoast("BTC/USD", "short", "test")).toMatch(/Give the idea/);
+    const msg = await t.brain.requestRoast("BTC/USD", "ETF inflows keep coming, buying the breakout", "test");
+    expect(msg).toMatch(/Roast of BTC\/USD/);
+    expect(calls.length).toBeGreaterThanOrEqual(3); // bull, bear, rebuttal (+ panel)
+    expect([...t.paper.orders.values()]).toHaveLength(0);
+    await t.brain.flushJournal();
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM decision_contracts").get()).toEqual({ n: 0 });
+    const card = t.notifier.sent.filter((m) => m.channel === "court").at(-1);
+    expect(card?.msg.embeds?.at(-1)?.fields?.at(-1)?.value).toMatch(/Roast only — no order/);
+    // and /why shows the trail
+    expect(t.brain.why("BTC/USD")).toMatch(/ROAST/);
+  });
+
+  it("/why answers from the position, the contract and the journal trail", async () => {
+    const t = setup();
+    breakout(t);
+    await t.brain.pulse();
+    t.advance(60_000);
+    t.market.set("SOL/USD", 101.99, 102);
+    t.paper.tick();
+    await t.brain.pulse();
+    const w = t.brain.why("SOLUSD");
+    expect(w).toMatch(/\*\*SOL\/USD\*\*/);
+    expect(w).toMatch(/PAPER holds it: entry/);
+    expect(w).toMatch(/why bought: /);
+    expect(w).toMatch(/CONTRACT/);
+    expect(t.brain.why("ZZZZ")).toMatch(/Nothing on record/);
+  });
+
+  it("/book posts a book review with betas and a crash replay", async () => {
+    const t = setup();
+    breakout(t);
+    await t.brain.pulse();
+    t.advance(60_000);
+    t.market.set("SOL/USD", 101.99, 102);
+    t.paper.tick();
+    await t.brain.pulse();
+    t.market.bars.SPY = rising(30, 400);
+    const b = await t.brain.bookReview(true);
+    expect(b?.lines[0]?.symbol).toBe("SOL/USD");
+    expect(b?.lines[0]?.notionalUsd).toBeGreaterThan(0);
+    expect(b?.stressLossUsd).not.toBeUndefined();
+    expect(
+      t.notifier.sent.some(
+        (m) => m.channel === "governor" && m.msg.embeds?.[0]?.title === "📒 Book review — PAPER",
+      ),
+    ).toBe(true);
+    expect(await t.brain.bookReview(false)).toBeNull(); // Thursday: the weekly slot isn't due
+  });
+
   const dossierBatch = (symbol: string, asOf: number) => ({
     schema_version: 1,
     job: "dossier",
