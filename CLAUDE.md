@@ -159,6 +159,9 @@ neurons/M, no output billing (ADR-043). **Jev** (TypeSafe AI) is not in our Work
 - Gemini (AI Studio) free: **use the Interactions API** (`POST /v1beta/interactions`, `response_format` with a JSON
   schema). `generateContent` 404s for current models and `gemini-2.5-flash` is closed to new users.
   `gemini-3.5-flash` ≈ 7–25 s; `gemini-3.8-flash` is often 503 "high demand". Prompts may be used for training.
+- **Re-verified 2026-10-26 (bull prompt, live BTC):** Gemini 3.5/3.8 returned 503 "high demand" at peak (3.5 answered ~14–20 s
+  later); qwen and gpt-oss-20b answer in ~2 s; nemotron (NIM and OpenRouter) answers in prose, not JSON; deepseek-v4.1-flash
+  times out at 60 s (out of the court chains, ADR-056).
 - NVIDIA NIM: enabled for this key — `deepseek-ai/deepseek-v4.1-flash`, `nvidia/nemotron-3-ultra-550b-a55b`
   (`nemotron-3-super` is *not* enabled). OpenRouter `:free` errored on every test (left out of chains).
 - **Verified 2026-10-24 (ADR-051):** Gemini Google Search grounding has no free quota; Groq `compound` is not on our key
@@ -431,5 +434,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-24: ADR-055 audit round 3 (Governor rigor, DSR/PBO in the backtest lab, funding shrink, HMM context). The
   audit work stops here; everything not built is in `docs/FUTURE_PLANS.md` with its trigger.
 - 2026-10-24 15:53 UTC: first fills — LAB (Kronos forward test) bought BTC/USD and AAVE/USD (~$10 each).
+- 2026-10-26: first exits — LAB closed BTC/USD and AAVE/USD on TIME_STOP (+$0.08, +$0.10). ADR-056 gate review: REDUCE_ONLY
+  admits court stock entries at half size under the coach's ceiling, transitional macro input, warm-up floor 0.5, court
+  bull-decline fix and deepseek out of the chains.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

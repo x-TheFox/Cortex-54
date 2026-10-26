@@ -648,6 +648,31 @@ describe("research batch ingest (Phase 2)", () => {
     expect(t.notifier.sent.filter((m) => m.msg.content?.includes("regime batch is"))).toHaveLength(1);
   });
 
+  it("ADR-056: REDUCE_ONLY halves COURT stock entries and caps stock exposure at the coach's ceiling", () => {
+    const t = setup();
+    t.sql.exec(
+      "INSERT INTO regime_state (arena, posture, score, ceiling, payload_json, as_of) VALUES ('EQUITIES', 'REDUCE_ONLY', 44, 0.41, '{}', ?)",
+      T0,
+    );
+    const k = (origin: "COURT" | "RULE", arena = "EQUITIES") =>
+      ({ origin, arena }) as unknown as DecisionContract;
+    const court = t.brain.equityPostureLimits("PAPER", k("COURT"), 54, T0);
+    expect(court.multiplier).toBe(0.5);
+    expect(court.roomUsd).toBeCloseTo(0.41 * 54);
+    expect(t.brain.equityPostureLimits("PAPER", k("RULE"), 54, T0)).toEqual({
+      multiplier: 1,
+      roomUsd: Infinity,
+    });
+    expect(t.brain.equityPostureLimits("PAPER", k("COURT", "CRYPTO"), 54, T0).multiplier).toBe(1);
+    t.sql.exec(
+      `INSERT INTO positions (account, symbol, arena, contract_id, qty, avg_entry, stop_price, target_price, fee_rt, opened_at, max_hold_until)
+       VALUES ('PAPER', 'AAPL', 'EQUITIES', 'c1', '0.07', '320', '300', '360', 0.001, ?, ?)`,
+      T0,
+      T0 + 72 * HOUR,
+    );
+    expect(t.brain.equityPostureLimits("PAPER", k("COURT"), 54, T0).reason).toContain("41% ceiling");
+  });
+
   it("does not call a weekday-only equity batch stale over the weekend", async () => {
     const t = setup();
     const fridayClose = Date.UTC(2026, 9, 23, 21, 20); // last equity run before the weekend

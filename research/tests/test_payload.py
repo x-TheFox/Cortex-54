@@ -95,3 +95,14 @@ def test_theme_matching_is_exact_or_subtheme():
     assert theme_matches("MILITARY", "MILITARY") and theme_matches("EPU_POLICY_GOVERNMENT", "EPU_POLICY")
     assert not theme_matches("TAX_MILITARY_TITLE", "MILITARY") and not theme_matches("EPU_ECONOMY_HISTORIC", "EPU_POLICY")
     assert theme_matches("ECON_CRYPTOCURRENCY", "*CRYPTO")
+
+
+def test_macro_for_exposure_treats_an_unsettled_regime_as_transitional():
+    raw = {"regime": {"current_regime": "contraction", "confidence": "moderate"},
+           "composite": {"composite_score": 54.7, "zone": "Transition Zone (Preparing)", "data_quality": {}}}
+    adapted = P.macro_for_exposure(raw)
+    assert adapted["regime_score"] == 50 and "regime_score" not in raw  # raw report untouched
+    confident = {**raw, "regime": {"current_regime": "contraction", "confidence": "high"}}
+    assert "regime_score" not in P.macro_for_exposure(confident)
+    settled = {**raw, "composite": {"composite_score": 20, "zone": "Stable", "data_quality": {}}}
+    assert "regime_score" not in P.macro_for_exposure(settled)

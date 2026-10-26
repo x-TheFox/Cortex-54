@@ -165,6 +165,11 @@ def equity_job(out: Path, version: str) -> dict:
         "macro-regime-detector": "--regime",
         "market-top-detector": "--top-risk",
     }
+    macro = paths.get("macro-regime-detector")
+    if macro is not None:  # ADR-056: an unsettled macro regime counts as transitional for the coach
+        adapted = out / "macro_for_exposure.json"
+        adapted.write_text(json.dumps(P.macro_for_exposure(json.loads(macro.read_bytes()))))
+        paths["macro-regime-detector"] = adapted
     args = [x for skill, p in paths.items() for x in (flags[skill], str(p))]
     run_skill("exposure-coach", "calculate_exposure.py", [*args, "--output-dir", str(out), "--json-only"], out)
     exp_path = newest(out, "exposure_posture_*.json")
