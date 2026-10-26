@@ -24,3 +24,7 @@ public/
 .impeccable/review/
 .impeccable/questions/
 brag-output/
+# desktop app build outputs (ADR-066)
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/src-tauri/binaries/

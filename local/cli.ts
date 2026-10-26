@@ -39,7 +39,8 @@ import { install, plan, uninstall } from "./service.ts";
  *   cortex runner                                                    run the cloud brain's research jobs on this machine
  */
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// CORTEX_ROOT points at the app's bundled resources (desktop app / packaged builds); from source it's the repo
+const ROOT = process.env.CORTEX_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);
 const opt = (n: string) => {
@@ -187,6 +188,10 @@ async function setup(home: string): Promise<void> {
   let cfg = loadConfig(home) ?? newConfig("demo");
   const mode = opt("mode");
   if (mode === "demo" || mode === "paper") cfg = { ...cfg, mode };
+  // headless/server installs (Docker, a VPS): listen beyond localhost; put TLS in front (docs/SELF_HOSTING.md)
+  const bind = opt("bind");
+  if (bind) cfg = { ...cfg, bind };
+  if (opt("port")) cfg = { ...cfg, port: Number(opt("port")) };
   cfg = applyKeys(cfg, multi("set"));
   if (!flag("yes") && process.stdin.isTTY) {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -248,6 +253,16 @@ async function start(home: string, cfg: LocalConfig, minutes?: number): Promise<
   process.on("SIGINT", () => void stop());
   process.on("SIGTERM", () => void stop());
   if (minutes) setTimeout(() => void stop(), minutes * 60_000);
+  // Started by the desktop app: exit with it, even if it was killed rather than quit (no orphaned brain)
+  const parent = Number(process.env.CORTEX_PARENT_PID ?? 0);
+  if (parent > 0)
+    setInterval(() => {
+      try {
+        process.kill(parent, 0);
+      } catch {
+        void stop();
+      }
+    }, 5_000).unref();
 }
 
 async function main(): Promise<void> {
