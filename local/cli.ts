@@ -260,11 +260,11 @@ async function main(): Promise<void> {
       const checks = await doctor(home);
       const bad = checks.filter((x) => !x.ok);
       out(
-        checks
+        `${checks
           .map(
             (x) => `${x.ok ? "✅" : "❌"} ${x.name}: ${x.detail}${x.ok || !x.fix ? "" : `\n   → ${x.fix}`}`,
           )
-          .join("\n") + `\n${bad.length ? `${bad.length} thing(s) to fix.` : "All good."}`,
+          .join("\n")}\n${bad.length ? `${bad.length} thing(s) to fix.` : "All good."}`,
         { ok: bad.length === 0, checks },
       );
       process.exitCode = bad.length ? 1 : 0;
