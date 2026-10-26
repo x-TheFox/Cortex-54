@@ -618,6 +618,8 @@ export class Brain {
       if (!broker) continue;
       try {
         await this.syncAccount(account, broker);
+        if (getKV(this.sql, `sync_fail_streak:${account}`) !== "0")
+          setKV(this.sql, `sync_fail_streak:${account}`, "0", started);
         const row = this.account(account);
         report.accounts[account] = {
           ok: true,
@@ -628,7 +630,14 @@ export class Brain {
         const msg = errText(e);
         this.sql.exec("UPDATE accounts SET last_error = ? WHERE account = ?", msg.slice(0, 500), account);
         report.accounts[account] = { ok: false, error: msg };
-        await this.alertOnce(`sync:${account}`, `⚠️ ${account} broker sync failed: ${msg.slice(0, 300)}`);
+        // Chaos test 2026-10-26: one 503 is routine (reads already retry); alert from the third failed pulse in a row
+        const streak = Number(getKV(this.sql, `sync_fail_streak:${account}`) ?? 0) + 1;
+        setKV(this.sql, `sync_fail_streak:${account}`, String(streak), started);
+        if (streak >= 3)
+          await this.alertOnce(
+            `sync:${account}`,
+            `⚠️ ${account} broker sync failed ${streak} pulses in a row: ${msg.slice(0, 300)}`,
+          );
       }
     }
 
