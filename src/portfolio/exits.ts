@@ -127,7 +127,8 @@ export function tripwires(i: TripwireInput): string[] {
   if (i.kronos && i.kronos.p10.length > 0) {
     const step = Math.floor((i.now - i.kronos.produced_at) / (i.kronos.candle_hours * 3_600_000));
     const band = i.kronos.p10[Math.min(Math.max(step, 0), i.kronos.p10.length - 1)];
-    if (band !== undefined && i.bid < band) t.push(`price below the Kronos 10% band (${band})`);
+    // no number in the text: the review key must stay the same while the condition does (review finding)
+    if (band !== undefined && i.bid < band) t.push("price below the Kronos 10% band");
   }
   if (i.fundingMultiplier < 1) t.push("perp funding crowded");
   if (i.thesis === "BROKEN" || i.thesis === "WEAKENED") t.push(`watch dossier: thesis ${i.thesis}`);

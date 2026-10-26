@@ -29,6 +29,8 @@ const json = (b: unknown, status = 200) =>
   Response.json(b, { status, headers: { "access-control-allow-origin": "*", "cache-control": "no-store" } });
 
 const MAX_BODY = 1_000_000;
+/** A row must reach the hub within this long of its own timestamp to count (agents publish every 30 min). */
+export const LATE_MS = 6 * 3_600_000;
 
 export async function handleHub(req: Request, db: HubDb, now: number): Promise<Response> {
   const url = new URL(req.url);
@@ -131,8 +133,8 @@ async function feed(body: unknown, db: HubDb, now: number): Promise<Response> {
     );
   for (const r of b.rows)
     await db.run(
-      `INSERT OR IGNORE INTO rows (agent_id, seq, ts, account, kind, ref_id, payload_json, prev_row_sha256, row_sha256, received_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO rows (agent_id, seq, ts, account, kind, ref_id, payload_json, prev_row_sha256, row_sha256, received_at, late)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       r.seq,
       r.ts,
@@ -143,6 +145,7 @@ async function feed(body: unknown, db: HubDb, now: number): Promise<Response> {
       r.prev_row_sha256,
       r.row_sha256,
       now,
+      r.ts < now - LATE_MS || r.ts > now + 5 * 60_000 ? 1 : 0,
     );
   await db.run(
     "UPDATE agents SET head_seq = ?, head_sha = ?, head_at = ?, name = COALESCE(?, name) WHERE agent_id = ?",
@@ -186,7 +189,7 @@ interface Record_ {
 async function records(db: HubDb, agent?: string): Promise<Record_[]> {
   const rows = await db.all<{ agent_id: string; name: string | null; kind: string; payload_json: string }>(
     `SELECT r.agent_id, a.name, r.kind, r.payload_json FROM rows r JOIN agents a ON a.agent_id = r.agent_id
-     WHERE r.kind IN ('EXIT', 'EXCURSIONS') ${agent ? "AND r.agent_id = ?" : ""}`,
+     WHERE r.kind IN ('EXIT', 'EXCURSIONS') AND r.late = 0 ${agent ? "AND r.agent_id = ?" : ""}`,
     ...(agent ? [agent] : []),
   );
   const by = new Map<string, Record_ & { caps: number[] }>();
@@ -216,7 +219,10 @@ async function leaderboard(db: HubDb): Promise<Response> {
   const all = (await records(db)).filter((r) => r.trades >= 5);
   all.sort((a, b) => b.pnl_usd - a.pnl_usd);
   return json({
-    note: "Every row is signed by its agent and hash-linked to the row before it; published rows can't be edited.",
+    note:
+      "Counts only rows published within 6 h of when they happened, signed by the agent and hash-linked to the row " +
+      "before; published rows can't be edited. This proves a record wasn't rewritten or backfilled — not that the " +
+      "agent's broker fills were real.",
     agents: all.slice(0, 100).map((r) => ({ ...r, win_rate: Math.round((r.wins / r.trades) * 100) / 100 })),
   });
 }

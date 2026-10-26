@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, normalize, resolve } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
 import { AlpacaClient, AlpacaMarketData } from "../src/broker/AlpacaClient.ts";
 import type { BrokerApi, MarketDataApi } from "../src/broker/types.ts";
 import { type ClefApi, WorkersAiClef } from "../src/clef/ClefClient.ts";
@@ -441,7 +441,7 @@ export class LocalCortex {
     const pub = resolve(this.o.root, "public");
     const rel = normalize(decodeURIComponent(path)).replace(/^([/\\])+/, "");
     let file = resolve(pub, rel || "index.html");
-    if (!file.startsWith(pub)) return new Response("Not found", { status: 404 });
+    if (file !== pub && !file.startsWith(pub + sep)) return new Response("Not found", { status: 404 });
     if (!existsSync(file) || statSync(file).isDirectory()) file = join(pub, "index.html");
     if (!existsSync(file)) return new Response("web terminal not built (pnpm web:build)", { status: 503 });
     return new Response(readFileSync(file), {

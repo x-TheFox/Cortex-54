@@ -20,6 +20,8 @@ CREATE TABLE rows (
   prev_row_sha256 TEXT NOT NULL,
   row_sha256 TEXT NOT NULL,
   received_at INTEGER NOT NULL,
+  -- published more than LATE_MS after it happened: kept, but never counted on the leaderboard (no backfilled records)
+  late INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (agent_id, seq)
 );
 CREATE INDEX rows_kind ON rows(agent_id, kind, seq);

@@ -954,7 +954,7 @@ export class Brain {
       `DELETE FROM settings WHERE updated_at < ? AND (
          key LIKE 'count:%' OR key LIKE 'alert:%' OR key LIKE 'court_seen:%' OR key LIKE 'spreads:%'
          OR key LIKE 't1_fail:%' OR key LIKE 'dispatch_stale:%' OR key LIKE 'ratify_request:%' OR key LIKE 'why:%'
-         OR key LIKE 'watch_dispatched:%'
+         OR key LIKE 'watch_dispatched:%' OR key LIKE 'venue:%' OR key LIKE 'review_failed:%'
          OR key GLOB '*:20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' OR key GLOB '*:month:20[0-9][0-9]-[0-9][0-9]')`,
       now - 14 * day,
     );
@@ -1689,6 +1689,22 @@ export class Brain {
         `SELECT * FROM orders WHERE client_order_id = ? AND state IN (${OPEN_SQL})`,
         pos.broker_stop_coid,
       );
+      // Review finding: replacing the broker stop on every small trail step churns orders, and Alpaca refuses the new
+      // sell while the old one is still cancelling. Small steps move only the synthetic stop (checked every pulse);
+      // the broker stop follows in steps of ≥ 0.25 ATR, at breakeven, and when a review tightens.
+      const atrNow = this.contract(pos.contract_id)?.atr ?? 0;
+      const brokerStop = Number(live?.stop_price ?? 0);
+      const bigStep = !live || rounded - brokerStop >= 0.25 * atrNow || why !== "TRAIL";
+      if (!bigStep) {
+        this.journal.append(
+          account,
+          "STOP_MOVE",
+          pos.contract_id,
+          { symbol: pos.symbol, from: old, to: rounded, why, broker: "kept" },
+          now,
+        );
+        return;
+      }
       if (live?.broker_order_id) {
         await broker.cancelOrder(live.broker_order_id).catch(() => undefined);
         this.sql.exec(
@@ -1809,6 +1825,12 @@ export class Brain {
       if (!pick || r < pick.r) pick = { pos, r, q };
     }
     if (!pick) return null;
+    const qty = Number(pick.pos.qty);
+    const freed = {
+      notionalUsd: qty * pick.q.bid,
+      riskUsd: Math.max(0, qty * (Number(pick.pos.avg_entry) - Number(pick.pos.stop_price))),
+    };
+    if (!(await this.wouldEnterAfterFreeing(account, contract, freed, now))) return null;
     this.journal.append(
       account,
       "ROTATE",
@@ -1921,6 +1943,8 @@ export class Brain {
         // a review needs something new; within the cooldown only a headline or a broken thesis counts
         if (wires.length === 0 || key === w.last_tripwires || (!cooled && !urgent)) continue;
         if (this.daily("reviews", now) >= cfg.review.max_per_day) return done;
+        // a review that failed (Clef down) is retried after 15 min with the same tripwires, not forgotten
+        if (now - Number(getKV(this.sql, `review_failed:${pos.symbol}`) ?? 0) < 15 * 60_000) continue;
         const contract = this.contract(pos.contract_id);
         const st = this.exitState(pos, w);
         const req = buildReview({
@@ -1946,17 +1970,11 @@ export class Brain {
         if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) return done;
         this.bumpDaily("reviews", now);
         seen.add(pos.symbol);
-        this.sql.exec(
-          `UPDATE position_watch SET last_review_at = ?, reviews = reviews + 1, last_tripwires = ?,
-             pending_headline = NULL WHERE symbol = ?`,
-          now,
-          key,
-          pos.symbol,
-        );
         let res: ClefResult;
         try {
           res = await clef.run("clef", req.state, req.questions);
         } catch (e) {
+          setKV(this.sql, `review_failed:${pos.symbol}`, String(now), now);
           this.journal.append(
             "SYSTEM",
             "REVIEW_FAILED",
@@ -1966,6 +1984,13 @@ export class Brain {
           );
           continue;
         }
+        this.sql.exec(
+          `UPDATE position_watch SET last_review_at = ?, reviews = reviews + 1, last_tripwires = ?,
+             pending_headline = NULL WHERE symbol = ?`,
+          now,
+          key,
+          pos.symbol,
+        );
         this.budget.add("neurons_tier2", neuronsFor("clef", res.usage.input_tokens ?? est, this.d), now);
         const dec = interpretReview(res, cfg);
         done++;
@@ -2129,6 +2154,13 @@ export class Brain {
         : null;
       if (live) continue;
       if (this.openOrders(account).some((o) => o.symbol === pos.symbol && o.role === "ENTRY")) continue; // wait for entry to finish
+      // a replaced stop is still cancelling: a second full-size sell would be refused (qty held for orders)
+      if (
+        this.openOrders(account).some(
+          (o) => o.symbol === pos.symbol && o.role === "STOP" && o.state === "pending_cancel",
+        )
+      )
+        continue;
       const crypto = pos.arena === "CRYPTO";
       if (!crypto && !(await broker.clock()).is_open) continue; // equity fractional stops: regular hours, TIF day
       const stop = Number(pos.stop_price);
@@ -5173,17 +5205,7 @@ ${postmortem}`,
       return false;
     }
     const view = { ...baseView, availableCashUsd: Math.min(baseView.availableCashUsd, posture.roomUsd) };
-    const asset: AssetView = {
-      tradable: meta.tradable && meta.status === "active",
-      fractionable: meta.fractionable,
-      minQty: meta.min_order_size ? Number(meta.min_order_size) : 0,
-      qtyIncrement: meta.min_trade_increment
-        ? Number(meta.min_trade_increment)
-        : contract.arena === "CRYPTO"
-          ? 1e-9
-          : 1e-9,
-      minNotionalUsd: Math.max(1, this.d.execution.min_order_notional_usd[contract.arena] ?? 1),
-    };
+    const asset = this.assetView(meta, contract.arena);
     const v = validateEntry(
       {
         contract,
@@ -5248,6 +5270,59 @@ ${postmortem}`,
     );
     if (ok) this.sql.exec("UPDATE accounts SET orders_today = orders_today + 1 WHERE account = ?", account);
     return ok;
+  }
+
+  private assetView(meta: AlpacaAsset, arena: Arena): AssetView {
+    return {
+      tradable: meta.tradable && meta.status === "active",
+      fractionable: meta.fractionable,
+      minQty: meta.min_order_size ? Number(meta.min_order_size) : 0,
+      qtyIncrement: meta.min_trade_increment ? Number(meta.min_trade_increment) : 1e-9,
+      minNotionalUsd: Math.max(1, this.d.execution.min_order_notional_usd[arena] ?? 1),
+    };
+  }
+
+  /**
+   * Would this contract pass the whole validator (fee hurdle and sizing included) if `freed` were sold first? Used
+   * before a rotation, so a stagnant position is only released for a newcomer that can actually enter (review finding).
+   */
+  private async wouldEnterAfterFreeing(
+    account: AccountId,
+    contract: DecisionContract,
+    freed: { notionalUsd: number; riskUsd: number },
+    now: number,
+  ): Promise<boolean> {
+    const q = (await this.quotesFor([contract.symbol]).catch(() => ({}) as Record<string, Quote>))[
+      contract.symbol
+    ];
+    const meta = await this.assetMeta(contract.symbol, account).catch(() => null);
+    const view = this.accountView(account, now);
+    if (!q || !meta || !view) return false;
+    const v = validateEntry(
+      {
+        contract,
+        account: {
+          ...view,
+          openSlots: Math.max(0, view.openSlots - 1),
+          availableCashUsd: view.availableCashUsd + freed.notionalUsd,
+          heatUsedUsd: Math.max(0, view.heatUsedUsd - freed.riskUsd),
+        },
+        market: {
+          bid: q.bid,
+          ask: q.ask,
+          quoteAt: q.at,
+          typicalSpreadFrac: this.typicalSpread(contract.symbol),
+        },
+        asset: this.assetView(meta, contract.arena),
+        reputationWeight: this.reputationWeight(this.catalystKey(contract.bull_case_receipts)),
+        regimeMultiplier: this.fundingMultiplier(contract.symbol, now),
+        now,
+      },
+      this.d,
+      this.c,
+    );
+    // the price may still be above the zone: that's what resting waits for
+    return v.ok || v.reasons.every((r) => r === "price ran past the entry zone");
   }
 
   private reject(

@@ -119,6 +119,12 @@ describe("hub API (ADR-068)", () => {
       agents: { agent_id: string; trades: number; pnl_usd: number; win_rate: number }[];
     };
     expect(lb.agents[0]).toMatchObject({ agent_id: k.agentId, trades: 6, pnl_usd: 0.6, win_rate: 0.5 });
+    // a history published long after it happened is stored but never counted (no backfilled track records)
+    const late = await generateAgentKey();
+    const old = chain(6, 0, "0".repeat(64), now - 48 * 3_600_000);
+    expect((await h("/v1/feed", { method: "POST", body: await batch(late, old, now) })).status).toBe(200);
+    const lb2 = (await (await h("/v1/leaderboard")).json()) as { agents: { agent_id: string }[] };
+    expect(lb2.agents.map((a) => a.agent_id)).toEqual([k.agentId]);
     // published rows can't be deleted at the database level either
     expect(() => db.db.exec("DELETE FROM rows")).toThrow(/append-only/);
   });

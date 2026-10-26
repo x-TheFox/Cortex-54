@@ -345,8 +345,10 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - **CPU discipline:** fetch/cron handlers do routing only (<10 ms CPU). Real work happens in the DO.
   Workflow steps are I/O-only. Anything heavy (backtests, Monte Carlo over large sets, screeners) goes to
   GitHub Actions.
-- **Budget discipline:** every call to Workers AI, an LLM provider, D1, or an external API goes through
-  `FreeTierBudget.charge()` first. If it says no, degrade (skip tier, widen cadence, REDUCE_ONLY).
+- **Budget discipline:** every outbound call goes through the per-invocation subrequest guard (`InvocationMeter`, the
+  `guard` passed to every client); Workers AI calls check `FreeTierBudget.canSpendNeurons()` first and record usage
+  with `budget.add()`; daily DO/D1 usage is metered per pulse. If the budget says no, degrade (skip tier, widen
+  cadence, REDUCE_ONLY).
 - **Determinism:** risk/sizing/fee/indicator code is pure (no I/O, no Date.now inside). Tested with fixtures
   and property tests (fast-check, `test/properties.test.ts`). Python↔TS twins (ATR, apply_map, the chain hash) are
   pinned by tests on each side; strategy params are zod-checked at `config:build` (`src/strategy/params.ts`).

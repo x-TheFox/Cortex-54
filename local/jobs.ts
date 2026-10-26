@@ -54,6 +54,8 @@ export function jobFor(
         .map((n) => [n, k[n] as string]),
     ),
     RUN_URL: "",
+    // the Python env lives in the CORTEX home, never inside the (read-only, signed) app bundle
+    UV_PROJECT_ENVIRONMENT: join(ctx.home, "venv"),
   };
   const uv = (extra: string[], groups: string[] = []) => [
     "run",

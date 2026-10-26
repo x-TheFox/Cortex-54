@@ -89,7 +89,8 @@ describe("exit rules (pure, ADR-059)", () => {
     // 4 h candles, 9 h after the forecast → step 2 (band 99)
     const k = { p10: [101, 100, 99, 98], produced_at: T0, candle_hours: 4 };
     expect(tripwires({ ...base, kronos: k, bid: 99.5 })).toEqual([]);
-    expect(tripwires({ ...base, kronos: k, bid: 98.9 })[0]).toMatch(/Kronos 10% band \(99\)/);
+    expect(tripwires({ ...base, kronos: k, bid: 98.9 })[0]).toBe("price below the Kronos 10% band");
+    expect(tripwires({ ...base, kronos: k, bid: 99.5 })).toEqual([]); // step 2's band is 99
     expect(
       tripwires({ ...base, thesis: "BROKEN", fundingMultiplier: 0.5, materialHeadline: "⬇ SEC sues" }),
     ).toEqual(["perp funding crowded", "watch dossier: thesis BROKEN", "headline: ⬇ SEC sues"]);
@@ -286,10 +287,37 @@ describe("exit engine in the pulse (ADR-059)", () => {
     const be = Number(pos()?.stop_price);
     expect(be).toBeGreaterThan(102);
     expect(be).toBeLessThan(103);
+    // the old stop is cancelled first; the replacement goes in once the broker confirms the cancel (next pulse)
+    expect([...t.paper.orders.values()].filter((o) => o.type === "stop_limit").map((o) => o.status)).toEqual([
+      "canceled",
+    ]);
+    t.advance(60_000);
+    await t.brain.pulse();
     const stops = [...t.paper.orders.values()].filter((o) => o.type === "stop_limit");
     expect(stops.map((o) => o.status)).toEqual(["canceled", "new"]);
     expect(Number(stops[1]?.stop_price)).toBeCloseTo(be, 2);
     expect(events(t, "STOP_MOVE")[0]).toMatchObject({ symbol: "SOL/USD", why: "BREAKEVEN" });
+  });
+
+  it("small trail steps move only the synthetic stop; the broker stop follows in ≥ 0.25 ATR steps", async () => {
+    const t = setup({ d: doctrineWith((x) => (x.exits.trail_after_r = 1.0)) });
+    await t.open();
+    t.advance(60_000);
+    t.market.set("SOL/USD", 107.0, 107.02); // +1.25R, under the target → chandelier 107 − 1.2 ATR
+    await t.brain.pulse();
+    t.advance(60_000);
+    await t.brain.pulse(); // replacement stop placed after the cancel is confirmed
+    const brokerStops = () =>
+      [...t.paper.orders.values()].filter((o) => o.type === "stop_limit" && o.status === "new");
+    const before = brokerStops().map((o) => o.stop_price);
+    t.advance(60_000);
+    t.market.set("SOL/USD", 107.2, 107.22); // a tiny new high: trail rises 0.2, under 0.25 ATR (0.5)
+    await t.brain.pulse();
+    expect(brokerStops().map((o) => o.stop_price)).toEqual(before);
+    const synthetic = Number(
+      t.sql.exec<{ stop_price: string }>("SELECT stop_price FROM positions")[0]?.stop_price,
+    );
+    expect(synthetic).toBeGreaterThan(Number(before[0]));
   });
 
   it("at the target with momentum intact it trails instead of selling, then exits on the trail", async () => {

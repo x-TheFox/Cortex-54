@@ -271,6 +271,8 @@ describe("resting convictions (ADR-060)", () => {
     }
     const k = courtContract("ETH/USD", [99, 100.5], 96, 108, 0.66);
     t.brain.recordContract(k, T0);
+    t.market.set("ETH/USD", 100.2, 100.25);
+    await t.brain.pulse(); // reconcile first: the rotation check runs the real validator
     const status = await b.maybeRest("PAPER", k, ["max positions (3) reached"], T0);
     expect(status).toMatch(/releasing stagnant LINK\/USD/); // the lowest R of the stagnant ones
     expect(
@@ -278,6 +280,30 @@ describe("resting convictions (ADR-060)", () => {
         "SELECT symbol, exit_reason FROM positions WHERE state = 'EXITING'",
       ),
     ).toEqual([{ symbol: "LINK/USD", exit_reason: "ROTATE" }]);
+  });
+
+  it("a newcomer that would fail the fee hurdle never rotates anything out (review finding)", async () => {
+    const t = setup();
+    const b = t.brain as unknown as Internals;
+    const id = uuidv7(T0 - 30 * HOUR);
+    t.brain.recordContract({ ...courtContract("LINK/USD", [19.8, 20], 19.2, 21.6), contract_id: id }, T0);
+    t.sql.exec(
+      `INSERT INTO positions (account, symbol, arena, contract_id, qty, avg_entry, stop_price, target_price, fee_rt,
+         opened_at, max_hold_until, state) VALUES ('PAPER', 'LINK/USD', 'CRYPTO', ?, '0.5', '20', '19.2', '21.6', 0.005, ?, ?, 'OPEN')`,
+      id,
+      T0 - 30 * HOUR,
+      T0 + 18 * HOUR,
+    );
+    t.paper.positionsBySymbol.set("LINK/USD", { qty: 0.5, avg: 20 });
+    t.market.set("LINK/USD", 20.02, 20.04);
+    t.market.set("ETH/USD", 100.2, 100.25);
+    await t.brain.pulse();
+    // target only 0.3% above the zone: can't clear the fee hurdle, so nothing is sold for it
+    const k = courtContract("ETH/USD", [99, 100.5], 96, 100.8, 0.7);
+    t.brain.recordContract(k, T0);
+    const status = await b.maybeRest("PAPER", k, ["max positions (3) reached"], T0);
+    expect(status).not.toMatch(/releasing/);
+    expect(t.sql.exec("SELECT state FROM positions WHERE symbol = 'LINK/USD'")).toEqual([{ state: "OPEN" }]);
   });
 
   it("a weaker candidate never rotates anything out", async () => {

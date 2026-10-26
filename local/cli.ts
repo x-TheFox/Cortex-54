@@ -315,7 +315,11 @@ async function main(): Promise<void> {
     }
     case "service": {
       const sub = args[1] ?? "print";
-      const argv = [process.execPath, "--import", "tsx", join(ROOT, "local", "cli.ts"), "start"];
+      // bundled (desktop/headless): node cortexd.mjs start; from source: node --import tsx local/cli.ts start
+      const self = process.argv[1] ?? "";
+      const argv = self.endsWith(".mjs")
+        ? [process.execPath, self, "start"]
+        : [process.execPath, "--import", "tsx", join(ROOT, "local", "cli.ts"), "start"];
       const p = plan(process.platform, argv, { CORTEX_HOME: home });
       if (sub === "install") {
         const steps = install(p);

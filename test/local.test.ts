@@ -69,6 +69,8 @@ describe("local job runner (ADR-064)", () => {
       "--weekly",
     ]);
     expect(jobFor("research.yml", { job: "rm -rf" }, ctx)).toBeNull();
+    // the Python env goes in the CORTEX home, never inside the read-only app bundle (review finding)
+    expect(jobFor("research.yml", { job: "world" }, ctx)?.env.UV_PROJECT_ENVIRONMENT).toBe("/h/venv");
     expect(jobFor("other.yml", {}, ctx)).toBeNull();
   });
 
