@@ -5,7 +5,7 @@ import { InvocationMeter } from "../budget/FreeTierBudget.ts";
 import { WorkersAiClef } from "../clef/ClefClient.ts";
 import { WorkersAiClairic } from "../clef/clairic.ts";
 import { GeminiProvider, type LlmProvider, LlmRouter, OpenAICompatProvider } from "../court/llm.ts";
-import { DiscordNotifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
+import { DiscordNotifier, type Notifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
 import type { Env } from "../env.ts";
 import {
   CALIBRATION,
@@ -16,6 +16,7 @@ import {
   SCAR_TISSUE,
 } from "../generated/config.ts";
 import type { AccountId } from "../lib/ids.ts";
+import { ntfyUrl, PushNotifier } from "../notify/push.ts";
 import { Brain, parseKillFlag, type SloView, type StatusView } from "./Brain.ts";
 import { GitHubDispatcher } from "./dispatch.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "./hot-schema.ts";
@@ -92,15 +93,19 @@ export class AgentCortexDO extends DurableObject<Env> {
       c: CONSTITUTION,
       brokers,
       market: dataKey ? new AlpacaMarketData(dataKey, guard) : null,
-      notifier: env.DISCORD_BOT_TOKEN
-        ? new DiscordNotifier(
-            env.DISCORD_BOT_TOKEN,
-            parseChannels(env.DISCORD_CHANNELS),
-            guard,
-            undefined,
-            discordReport(this.sql),
-          )
-        : new NullNotifier(),
+      notifier: withPush(
+        env.DISCORD_BOT_TOKEN
+          ? new DiscordNotifier(
+              env.DISCORD_BOT_TOKEN,
+              parseChannels(env.DISCORD_CHANNELS),
+              guard,
+              undefined,
+              discordReport(this.sql),
+            )
+          : new NullNotifier(),
+        env,
+        guard,
+      ),
       d1: env.DB,
       readKillFlag: async () => parseKillFlag(await env.FLAGS.get("killed")),
       clef: new WorkersAiClef(env.AI),
@@ -386,6 +391,12 @@ function llmProviders(env: Env): Partial<Record<string, LlmProvider>> {
 }
 
 /** ADR-045: LAB brain wiring — LAB paper keys, LAB journal, LAB doctrine view, no AI and no dispatching. */
+/** ADR-062: phone pushes via ntfy when NTFY_TOPIC is set (PAPER/LIVE brain only; LAB stays in #agent-terminal). */
+function withPush(inner: Notifier, env: Env, guard: () => void): Notifier {
+  const url = ntfyUrl(env.NTFY_TOPIC, env.NTFY_URL);
+  return url ? new PushNotifier(inner, url, guard) : inner;
+}
+
 function labBrain(sql: SqlLike, env: Env, guard: () => void): Brain {
   const paper = DOCTRINE.accounts.PAPER;
   const brokers: Partial<Record<AccountId, BrokerApi>> = {};

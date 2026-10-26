@@ -1,5 +1,5 @@
 import { MAX_BATCH_BYTES } from "./contracts/batch.ts";
-import { hudMessage } from "./cortex/Brain.ts";
+import { hudMessage, type StatusView } from "./cortex/Brain.ts";
 import {
   APPLICATION_COMMAND,
   accountOption,
@@ -18,6 +18,7 @@ import type { Env } from "./env.ts";
 import { verifySignedBody } from "./lib/hmac.ts";
 import { handleWeb, loginLink } from "./web/api.ts";
 import { runCommand } from "./web/commands.ts";
+import { pill, pillAuthorized, swiftbar } from "./web/pill.ts";
 
 export { AgentCortexDO, LabCortexDO } from "./cortex/AgentCortexDO.ts";
 
@@ -283,6 +284,21 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/discord/interactions") {
       return handleInteraction(request, env, ctx);
+    }
+
+    // ADR-062: read-only status for desktop widgets (bearer PILL_TOKEN; never in a URL)
+    if (request.method === "GET" && url.pathname === "/pill") {
+      if (!env.PILL_TOKEN) return new Response("pill not configured", { status: 503 });
+      if (!pillAuthorized(request.headers.get("authorization"), env.PILL_TOKEN))
+        return new Response("unauthorized", { status: 401 });
+      const p = pill((await brain(env).status()) as StatusView);
+      const fmt = url.searchParams.get("format");
+      const headers = { "cache-control": "no-store" };
+      if (fmt === "swiftbar")
+        return new Response(swiftbar(p, `${url.origin}/`), {
+          headers: { ...headers, "content-type": "text/plain; charset=utf-8" },
+        });
+      return Response.json(p, { headers });
     }
 
     if (url.pathname.startsWith("/api/")) return handleWeb(request, env, brain(env));

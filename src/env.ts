@@ -39,6 +39,11 @@ export interface Env {
   GH_DISPATCH_TOKEN?: string;
   /** HMAC key for web-terminal login links and session cookies (ADR-034). */
   WEB_SESSION_SECRET?: string;
+  /** ADR-062: ntfy push alerts (topic = 16–64 url-safe chars; optional self-hosted https base). Absent → off. */
+  NTFY_TOPIC?: string;
+  NTFY_URL?: string;
+  /** ADR-062: read-only bearer token for /pill (desktop widgets). Absent → /pill returns 503. */
+  PILL_TOKEN?: string;
   /** Static web terminal (public/). */
   ASSETS?: Fetcher;
 }
