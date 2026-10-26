@@ -199,6 +199,78 @@ export const DoctrineSchema = z.object({
     }),
   ),
   watchlists: z.record(z.string(), z.array(z.string())),
+  /** ADR-060: entry timing. Lateness meter (Tier 0 veto on chased moves) and resting convictions. */
+  entry_timing: z
+    .object({
+      lateness: z.object({
+        enabled: z.boolean(),
+        late_atr: z.number().positive(),
+        mid_atr: z.number().positive(),
+      }),
+      resting: z.object({
+        enabled: z.boolean(),
+        max_hours: z
+          .number()
+          .positive()
+          .max(24 * 7),
+      }),
+    })
+    .default({
+      lateness: { enabled: false, late_atr: 0.8, mid_atr: 0.4 },
+      resting: { enabled: false, max_hours: 48 },
+    }),
+  /**
+   * ADR-059: exit intelligence. Stops only ever tighten; models choose HOLD/TIGHTEN/EXIT, code computes prices.
+   */
+  exits: z
+    .object({
+      enabled: z.boolean(),
+      breakeven_at_r: z.number().positive(),
+      trail_after_r: z.number().positive(),
+      trail_atr: z.object({ calm: z.number().positive(), stressed: z.number().positive() }),
+      harvest: z.object({
+        enabled: z.boolean(),
+        max_extra_hours: z
+          .number()
+          .nonnegative()
+          .max(24 * 7),
+        max_rsi: z.number().min(50).max(100),
+      }),
+      review: z.object({
+        enabled: z.boolean(),
+        max_per_day: z.number().int().nonnegative(),
+        cooldown_minutes: z.number().int().nonnegative(),
+        held_material_min: z.number().min(0).max(1),
+        exit_prob: z.number().min(0.5).max(1),
+        kill_prob: z.number().min(0.5).max(1),
+      }),
+      watch_research: z.object({ enabled: z.boolean(), every_hours: z.number().positive() }),
+      earnings_derisk: z.boolean(),
+      rotation: z.object({
+        enabled: z.boolean(),
+        min_horizon_fraction: z.number().min(0).max(1),
+        max_abs_r: z.number().positive(),
+        min_candidate_win: z.number().min(0).max(1),
+      }),
+    })
+    .default({
+      enabled: false,
+      breakeven_at_r: 1,
+      trail_after_r: 1.5,
+      trail_atr: { calm: 1.2, stressed: 0.8 },
+      harvest: { enabled: false, max_extra_hours: 0, max_rsi: 80 },
+      review: {
+        enabled: false,
+        max_per_day: 0,
+        cooldown_minutes: 120,
+        held_material_min: 0.5,
+        exit_prob: 0.6,
+        kill_prob: 0.7,
+      },
+      watch_research: { enabled: false, every_hours: 24 },
+      earnings_derisk: false,
+      rotation: { enabled: false, min_horizon_fraction: 0.5, max_abs_r: 0.25, min_candidate_win: 0.6 },
+    }),
   /**
    * ADR-058: dynamic universe. The scout hot-ports any Alpaca asset that passes the code screen when a catalyst about
    * it reaches Tier 2; research-named related symbols are watched. The doctrine watchlists stay the permanent core.

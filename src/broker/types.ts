@@ -165,4 +165,6 @@ export interface MarketDataApi {
   stockQuotes(symbols: string[]): Promise<Record<string, Quote>>;
   cryptoDailyBars(symbols: string[], days: number, now: number): Promise<Record<string, Bar[]>>;
   stockDailyBars(symbols: string[], days: number, now: number): Promise<Record<string, Bar[]>>;
+  /** ADR-060: hourly bars since `sinceMs` for one symbol (lateness meter). Optional: absent → meter says UNKNOWN. */
+  hourlyBars?(symbol: string, sinceMs: number): Promise<Bar[]>;
 }

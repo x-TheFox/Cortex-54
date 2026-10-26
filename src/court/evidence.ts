@@ -2,6 +2,7 @@ import type { CatalystFacts } from "../clef/clairic.ts";
 import type { Dossier } from "../contracts/batch.ts";
 import type { Receipt } from "../contracts/decision-contract.ts";
 import type { Doctrine } from "../contracts/doctrine.ts";
+import { type Lateness, usSession } from "../portfolio/lateness.ts";
 import { reputationKey } from "../risk/scar.ts";
 import { atr, type Bar, ema, rsi } from "../strategy/indicators.ts";
 
@@ -25,6 +26,10 @@ export interface Evidence {
   symbol: string;
   arena: Arena;
   asOf: number;
+  /** ADR-060 temporal fact sheet: models' training data is months old; this is the real "now". */
+  today: { utc: string; weekday: string; us_equity_session: string; note: string };
+  /** ADR-060 lateness meter: how much of the catalyst's move already happened (code-computed), or null. */
+  timing: Lateness | null;
   quote: { bid: number; ask: number; spread_bps: number };
   technicals: {
     close: number;
@@ -191,6 +196,7 @@ export function buildEvidence(i: {
   research?: ResearchView | null;
   /** epoch ms of the quote (Alpaca's own timestamp) */
   quoteAt?: number;
+  timing?: Lateness | null;
 }): Evidence | null {
   const closes = i.bars.map((b) => b.c);
   const a = atr(i.bars, 14);
@@ -301,6 +307,17 @@ export function buildEvidence(i: {
       metric_value: `${f.published ?? "undated"} ${f.source}: ${f.claim}`.slice(0, 200),
       as_of: i.now - (i.research?.age_minutes ?? 0) * 60_000,
     })),
+    ...(i.timing && i.timing.move_since_atr !== null
+      ? [
+          {
+            evidence_id: "lateness",
+            source_skill: "lateness-meter",
+            metric: "move_since_catalyst_atr",
+            metric_value: i.timing.move_since_atr,
+            as_of: i.now,
+          },
+        ]
+      : []),
     ...(i.regimeException
       ? [
           {
@@ -313,10 +330,18 @@ export function buildEvidence(i: {
         ]
       : []),
   ];
+  const d = new Date(i.now);
   return {
     symbol: i.symbol,
     arena: i.arena,
     asOf: i.now,
+    today: {
+      utc: d.toISOString().slice(0, 16).replace("T", " "),
+      weekday: d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" }),
+      us_equity_session: usSession(i.now),
+      note: "Your training data ends months before this date. Facts not in this evidence may be stale.",
+    },
+    timing: i.timing ?? null,
     quote: { bid: i.bid, ask: i.ask, spread_bps: round(((i.ask - i.bid) / mid) * 10_000, 2) },
     technicals: t,
     regime: i.regime,

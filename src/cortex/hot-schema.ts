@@ -89,4 +89,13 @@ export const HOT_SCHEMA: readonly string[] = [
      source TEXT NOT NULL, reason TEXT NOT NULL, metrics_json TEXT NOT NULL, added_at INTEGER NOT NULL,
      expires_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS headline_ring (id TEXT PRIMARY KEY, tokens TEXT NOT NULL, at INTEGER NOT NULL)`,
+  // v8: exit intelligence (ADR-059): excursions, ratchet/trail state and re-underwriting per open position
+  `CREATE TABLE IF NOT EXISTS position_watch (account TEXT NOT NULL, symbol TEXT NOT NULL, contract_id TEXT NOT NULL,
+     initial_stop REAL NOT NULL, mfe REAL NOT NULL, mae REAL NOT NULL, trailing INTEGER NOT NULL DEFAULT 0,
+     regime_open_at_entry INTEGER, extended_until INTEGER, last_review_at INTEGER, reviews INTEGER NOT NULL DEFAULT 0,
+     last_tripwires TEXT, pending_headline TEXT, PRIMARY KEY (account, symbol))`,
+  // v8: resting convictions (ADR-060): approved court contracts waiting for their entry zone or a free slot
+  `CREATE TABLE IF NOT EXISTS resting (contract_id TEXT NOT NULL, account TEXT NOT NULL, symbol TEXT NOT NULL,
+     until_at INTEGER NOT NULL, created_at INTEGER NOT NULL, checks INTEGER NOT NULL DEFAULT 0, why TEXT NOT NULL,
+     PRIMARY KEY (contract_id, account))`,
 ];

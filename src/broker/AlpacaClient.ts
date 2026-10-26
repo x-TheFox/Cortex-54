@@ -266,6 +266,15 @@ export class AlpacaMarketData implements MarketDataApi {
     );
   }
 
+  async hourlyBars(symbol: string, sinceMs: number): Promise<Bar[]> {
+    const start = encodeURIComponent(new Date(sinceMs).toISOString());
+    const sym = encodeURIComponent(symbol);
+    const url = symbol.includes("/")
+      ? `${DATA_BASE}/v1beta3/crypto/us/bars?timeframe=1Hour&limit=200&sort=asc&start=${start}&symbols=${sym}`
+      : `${DATA_BASE}/v2/stocks/bars?timeframe=1Hour&feed=iex&adjustment=split&limit=200&sort=asc&start=${start}&symbols=${sym}`;
+    return (await this.pagedBars(url))[symbol] ?? [];
+  }
+
   /**
    * Multi-symbol bars come back 1,000 rows per page across all symbols; without paging, later symbols are silently
    * cut short (the Kronos job lost six pairs this way, 2026-10-24). Each page is one subrequest; at most 6 pages.

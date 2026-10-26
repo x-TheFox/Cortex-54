@@ -92,6 +92,20 @@ import {
 import { dec, defaultTick, roundPrice, toCents } from "../lib/num.ts";
 import { sha256Hex } from "../lib/sha256.ts";
 import { weekdayMsBetween } from "../lib/time.ts";
+import {
+  buildReview,
+  type ExitState,
+  excursions,
+  holdOrHarvest,
+  interpretReview,
+  REVIEW_PROMPT_VERSION,
+  ratchetStop,
+  rMultiple,
+  stagnant,
+  tightenedStop,
+  tripwires,
+} from "../portfolio/exits.ts";
+import { lateness } from "../portfolio/lateness.ts";
 import { type Band, evaluateBreaker, withHysteresis } from "../risk/CircuitBreakerLadder.ts";
 import { correlation, correlationVeto } from "../risk/correlation.ts";
 import { type Arena, modeledPaperCostCents, roundTripFeeRate } from "../risk/fees.ts";
@@ -123,7 +137,7 @@ import {
   baselineSignal,
   regimeProxyRiskOn,
 } from "../strategy/CryptoBreakoutBaseline.ts";
-import { atr, type Bar } from "../strategy/indicators.ts";
+import { atr, type Bar, ema, rsi } from "../strategy/indicators.ts";
 import {
   KRONOS_ID,
   type KronosForecast,
@@ -191,6 +205,22 @@ type PositionRow = {
   broker_stop_coid: string | null;
   state: "OPEN" | "EXITING";
   exit_reason: string | null;
+};
+
+type WatchRow = {
+  account: AccountId;
+  symbol: string;
+  contract_id: string;
+  initial_stop: number;
+  mfe: number;
+  mae: number;
+  trailing: number;
+  regime_open_at_entry: number | null;
+  extended_until: number | null;
+  last_review_at: number | null;
+  reviews: number;
+  last_tripwires: string | null;
+  pending_headline: string | null;
 };
 
 type OrderRow = {
@@ -534,6 +564,16 @@ export class Brain {
       }
     }
 
+    // 2d'. ADR-059: re-underwrite open positions that hit a tripwire; daily surveillance dossiers. Never blocks trading.
+    try {
+      await this.reviewPositions(started);
+      await this.dispatchWatches(started);
+    } catch (e) {
+      if (!(e instanceof SubrequestBudgetExceeded)) {
+        await this.alertOnce("reviews", `⚠️ position review failed: ${errText(e).slice(0, 200)}`);
+      }
+    }
+
     // 2e. Court (Tier 3): one sprint per pulse, only when new entries are possible at all.
     if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
       try {
@@ -549,6 +589,7 @@ export class Brain {
     if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
       try {
         for (const run of [
+          () => this.runResting(),
           () => this.runBaseline(quotes),
           () => this.runBounce(quotes),
           () => this.runInverse(),
@@ -1293,6 +1334,37 @@ export class Brain {
     now: number,
     pnlCents: number | null = null,
   ): void {
+    // ADR-059: what the position could have made and how deep it went, in R (the Governor grades exits from these)
+    const w = one<WatchRow>(
+      this.sql,
+      "SELECT * FROM position_watch WHERE account = ? AND symbol = ? AND contract_id = ?",
+      account,
+      pos.symbol,
+      pos.contract_id,
+    );
+    if (w) {
+      const s = { entry: Number(pos.avg_entry), initialStop: w.initial_stop };
+      this.journal.append(
+        account,
+        "EXCURSIONS",
+        pos.contract_id,
+        {
+          symbol: pos.symbol,
+          mfe: w.mfe,
+          mae: w.mae,
+          mfe_r: Math.round(rMultiple(s, w.mfe) * 100) / 100,
+          mae_r: Math.round(rMultiple(s, w.mae) * 100) / 100,
+          initial_stop: w.initial_stop,
+          final_stop: Number(pos.stop_price),
+          trailed: w.trailing === 1,
+          reviews: w.reviews,
+          held_hours: Math.round(((now - pos.opened_at) / 3_600_000) * 10) / 10,
+          reason,
+        },
+        now,
+      );
+    }
+    this.sql.exec("DELETE FROM position_watch WHERE account = ? AND symbol = ?", account, pos.symbol);
     this.sql.exec("DELETE FROM positions WHERE account = ? AND symbol = ?", account, pos.symbol);
     this.sql.exec(
       "INSERT INTO exits (account, symbol, contract_id, reason, pnl_cents, at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1332,16 +1404,504 @@ export class Brain {
     let exits = 0;
     for (const pos of this.positions(account)) {
       const q = quotes[pos.symbol];
+      const w = this.watchRow(account, pos, now);
+      const fresh = q && now - q.at <= this.d.staleness.quote_seconds * 1000;
       let reason: string | null = pos.state === "EXITING" ? (pos.exit_reason ?? "EXIT") : null;
-      if (!reason && q && now - q.at <= this.d.staleness.quote_seconds * 1000) {
-        if (q.bid <= Number(pos.stop_price)) reason = "STOP_SYNTHETIC";
-        else if (q.bid >= Number(pos.target_price)) reason = "TARGET";
+      if (fresh && w) {
+        const ex = excursions(w, q.bid);
+        if (ex.mfe !== w.mfe || ex.mae !== w.mae) {
+          this.sql.exec(
+            "UPDATE position_watch SET mfe = ?, mae = ? WHERE account = ? AND symbol = ?",
+            ex.mfe,
+            ex.mae,
+            account,
+            pos.symbol,
+          );
+          w.mfe = ex.mfe;
+          w.mae = ex.mae;
+        }
       }
-      if (!reason && now >= pos.max_hold_until) reason = "TIME_STOP";
+      if (!reason && fresh) {
+        if (q.bid <= Number(pos.stop_price)) reason = "STOP_SYNTHETIC";
+        else if (q.bid >= Number(pos.target_price) && !(w?.trailing === 1)) {
+          // ADR-059 hold-or-harvest: momentum intact → the target becomes a trailing stop instead of a sale
+          const h = w
+            ? await this.harvestCheck(pos, now)
+            : { action: "HARVEST" as const, why: "no exit state" };
+          if (h.action === "TRAIL" && w) {
+            const extra = this.d.exits.harvest.max_extra_hours * 3_600_000;
+            this.sql.exec(
+              "UPDATE position_watch SET trailing = 1, extended_until = ? WHERE account = ? AND symbol = ?",
+              pos.max_hold_until + extra,
+              account,
+              pos.symbol,
+            );
+            w.trailing = 1;
+            w.extended_until = pos.max_hold_until + extra;
+            this.journal.append(
+              account,
+              "HARVEST_TRAIL",
+              pos.contract_id,
+              { symbol: pos.symbol, bid: q.bid, target: pos.target_price, why: h.why },
+              now,
+            );
+          } else reason = "TARGET";
+        }
+      }
+      if (!reason && pos.state === "OPEN" && this.d.exits.earnings_derisk && pos.arena === "EQUITIES") {
+        const horizon = utcDay(now + this.d.execution.earnings_blackout_hours * 3_600_000);
+        const e = one<{ date: string }>(
+          this.sql,
+          "SELECT date FROM earnings WHERE symbol = ? AND date >= ? AND date <= ?",
+          pos.symbol,
+          utcDay(now),
+          horizon,
+        );
+        if (e) reason = "EARNINGS_DERISK";
+      }
+      const holdUntil = w?.trailing === 1 && w.extended_until ? w.extended_until : pos.max_hold_until;
+      if (!reason && now >= holdUntil) reason = "TIME_STOP";
+      if (!reason && fresh && w && pos.state === "OPEN") {
+        const st = this.exitState(pos, w);
+        const move = ratchetStop(st, q.bid, this.d.exits, !this.regimeGate(pos.arena, null, now).open);
+        if (move) await this.moveStop(account, broker, pos, move.stop, move.why, now);
+        continue;
+      }
       if (!reason) continue;
       if (await this.exitPosition(account, broker, pos, reason, q ?? null)) exits++;
     }
     return exits;
+  }
+
+  /** ADR-059 exit state for a position (initial stop from the watch row, ATR from its contract). */
+  private exitState(pos: PositionRow, w: WatchRow): ExitState {
+    const k = this.contract(pos.contract_id);
+    const entry = Number(pos.avg_entry);
+    return {
+      entry,
+      initialStop: w.initial_stop,
+      stop: Number(pos.stop_price),
+      target: Number(pos.target_price),
+      atr: k?.atr ?? Math.max(entry - w.initial_stop, entry * 0.01),
+      feeRt: pos.fee_rt,
+      openedAt: pos.opened_at,
+      maxHoldUntil: pos.max_hold_until,
+      mfe: w.mfe,
+      mae: w.mae,
+      trailing: w.trailing === 1,
+    };
+  }
+
+  /** The watch row for an open position, created on first sight (initial stop = the contract's stop). */
+  private watchRow(account: AccountId, pos: PositionRow, now: number): WatchRow | null {
+    if (!this.d.exits.enabled) return null;
+    const w = one<WatchRow>(
+      this.sql,
+      "SELECT * FROM position_watch WHERE account = ? AND symbol = ?",
+      account,
+      pos.symbol,
+    );
+    if (w && w.contract_id === pos.contract_id) return w;
+    const k = this.contract(pos.contract_id);
+    const initial = Number(k?.invalidation_criteria.stop_price ?? pos.stop_price);
+    const entry = Number(pos.avg_entry);
+    const open =
+      pos.arena === "CRYPTO" || pos.arena === "EQUITIES" ? this.regimeGate(pos.arena, null, now).open : null;
+    this.sql.exec(
+      `INSERT OR REPLACE INTO position_watch (account, symbol, contract_id, initial_stop, mfe, mae, trailing,
+         regime_open_at_entry, reviews) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0)`,
+      account,
+      pos.symbol,
+      pos.contract_id,
+      initial < entry ? initial : Number(pos.stop_price),
+      entry,
+      entry,
+      open === null ? null : open ? 1 : 0,
+    );
+    return one<WatchRow>(
+      this.sql,
+      "SELECT * FROM position_watch WHERE account = ? AND symbol = ?",
+      account,
+      pos.symbol,
+    );
+  }
+
+  /**
+   * Move the stop up (never down): synthetic stop now, broker stop replaced on the next ensureProtectiveStops
+   * (the old one is cancelled first; in between the synthetic stop protects every pulse, as before ADR-059).
+   */
+  private async moveStop(
+    account: AccountId,
+    broker: BrokerApi,
+    pos: PositionRow,
+    stop: number,
+    why: string,
+    now: number,
+  ): Promise<void> {
+    const old = Number(pos.stop_price);
+    const tick = defaultTick(stop, pos.arena);
+    const rounded = Number(roundPrice(stop, tick, "down"));
+    if (!(rounded > old)) return;
+    this.sql.exec(
+      "UPDATE positions SET stop_price = ? WHERE account = ? AND symbol = ?",
+      String(rounded),
+      account,
+      pos.symbol,
+    );
+    if (pos.broker_stop_coid) {
+      const live = one<OrderRow>(
+        this.sql,
+        `SELECT * FROM orders WHERE client_order_id = ? AND state IN (${OPEN_SQL})`,
+        pos.broker_stop_coid,
+      );
+      if (live?.broker_order_id) {
+        await broker.cancelOrder(live.broker_order_id).catch(() => undefined);
+        this.sql.exec(
+          "UPDATE orders SET state = 'pending_cancel', updated_at = ? WHERE client_order_id = ?",
+          now,
+          live.client_order_id,
+        );
+      }
+      this.sql.exec(
+        "UPDATE positions SET broker_stop_coid = NULL WHERE account = ? AND symbol = ?",
+        account,
+        pos.symbol,
+      );
+    }
+    this.journal.append(
+      account,
+      "STOP_MOVE",
+      pos.contract_id,
+      { symbol: pos.symbol, from: old, to: rounded, why },
+      now,
+    );
+  }
+
+  /** Momentum checks for hold-or-harvest: regime, close vs EMA20 and RSI14 on daily bars, Kronos lean. */
+  private async harvestCheck(
+    pos: PositionRow,
+    now: number,
+  ): Promise<{ action: "HARVEST" | "TRAIL"; why: string }> {
+    const cfg = this.d.exits;
+    if (!cfg.enabled || !cfg.harvest.enabled) return { action: "HARVEST", why: "harvest mode off" };
+    const m = this.deps.market;
+    const bars = m
+      ? await (pos.arena === "CRYPTO"
+          ? m.cryptoDailyBars([pos.symbol], 40, now)
+          : m.stockDailyBars([pos.symbol], 40, now)
+        )
+          .then((b) => b[pos.symbol])
+          .catch(() => undefined)
+      : undefined;
+    const closes = bars?.map((b) => b.c) ?? [];
+    const e20 = closes.length >= 20 ? ema(closes, 20) : null;
+    const last = closes.at(-1);
+    const k = this.kronosFor(pos.symbol, now);
+    return holdOrHarvest(cfg, {
+      regimeOpen: this.regimeGate(pos.arena, null, now).open,
+      aboveEma20: e20 !== null && last !== undefined ? last > e20 : null,
+      rsi14: closes.length >= 15 ? rsi(closes, 14) : null,
+      kronosPUp: k ? k.p_up : null,
+    });
+  }
+
+  /**
+   * ADR-060 resting convictions: when the only things stopping a court contract are timing (price ran past the zone)
+   * or a full book (max positions), it waits instead of being thrown away, up to `max_hours` and half its horizon.
+   * Every gate runs again when it fires. With a full book, a stagnant position may be released for it (rotation).
+   * Returns a short status, or null when the contract can't rest.
+   */
+  private async maybeRest(
+    account: AccountId,
+    contract: DecisionContract,
+    reasons: string[],
+    now: number,
+  ): Promise<string | null> {
+    const cfg = this.d.entry_timing.resting;
+    if (!cfg.enabled || contract.origin !== "COURT") return null;
+    const restable = (r: string) =>
+      r === "price ran past the entry zone" || /^max positions \(\d+\) reached$/.test(r);
+    if (!reasons.every(restable)) return null;
+    const until = Math.min(
+      now + cfg.max_hours * 3_600_000,
+      now + (contract.invalidation_criteria.max_hold_hours * 3_600_000) / 2,
+    );
+    this.sql.exec(
+      `INSERT OR REPLACE INTO resting (contract_id, account, symbol, until_at, created_at, checks, why)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
+      contract.contract_id,
+      account,
+      contract.symbol,
+      until,
+      now,
+      reasons.join("; ").slice(0, 200),
+    );
+    let rotated: string | null = null;
+    if (reasons.some((r) => r.startsWith("max positions")))
+      rotated = await this.rotateFor(account, contract, now);
+    this.journal.append(
+      account,
+      "RESTING",
+      contract.contract_id,
+      { symbol: contract.symbol, until, why: reasons, rotated },
+      now,
+    );
+    return `${reasons[0]}; waits until ${new Date(until).toISOString().slice(5, 16)}Z${rotated ? `, releasing stagnant ${rotated}` : ""}`;
+  }
+
+  /** Rotation (MLP4-004): release the most stagnant position for a stronger waiting court contract. */
+  private async rotateFor(
+    account: AccountId,
+    contract: DecisionContract,
+    now: number,
+  ): Promise<string | null> {
+    const cfg = this.d.exits;
+    const broker = this.deps.brokers[account];
+    if (!cfg.enabled || !cfg.rotation.enabled || !broker) return null;
+    if (contract.win_prob_used < cfg.rotation.min_candidate_win) return null;
+    const positions = this.positions(account).filter((p) => p.state === "OPEN");
+    const quotes = await this.quotesFor(positions.map((p) => p.symbol)).catch(
+      () => ({}) as Record<string, Quote>,
+    );
+    let pick: { pos: PositionRow; r: number; q: Quote } | null = null;
+    for (const pos of positions) {
+      const q = quotes[pos.symbol];
+      const w = this.watchRow(account, pos, now);
+      if (!q || !w) continue;
+      const s = this.exitState(pos, w);
+      if (!stagnant(s, q.bid, now, cfg)) continue;
+      const r = rMultiple(s, q.bid);
+      if (!pick || r < pick.r) pick = { pos, r, q };
+    }
+    if (!pick) return null;
+    this.journal.append(
+      account,
+      "ROTATE",
+      pick.pos.contract_id,
+      {
+        out: pick.pos.symbol,
+        r: Math.round(pick.r * 100) / 100,
+        in: contract.symbol,
+        in_win: contract.win_prob_used,
+      },
+      now,
+    );
+    await this.exitPosition(account, broker, pick.pos, "ROTATE", pick.q);
+    return pick.pos.symbol;
+  }
+
+  /** Each pulse: resting contracts whose zone came back (and a slot is free) go through every gate again. */
+  private async runResting(): Promise<{ contracts: number; entries: number }> {
+    const now = this.deps.now();
+    if (!this.d.entry_timing.resting.enabled) return { contracts: 0, entries: 0 };
+    this.sql.exec("DELETE FROM resting WHERE until_at < ?", now);
+    const rows = this.sql.exec<{ contract_id: string; account: AccountId; symbol: string }>(
+      "SELECT contract_id, account, symbol FROM resting ORDER BY created_at LIMIT 6",
+    );
+    let entries = 0;
+    for (const row of rows) {
+      const k = this.contract(row.contract_id);
+      const view = this.accountView(row.account, now);
+      if (!k || !view) {
+        this.sql.exec(
+          "DELETE FROM resting WHERE contract_id = ? AND account = ?",
+          row.contract_id,
+          row.account,
+        );
+        continue;
+      }
+      if (view.heldOrPendingSymbols.includes(row.symbol)) continue;
+      const rung = this.d.rungs[view.rung];
+      if (view.openSlots >= rung.max_positions) continue; // still full: keep waiting quietly
+      const q = (await this.quotesFor([row.symbol]).catch(() => ({}) as Record<string, Quote>))[row.symbol];
+      if (!q) continue;
+      const low = Number(k.entry_plan.zone_low);
+      const high = Number(k.entry_plan.zone_high);
+      this.sql.exec(
+        "UPDATE resting SET checks = checks + 1 WHERE contract_id = ? AND account = ?",
+        row.contract_id,
+        row.account,
+      );
+      if (q.bid > high || q.bid < low) continue; // not in the zone yet: no rejection spam
+      this.lastRejections.delete(k.contract_id);
+      const ok = await this.route(row.account, k, { [row.symbol]: q });
+      const why = this.lastRejections.get(k.contract_id) ?? [];
+      if (ok || !why.every((r) => r === "price ran past the entry zone" || r.startsWith("max positions"))) {
+        this.sql.exec(
+          "DELETE FROM resting WHERE contract_id = ? AND account = ?",
+          row.contract_id,
+          row.account,
+        );
+        this.journal.append(
+          row.account,
+          ok ? "RESTING_FILLED" : "RESTING_DROPPED",
+          k.contract_id,
+          { symbol: row.symbol, why: ok ? "zone came back" : why.slice(0, 3) },
+          now,
+        );
+      }
+      if (ok) entries++;
+    }
+    return { contracts: 0, entries };
+  }
+
+  /**
+   * ADR-059 re-underwriting: positions with a new tripwire (regime flip, Kronos p10 breach, funding stress, a watch
+   * dossier saying the thesis broke, or a material headline) get one Clef review: HOLD / TIGHTEN / EXIT. Models pick
+   * the class only; code moves the stop or starts the exit. Never blocks trading; budgeted from the Tier 2 pool.
+   */
+  private async reviewPositions(now: number): Promise<number> {
+    const cfg = this.d.exits;
+    const clef = this.deps.clef;
+    if (!cfg.enabled || !cfg.review.enabled || !clef) return 0;
+    let done = 0;
+    const seen = new Set<string>();
+    for (const account of ACCOUNTS) {
+      const broker = this.deps.brokers[account];
+      if (!broker) continue;
+      for (const pos of this.positions(account)) {
+        if (pos.state !== "OPEN" || seen.has(pos.symbol)) continue;
+        const w = this.watchRow(account, pos, now);
+        if (!w) continue;
+        const q = (await this.quotesFor([pos.symbol]).catch(() => ({}) as Record<string, Quote>))[pos.symbol];
+        if (!q || now - q.at > this.d.staleness.quote_seconds * 1000) continue;
+        const dz = this.dossierFor(pos.symbol, now);
+        const k = this.kronosFor(pos.symbol, now);
+        const wires = tripwires({
+          arena: pos.arena,
+          regimeOpenNow: pos.arena === "OPTIONS" ? null : this.regimeGate(pos.arena, null, now).open,
+          regimeOpenAtEntry: w.regime_open_at_entry === null ? null : w.regime_open_at_entry === 1,
+          kronos: k?.fan
+            ? { p10: k.fan.p10, produced_at: k.produced_at, candle_hours: k.candle_hours ?? 4 }
+            : null,
+          fundingMultiplier: this.fundingMultiplier(pos.symbol, now),
+          thesis: dz?.stage === "watch" && dz.as_of > pos.opened_at ? (dz.thesis?.status ?? null) : null,
+          materialHeadline: w.pending_headline,
+          bid: q.bid,
+          now,
+        });
+        const key = JSON.stringify(wires);
+        const cooled = !w.last_review_at || now - w.last_review_at >= cfg.review.cooldown_minutes * 60_000;
+        const urgent = wires.some((x) => x.startsWith("headline:") || x.endsWith("thesis BROKEN"));
+        // a review needs something new; within the cooldown only a headline or a broken thesis counts
+        if (wires.length === 0 || key === w.last_tripwires || (!cooled && !urgent)) continue;
+        if (this.daily("reviews", now) >= cfg.review.max_per_day) return done;
+        const contract = this.contract(pos.contract_id);
+        const st = this.exitState(pos, w);
+        const req = buildReview({
+          symbol: pos.symbol,
+          arena: pos.arena,
+          thesis: contract?.thesis_summary ?? "(rule strategy)",
+          killCriteria: contract?.kill_criteria ?? [],
+          entry: st.entry,
+          stop: st.stop,
+          target: st.target,
+          bid: q.bid,
+          r: rMultiple(st, q.bid),
+          heldHours: (now - pos.opened_at) / 3_600_000,
+          horizonHours: Math.round((pos.max_hold_until - pos.opened_at) / 3_600_000),
+          tripwires: wires,
+          regime: this.regimeContext(now),
+          research: dz ? { summary: dz.summary, thesis: dz.thesis ?? null } : null,
+          kronos: k
+            ? { p_up: k.p_up, exp_ret: k.exp_ret, age_minutes: Math.round((now - k.produced_at) / 60_000) }
+            : null,
+        });
+        const est = estimateTokens(req.state, req.questions);
+        if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) return done;
+        this.bumpDaily("reviews", now);
+        seen.add(pos.symbol);
+        this.sql.exec(
+          `UPDATE position_watch SET last_review_at = ?, reviews = reviews + 1, last_tripwires = ?,
+             pending_headline = NULL WHERE symbol = ?`,
+          now,
+          key,
+          pos.symbol,
+        );
+        let res: ClefResult;
+        try {
+          res = await clef.run("clef", req.state, req.questions);
+        } catch (e) {
+          this.journal.append(
+            "SYSTEM",
+            "REVIEW_FAILED",
+            pos.contract_id,
+            { symbol: pos.symbol, error: errText(e).slice(0, 160) },
+            now,
+          );
+          continue;
+        }
+        this.budget.add("neurons_tier2", neuronsFor("clef", res.usage.input_tokens ?? est, this.d), now);
+        const dec = interpretReview(res, cfg);
+        done++;
+        this.journal.append(
+          "SYSTEM",
+          "REVIEW",
+          pos.contract_id,
+          { symbol: pos.symbol, prompt: REVIEW_PROMPT_VERSION, tripwires: wires, ...dec },
+          now,
+        );
+        for (const a of ACCOUNTS) {
+          const b = this.deps.brokers[a];
+          const p = this.positions(a).find((x) => x.symbol === pos.symbol && x.state === "OPEN");
+          if (!b || !p) continue;
+          if (dec.action === "EXIT") await this.exitPosition(a, b, p, "REVIEW_EXIT", q);
+          if (dec.action === "TIGHTEN") {
+            const wa = this.watchRow(a, p, now);
+            const ns = wa ? tightenedStop(this.exitState(p, wa), q.bid) : null;
+            if (ns !== null) await this.moveStop(a, b, p, ns, "REVIEW_TIGHTEN", now);
+          }
+        }
+        await this.deps.notifier.post("court", reviewCard(pos.symbol, wires, dec, rMultiple(st, q.bid)));
+      }
+    }
+    return done;
+  }
+
+  /**
+   * ADR-059 / MLP3-003: a daily surveillance dossier per held position. The research desk checks the bear's kill
+   * criteria against fresh news; a WEAKENED/BROKEN thesis becomes a review tripwire.
+   */
+  private async dispatchWatches(now: number): Promise<void> {
+    const cfg = this.d.exits;
+    const dispatcher = this.deps.dispatcher;
+    if (!cfg.enabled || !cfg.watch_research.enabled || !dispatcher || !this.d.funnel.research.enabled) return;
+    const seen = new Set<string>();
+    for (const account of ACCOUNTS) {
+      for (const pos of this.positions(account)) {
+        if (pos.state !== "OPEN" || seen.has(pos.symbol) || pos.arena === "OPTIONS") continue;
+        seen.add(pos.symbol);
+        if (now - pos.opened_at < 2 * 3_600_000) continue; // the case dossier is still fresh
+        const key = `watch_dispatched:${pos.symbol}`;
+        if (now - Number(getKV(this.sql, key) ?? 0) < cfg.watch_research.every_hours * 3_600_000) continue;
+        if (this.daily("research", now) >= this.d.funnel.research.max_per_day) return;
+        const k = this.contract(pos.contract_id);
+        try {
+          await dispatcher.dispatch("research.yml", {
+            job: "dossier",
+            symbol: pos.symbol,
+            context:
+              `Held since ${new Date(pos.opened_at).toISOString().slice(0, 16)}Z. Thesis: ${k?.thesis_summary ?? "rule strategy entry"}`
+                .replace(/\s+/g, " ")
+                .slice(0, 280),
+            arena: pos.arena,
+            mode: "watch",
+            depth: "quick",
+            catalyst: "",
+            kill: (k?.kill_criteria ?? []).join(" | ").slice(0, 280),
+          });
+        } catch (e) {
+          await this.alertOnce(
+            "watch-dispatch",
+            `⚠️ watch research dispatch failed: ${errText(e).slice(0, 160)}`,
+          );
+          return;
+        }
+        this.bumpDaily("research", now);
+        setKV(this.sql, key, String(now), now);
+        this.journal.append("SYSTEM", "WATCH_REQUEST", pos.contract_id, { symbol: pos.symbol }, now);
+      }
+    }
   }
 
   /** Cancel the protective stop, then sell with a marketable limit inside a price collar. Retried each pulse. */
@@ -2725,6 +3285,28 @@ ${postmortem}`,
     if (q.at && now - q.at > this.d.staleness.quote_seconds * 1000)
       return { ok: false, reason: "quote is stale", symbol, arena };
     const created = typeof p.createdAt === "number" ? p.createdAt : row.enqueued_at;
+    // ADR-060 lateness meter: how much of the move is already done since the headline (hourly bars, code math)
+    const lt = this.d.entry_timing.lateness;
+    const a14d = atr(b, 14);
+    const timing =
+      lt.enabled && p.kind !== "operator" && m.hourlyBars && a14d
+        ? lateness(
+            await m.hourlyBars(symbol, created - 26 * 3_600_000).catch(() => []),
+            created,
+            q.bid,
+            a14d,
+            now,
+            lt,
+          )
+        : null;
+    if (timing?.verdict === "LATE")
+      return {
+        ok: false,
+        reason: `late: price already moved ${timing.move_since_atr} ATR since the headline (lateness meter)`,
+        symbol,
+        arena,
+        hypothetical: { bid: q.bid, atr: a14d, gate: true, timing },
+      };
     const facts = await this.catalystFacts(
       row.candidate_id,
       `${String(p.headline ?? "")}\n${String(p.summary ?? "")}`.trim(),
@@ -2769,6 +3351,7 @@ ${postmortem}`,
             }
           : null)(this.kronosFor(symbol, now)),
       research: ((dz) => (dz ? researchView(dz, now) : null))(this.dossierFor(symbol, now)),
+      timing,
     });
     return evidence ? { ok: true, evidence } : { ok: false, reason: "not enough bar history", symbol, arena };
   }
@@ -3410,12 +3993,15 @@ ${postmortem}`,
       const ok = await this.route(account, contract, quotes);
       traded ||= ok;
       const why = this.lastRejections.get(contract.contract_id);
+      const rested = !ok && why ? await this.maybeRest(account, contract, why, now) : null;
       outcomes.push(
         ok
           ? `✅ ${account}: entry order placed`
-          : why
-            ? `🛑 ${account}: declined by the risk engine — ${why.slice(0, 3).join("; ")}`
-            : `👻 ${account}: shadow only (autonomy dial)`,
+          : rested
+            ? `⏳ ${account}: resting — ${rested}`
+            : why
+              ? `🛑 ${account}: declined by the risk engine — ${why.slice(0, 3).join("; ")}`
+              : `👻 ${account}: shadow only (autonomy dial)`,
       );
     }
     session.contractId = contract.contract_id;
@@ -3510,8 +4096,20 @@ ${postmortem}`,
 
     const decisions = interpretTier1(items, result, this.d);
     let promoted = 0;
+    const held = new Set(this.symbolsInPlay());
     for (const [i, dcs] of decisions.entries()) {
       const it = items[i] as TriageItem;
+      // ADR-059: a material headline about a held symbol (either direction) is a re-underwriting tripwire
+      const heldSym = this.universe.resolve(it.symbols, now)?.symbol;
+      if (heldSym && held.has(heldSym) && dcs.material >= this.d.exits.review.held_material_min)
+        this.sql.exec(
+          "UPDATE position_watch SET pending_headline = ? WHERE symbol = ?",
+          `${dcs.direction === "down" ? "⬇ " : dcs.direction === "up" ? "⬆ " : ""}${it.headline}`.slice(
+            0,
+            300,
+          ),
+          heldSym,
+        );
       if (!dcs.promote) {
         this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", dcs.candidateId);
         continue;
@@ -5387,6 +5985,42 @@ export function dossierCard(d: Dossier): DiscordMessage {
             300,
           ),
         },
+      },
+    ],
+  };
+}
+
+/** ADR-059: a re-underwriting hearing's outcome, posted to the court channel. */
+export function reviewCard(
+  symbol: string,
+  wires: string[],
+  d: { action: string; why: string; thesisAlive: number | null; killFired: number | null; pExit: number },
+  r: number,
+): DiscordMessage {
+  const icon = { HOLD: "🟢", TIGHTEN: "🟡", EXIT: "🔴" }[d.action] ?? "⚪";
+  return {
+    embeds: [
+      {
+        title: `🔁 Re-underwriting — ${symbol}: ${icon} ${d.action}`,
+        description: cut(
+          `**Why it was reviewed**\n${wires.map((w) => `• ${w}`).join("\n")}\n\n**Ruling** ${d.why}`,
+          1800,
+        ),
+        color: d.action === "EXIT" ? COLORS.red : d.action === "TIGHTEN" ? COLORS.yellow : COLORS.green,
+        fields: [
+          { name: "Now", value: `${r >= 0 ? "+" : ""}${r.toFixed(2)} R`, inline: true },
+          {
+            name: "Thesis alive",
+            value: d.thesisAlive === null ? "—" : `${Math.round(d.thesisAlive * 100)}%`,
+            inline: true,
+          },
+          {
+            name: "Kill fired",
+            value: d.killFired === null ? "—" : `${Math.round(d.killFired * 100)}%`,
+            inline: true,
+          },
+        ],
+        footer: { text: "Clef 27B chose the action; code sets every price. Stops only move up." },
       },
     ],
   };

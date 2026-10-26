@@ -28,6 +28,8 @@ export class Market {
   quotes: Record<string, Quote> = {};
   news: NewsItem[] = [];
   bars: Record<string, Bar[]> = {};
+  /** hourly bars per symbol (lateness meter tests) */
+  hourly: Record<string, Bar[]> = {};
   /** per-symbol asset overrides (name, exchange, fractionable…) for universe-screen tests */
   assets: Record<string, Partial<AlpacaAsset>> = {};
   constructor(public clock: () => number) {}
@@ -284,5 +286,8 @@ export class FakeMarketData implements MarketDataApi {
   }
   async cryptoDailyBars(symbols: string[]): Promise<Record<string, Bar[]>> {
     return Object.fromEntries(symbols.flatMap((s) => (this.m.bars[s] ? [[s, this.m.bars[s]]] : [])));
+  }
+  async hourlyBars(symbol: string, sinceMs: number): Promise<Bar[]> {
+    return (this.m.hourly[symbol] ?? []).filter((b) => b.t >= sinceMs);
   }
 }

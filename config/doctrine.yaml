@@ -543,3 +543,40 @@ universe:
   max_watch: 60 # research-named related symbols
   prefilter_min_score: 2
   max_open_intake_per_day: 150 # non-watchlist headlines into Tier 1 (≈180 clef-flash neurons)
+
+# ADR-059: exit intelligence. Stops only ever move up; models choose HOLD/TIGHTEN/EXIT, code computes every price.
+exits:
+  enabled: true
+  breakeven_at_r: 1.0 # best price ≥ entry + 1R → stop to entry + round-trip fees
+  trail_after_r: 1.5 # then a chandelier: best price − k × ATR
+  trail_atr: { calm: 1.2, stressed: 0.8 } # stressed = regime no longer allows longs
+  harvest:
+    enabled: true # at the target, keep running on a trail while trend, regime and forecast agree
+    max_extra_hours: 48 # past the contract horizon, only while trailing
+    max_rsi: 78 # daily RSI14 at or above this = exhausted → sell at the target
+  review:
+    enabled: true # re-underwriting hearings (one Clef 27B call each, Tier 2 neuron pool)
+    max_per_day: 20
+    cooldown_minutes: 120 # per position, unless a new tripwire appears
+    held_material_min: 0.5 # Tier 1 materiality that makes a headline about a held symbol a tripwire
+    exit_prob: 0.6
+    kill_prob: 0.7
+  watch_research:
+    enabled: true # daily surveillance dossier per held position (bear kill criteria)
+    every_hours: 24
+  earnings_derisk: true # equities are sold before earnings inside the blackout window
+  rotation:
+    enabled: true # release a stagnant position for a better waiting candidate when slots are full
+    min_horizon_fraction: 0.5
+    max_abs_r: 0.25
+    min_candidate_win: 0.6
+
+# ADR-060: entry timing.
+entry_timing:
+  lateness:
+    enabled: true # Tier 0 refuses a catalyst whose move is mostly done (graded, so the Governor can price the rule)
+    late_atr: 0.8 # price already moved ≥ 0.8 daily ATR since the headline → LATE
+    mid_atr: 0.4
+  resting:
+    enabled: true # a court contract whose price ran past its zone (or found no free slot) waits for it instead
+    max_hours: 48 # and never longer than half the contract's horizon
