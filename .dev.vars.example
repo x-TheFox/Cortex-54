@@ -24,3 +24,7 @@ WEB_SESSION_SECRET=
 # Research job keys (GitHub Actions secrets; locally for dry runs)
 FMP_API_KEY=
 FRED_API_KEY=
+# ADR-062 monitoring (optional): ntfy push topic (16–64 url-safe chars), optional self-hosted ntfy base, widget token
+NTFY_TOPIC=
+NTFY_URL=
+PILL_TOKEN=
