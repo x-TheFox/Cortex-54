@@ -53,8 +53,8 @@ async function call<T>(
       res = await fetcher(url, {
         ...init,
         headers: {
-          "APCA-API-KEY-ID": creds.keyId,
-          "APCA-API-SECRET-KEY": creds.secret,
+          // keyless (crypto market data only): local demo mode sends no credential headers at all
+          ...(creds.keyId ? { "APCA-API-KEY-ID": creds.keyId, "APCA-API-SECRET-KEY": creds.secret } : {}),
           accept: "application/json",
           ...(init.body ? { "content-type": "application/json" } : {}),
         },

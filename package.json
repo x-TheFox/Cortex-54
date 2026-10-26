@@ -25,7 +25,10 @@
     "discord:setup": "node scripts/discord-setup.ts",
     "court:smoke": "tsx scripts/court-smoke.ts",
     "web:dev": "vite --config web/vite.config.ts",
-    "web:build": "vite build --config web/vite.config.ts"
+    "web:build": "vite build --config web/vite.config.ts",
+    "cortex": "tsx local/cli.ts",
+    "local": "pnpm config:build && tsx local/cli.ts start",
+    "demo": "pnpm config:build && pnpm web:build && tsx local/cli.ts demo"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

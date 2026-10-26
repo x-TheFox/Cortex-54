@@ -1093,6 +1093,13 @@ describe("court end-to-end (Phase 3)", () => {
     expect(t.brain.why("BTC/USD")).toMatch(/ROAST/);
   });
 
+  it("web sessions are not revoked until logout revokes them (regression: every command said 'signed out')", () => {
+    const t = setup();
+    expect(t.brain.isRevoked("revoked:abc")).toBe(false);
+    expect(t.brain.consumeOnce("revoked:abc")).toBe(true);
+    expect(t.brain.isRevoked("revoked:abc")).toBe(true);
+  });
+
   it("/why answers from the position, the contract and the journal trail", async () => {
     const t = setup();
     breakout(t);

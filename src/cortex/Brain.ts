@@ -5810,7 +5810,8 @@ ${postmortem}`,
   }
 
   isRevoked(id: string): boolean {
-    return one(this.sql, "SELECT 1 AS x FROM seen_items WHERE id = ?", `web:${id}`) !== undefined;
+    // `one` returns null when there's no row (it was compared to undefined, so every session looked revoked)
+    return one(this.sql, "SELECT 1 AS x FROM seen_items WHERE id = ?", `web:${id}`) !== null;
   }
 
   /** Memory Vault view: decayed beliefs, reputation weights, merged scar rules. */

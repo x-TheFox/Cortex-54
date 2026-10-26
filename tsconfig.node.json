@@ -6,6 +6,7 @@
   },
   "include": [
     "scripts",
+    "local",
     "test",
     "src/contracts",
     "src/discord/commands.ts",
