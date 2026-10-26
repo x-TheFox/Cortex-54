@@ -144,7 +144,7 @@ funnel:
   calibration:
     min_outcomes_before_trusting: 50
     shrink_to: 0.5
-    warmup_min_weight: 0.3 # floor on trust during warm-up so the system can collect outcomes at all
+    warmup_min_weight: 0.5 # ADR-056 (was 0.3): floor on trust during warm-up so PAPER can collect outcomes at all
 
 budgets:
   thrift_fraction: 0.7
@@ -179,16 +179,19 @@ llm_routing:
     nim/deepseek-ai/deepseek-v4.1-flash: deepseek
     nim/nvidia/nemotron-3-ultra-550b-a55b: nvidia
     openrouter/google/gemma-4-31b-it:free: google
+  # Probe 2026-10-26 (bull prompt, live BTC): gemini-3.5 ok in ~14 s (503 at peak), qwen ok in ~2 s, gpt-oss-20b ok in
+  # ~2 s; nemotron (NIM and OpenRouter) answers in prose, not JSON; deepseek times out at 60 s, so it is out of both
+  # chains (one timeout ate 40% of the hearing deadline).
   bull_chain:
     - { provider: gemini, model: gemini-3.5-flash }
-    - { provider: gemini, model: gemini-3.8-flash }
     - { provider: groq, model: qwen/qwen3.8-27b }
-    - { provider: nim, model: deepseek-ai/deepseek-v4.1-flash }
+    - { provider: gemini, model: gemini-3.8-flash }
+    - { provider: groq, model: openai/gpt-oss-20b }
   bear_chain:
     - { provider: groq, model: openai/gpt-oss-120b }
-    - { provider: nim, model: nvidia/nemotron-3-ultra-550b-a55b }
-    - { provider: nim, model: deepseek-ai/deepseek-v4.1-flash }
     - { provider: groq, model: qwen/qwen3.8-27b }
+    - { provider: gemini, model: gemini-3.5-flash }
+    - { provider: nim, model: nvidia/nemotron-3-ultra-550b-a55b }
   panel: # ADR-044: the bull answers the bear, then three experts weigh in (in parallel) before the Clef judge
     rebuttal: true
     seats: [quant, risk, macro]
@@ -207,12 +210,15 @@ llm_routing:
 
 regime_gates:
   crypto_composite_min_for_longs: 40
-  equity_postures_allowing_entries: [NEW_ENTRY_ALLOWED]
+  # ADR-056: REDUCE_ONLY ("be selective") admits court entries at half size, and all stock exposure stays under the
+  # exposure coach's ceiling. CASH_PRIORITY still blocks. Rule strategies (RSI(2), inverse ETFs) are not resized here.
+  equity_postures_allowing_entries: [NEW_ENTRY_ALLOWED, REDUCE_ONLY]
+  equity_posture_size: { REDUCE_ONLY: 0.5 }
   # ADR-039: an exceptional catalyst may still trade against a closed gate, smaller and judged harder.
   # Never in CASH_PRIORITY, never on stale regime data (fail closed, U6), never more than one at a time.
   exception_lane:
     enabled: true
-    equity_postures: [REDUCE_ONLY]
+    equity_postures: [] # ADR-056: REDUCE_ONLY is now a regular (half-size) posture
     crypto_composite_floor: 25
     min_tier1_material: 0.85
     min_tier1_escalate: 2.2

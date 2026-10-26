@@ -170,9 +170,11 @@ export const DoctrineSchema = z.object({
   regime_gates: z.object({
     crypto_composite_min_for_longs: z.number().min(0).max(100),
     equity_postures_allowing_entries: z.array(z.string()),
+    // ADR-056: size multiplier per equity posture for COURT entries (shrink only). Postures not listed size at 1.
+    equity_posture_size: z.record(z.string(), z.number().gt(0).max(1)).default({}),
     exception_lane: z.object({
       enabled: z.boolean(),
-      equity_postures: z.array(z.enum(["REDUCE_ONLY"])),
+      equity_postures: z.array(z.enum(["REDUCE_ONLY"])), // ADR-056: empty while REDUCE_ONLY is a regular posture
       crypto_composite_floor: z.number().min(0).max(100),
       min_tier1_material: Fraction,
       min_tier1_escalate: z.number().min(0).max(3),

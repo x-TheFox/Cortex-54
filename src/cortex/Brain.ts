@@ -3743,6 +3743,43 @@ ${postmortem}`,
     return { ok: true, message: `queued ${queued} screener candidate(s) for Tier 2` };
   }
 
+  /**
+   * ADR-056: COURT stock entries are sized by the equity posture (REDUCE_ONLY → half) and all stock exposure on the
+   * account stays under the exposure coach's ceiling. Rule strategies and crypto are untouched. Shrink only.
+   */
+  equityPostureLimits(
+    account: string,
+    contract: DecisionContract,
+    equityUsd: number,
+    now: number,
+  ): { multiplier: number; roomUsd: number; reason?: string } {
+    if (contract.arena !== "EQUITIES" || contract.origin !== "COURT")
+      return { multiplier: 1, roomUsd: Infinity };
+    const eq = this.freshRegime("EQUITIES", now);
+    if (!eq) return { multiplier: 1, roomUsd: Infinity }; // the regime gate already failed closed on stale data
+    const multiplier = Math.min(1, this.d.regime_gates.equity_posture_size[eq.posture] ?? 1);
+    if (eq.ceiling === null) return { multiplier, roomUsd: Infinity };
+    const held =
+      (one<{ n: number }>(
+        this.sql,
+        "SELECT COALESCE(SUM(CAST(qty AS REAL) * CAST(avg_entry AS REAL)), 0) AS n FROM positions WHERE account = ? AND arena = 'EQUITIES' AND state = 'OPEN'",
+        account,
+      )?.n ?? 0) +
+      (one<{ n: number }>(
+        this.sql,
+        `SELECT COALESCE(SUM(notional_cents), 0) / 100.0 AS n FROM orders WHERE account = ? AND arena = 'EQUITIES' AND role = 'ENTRY' AND state IN (${OPEN_SQL})`,
+        account,
+      )?.n ?? 0);
+    const roomUsd = eq.ceiling * equityUsd - held;
+    if (roomUsd < (this.d.execution.min_order_notional_usd.EQUITIES ?? 1))
+      return {
+        multiplier,
+        roomUsd: 0,
+        reason: `stock exposure at the ${(eq.ceiling * 100).toFixed(0)}% ceiling (${eq.posture})`,
+      };
+    return { multiplier, roomUsd };
+  }
+
   /** Batch regime for an arena if it is within the doctrine staleness limit, else null (fail closed to proxy/none). */
   freshRegime(
     arena: "CRYPTO" | "EQUITIES",
@@ -3936,8 +3973,14 @@ ${postmortem}`,
       return false;
     }
     // ---- synchronous section: view → validate → reserve (no await until submit) ----
-    const view = this.accountView(account, now);
-    if (!view) return false;
+    const baseView = this.accountView(account, now);
+    if (!baseView) return false;
+    const posture = this.equityPostureLimits(account, contract, baseView.equityUsd, now);
+    if (posture.reason) {
+      this.reject(account, contract, "VALIDATOR", [posture.reason], now);
+      return false;
+    }
+    const view = { ...baseView, availableCashUsd: Math.min(baseView.availableCashUsd, posture.roomUsd) };
     const asset: AssetView = {
       tradable: meta.tradable && meta.status === "active",
       fractionable: meta.fractionable,
@@ -3964,6 +4007,7 @@ ${postmortem}`,
         regimeMultiplier: Math.min(
           exception ? lane.size_multiplier : 1,
           this.fundingMultiplier(contract.symbol, now),
+          posture.multiplier,
         ),
         now,
       },

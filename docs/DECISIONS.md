@@ -776,3 +776,37 @@ crossed-quote rejection. W1-12/W3-34 (field taint) hold by construction, and the
 **Stopped here (operator, 2026-10-24):** every idea not built yet — the ones that need data, LIVE or the operator,
 small extras, and the ones decided against — is recorded with its trigger in `docs/FUTURE_PLANS.md`. That file
 replaces the full per-idea table.
+
+## ADR-056 — Gate review: REDUCE_ONLY stocks at half size, transitional macro input, warm-up floor, court chains (2026-10-26)
+**Context:** four days without one automatic court session or PAPER buy. An operator-requested review of every gate
+found:
+- **Stocks:** SPY sat 1.8% under its high, yet every stock candidate died at Tier 0 because the exposure coach said
+  REDUCE_ONLY, which we mapped to *no* entries. The coach's composite (34.4) was dominated by the macro detector's
+  label "contraction" scored as a fixed 20 at 25% weight. The detector itself reported a transition zone (moderate
+  confidence) on its 1–2 year monthly view.
+- **Crypto:** the gates were right. All 13 pairs fell 6–24% in 20 days, Tier 2 refused 18 of 18, and 13 of the 15
+  crypto refusals were lower 24 h later, with none reaching a 3-ATR target in 72 h.
+- **Sizer:** with 0 graded outcomes, the warm-up floor (0.3) shrank a 0.68 court probability to 0.554. PAPER could
+  barely size the trades it needs to learn from.
+- **Court bug:** a bull that answered no_trade with prices at 0 failed `BullSchema`, so the router burned every hop.
+  Live probe: Gemini 503 at peak, deepseek timeouts, nemotron answering in prose. The hearing ended "no bull"
+  instead of "bull declined".
+
+**Decision:**
+- **REDUCE_ONLY admits COURT stock entries** (`regime_gates.equity_postures_allowing_entries`) at half size
+  (`equity_posture_size.REDUCE_ONLY: 0.5`). Total stock exposure stays under the coach's ceiling
+  (`Brain.equityPostureLimits`). CASH_PRIORITY still blocks, stale postures still fail closed, and rule strategies
+  are unchanged. The exception lane no longer lists REDUCE_ONLY, since it is a regular posture now.
+- **Transitional macro input:** when the macro detector reports its own transition zone at moderate or low
+  confidence, the coach receives the regime as transitional (its own baseline, 50) via `payload.macro_for_exposure`.
+  The raw report is still stored. The follow-through-day input stays as reported: RALLY_FAILED after QQQ's 6% dip is
+  a real reading. Today this moves the composite from 34.4 to 43.8 and the ceiling from 28% to 41%.
+- **Warm-up floor 0.3 → 0.5** (`funnel.calibration.warmup_min_weight`), until 50 graded outcomes exist. This is a
+  doctrine value inside every constitution cap; LIVE stays dormant.
+- **Court fix:**
+  - a declined bull parses: placeholder prices are filled, and `checkBull` turns them into "bull declined";
+  - the chains drop deepseek (60 s timeouts). Bull: Gemini 3.5 → qwen → Gemini 3.8 → gpt-oss-20b. Bear: gpt-oss-120b
+    → qwen → Gemini 3.5 → nemotron.
+
+**Kept:** the constitution, crypto gates, Tier 2's bar, breakers, long-only, and the losing bounce and inverse-ETF
+strategies staying in the LAB.

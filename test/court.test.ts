@@ -3,7 +3,14 @@ import { ClairicResultSchema, grounded, interpretFacts } from "../src/clef/clair
 import { interpretTier2 } from "../src/clef/tier2.ts";
 import { CalibrationMapSchema } from "../src/contracts/calibration.ts";
 import { contractViolations, DecisionContractSchema } from "../src/contracts/decision-contract.ts";
-import { type Bull, buildCourtContract, calibrate, checkBull, interpretSynth } from "../src/court/court.ts";
+import {
+  type Bull,
+  BullSchema,
+  buildCourtContract,
+  calibrate,
+  checkBull,
+  interpretSynth,
+} from "../src/court/court.ts";
 import { buildEvidence, resolveTradeable } from "../src/court/evidence.ts";
 import {
   extractJson,
@@ -96,6 +103,25 @@ describe("bull checks (code wins)", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.bull.targets[0]).toBeCloseTo(160.5 + 3 * 2 * Math.sqrt(2), 6);
   });
+  it("parses a declined bull that leaves the prices at 0, and checkBull turns it into a decline", () => {
+    const declined = {
+      no_trade: true,
+      thesis: "No edge here.",
+      setup: "no_trade",
+      entry_low: 0,
+      entry_high: 0,
+      stop: 0,
+      targets: [],
+      horizon_hours: 0,
+      conviction: 1,
+      receipts: [],
+    };
+    const parsed = BullSchema.parse(declined);
+    expect(checkBull(parsed, ev(), d)).toEqual({ ok: false, reasons: ["bull declined (no_trade)"] });
+    // a bull that wants to trade still needs real prices
+    expect(BullSchema.safeParse({ ...declined, no_trade: false, setup: "breakout" }).success).toBe(false);
+  });
+
   it("rejects no_trade, zones that miss the bid, and noise stops", () => {
     expect(checkBull(bull({ no_trade: true }), ev(), d).ok).toBe(false);
     const miss = checkBull(bull({ entry_low: 150, entry_high: 151 }), ev(), d);
@@ -142,8 +168,9 @@ describe("Tier 2 exception bar (ADR-039)", () => {
 
 describe("calibration and synthesis", () => {
   it("shrinks hard toward 0.5 during warm-up and trusts after enough outcomes", () => {
-    expect(calibrate(0.7, 0, d)).toBeCloseTo(0.5 + 0.2 * 0.3, 9);
-    expect(calibrate(0.7, 25, d)).toBeCloseTo(0.5 + 0.2 * 0.5, 9);
+    const floor = d.funnel.calibration.warmup_min_weight;
+    expect(calibrate(0.7, 0, d)).toBeCloseTo(0.5 + 0.2 * floor, 9);
+    expect(calibrate(0.7, 40, d)).toBeCloseTo(0.5 + 0.2 * Math.max(floor, 40 / 50), 9);
     expect(calibrate(0.7, 500, d)).toBeCloseTo(0.7, 9);
   });
   it("uses a Governor isotonic map only once it rests on enough outcomes", () => {
@@ -247,8 +274,13 @@ describe("LLM router", () => {
       d,
       () => T,
     );
+    const chain = [
+      { provider: "groq", model: "openai/gpt-oss-120b" },
+      { provider: "nim", model: "nvidia/nemotron-3-ultra-550b-a55b" },
+      { provider: "nim", model: "deepseek-ai/deepseek-v4.1-flash" },
+    ];
     const res = await r.run(
-      d.llm_routing.bear_chain,
+      chain,
       { system: "", user: "", maxOutputTokens: 10, schema: {} },
       parse,
       ["nvidia"],

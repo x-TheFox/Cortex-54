@@ -12,7 +12,28 @@ import { BEAR_PROMPT_VERSION, BULL_PROMPT_VERSION } from "./prompts.ts";
  * Tier 3 court (pure parts). Models argue; code checks every number against Tier 0 evidence and assembles the
  * DecisionContract. Nothing here sizes a position (constitution U2).
  */
-export const BullSchema = z.object({
+/**
+ * A bull that declines answers no_trade and usually leaves the prices at 0. That is a valid answer, not a schema
+ * failure: fill neutral placeholders so it parses, and checkBull turns it into "bull declined" (the placeholders are
+ * never priced or traded).
+ */
+function fillDeclinedBull(v: unknown): unknown {
+  if (!v || typeof v !== "object") return v;
+  const o = { ...(v as Record<string, unknown>) };
+  if (o.no_trade !== true && o.setup !== "no_trade") return o;
+  const pos = (x: unknown) => typeof x === "number" && x > 0;
+  for (const k of ["entry_low", "entry_high", "stop"]) if (!pos(o[k])) o[k] = 1;
+  if (!Array.isArray(o.targets) || o.targets.length === 0 || !o.targets.every(pos)) o.targets = [1];
+  if (typeof o.horizon_hours !== "number" || o.horizon_hours < 6 || o.horizon_hours > 168)
+    o.horizon_hours = 24;
+  if (typeof o.conviction !== "number" || o.conviction < 1 || o.conviction > 10) o.conviction = 1;
+  if (typeof o.thesis !== "string" || o.thesis.length === 0) o.thesis = "no trade";
+  if (!Array.isArray(o.receipts)) o.receipts = [];
+  if (o.setup === undefined) o.setup = "no_trade";
+  return o;
+}
+
+const BullObject = z.object({
   no_trade: z.boolean(),
   thesis: z.string().min(1).max(600),
   setup: z.enum(["momentum_continuation", "breakout", "pullback_buy", "news_fade", "no_trade"]),
@@ -28,7 +49,8 @@ export const BullSchema = z.object({
   conviction: z.number().int().min(1).max(10),
   receipts: z.array(z.string()).max(12),
 });
-export type Bull = z.infer<typeof BullSchema>;
+export const BullSchema = z.preprocess(fillDeclinedBull, BullObject);
+export type Bull = z.infer<typeof BullObject>;
 
 export const BearSchema = z.object({
   fatal_flaws: z.array(z.string().min(3).max(400)).min(1).max(6),

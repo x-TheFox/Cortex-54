@@ -98,6 +98,24 @@ def summarize_macro(d: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
+# The exposure coach's own baseline for an unsettled macro regime (calculate_exposure.REGIME_SCORES["transitional"]).
+TRANSITIONAL_REGIME_SCORE = 50
+
+
+def macro_for_exposure(d: dict[str, Any]) -> dict[str, Any]:
+    """ADR-056: the macro detector reads 1-2 year structural regimes from monthly data. When it reports its own
+    transition zone and is not highly confident, the coach should treat the regime as transitional (its own 50
+    baseline) instead of locking in the label's fixed score (contraction = 20, 25% of the composite). Otherwise the
+    report passes through unchanged. Returns a new dict; the stored batch keeps the raw report."""
+    comp = d.get("composite") if isinstance(d.get("composite"), dict) else {}
+    regime = d.get("regime") if isinstance(d.get("regime"), dict) else {}
+    zone = str(comp.get("zone") or "")
+    confidence = str(regime.get("confidence") or "").lower()
+    if zone.lower().startswith("transition") and confidence in {"moderate", "low"}:
+        return {**d, "regime_score": TRANSITIONAL_REGIME_SCORE}
+    return d
+
+
 def equity_posture(exposure: dict[str, Any]) -> dict[str, Any]:
     rec = exposure.get("recommendation")
     posture = rec if rec in POSTURES else "REDUCE_ONLY"  # unknown → fail closed
