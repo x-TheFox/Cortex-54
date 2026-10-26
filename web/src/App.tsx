@@ -89,7 +89,12 @@ function AccountColumn({ a, s }: { a: AccountView; s: StatusView }) {
         )}
       </div>
       <div data-guide={a.account === "PAPER" ? "trend" : undefined}>
-        <Trend points={s.equity[a.account]} hwm={a.hwmUsd} label={`${a.account} equity`} />
+        <Trend
+          points={s.equity[a.account]}
+          hwm={a.hwmUsd}
+          label={`${a.account} equity`}
+          bench={s.benchmark?.[a.account]}
+        />
       </div>
     </div>
   );

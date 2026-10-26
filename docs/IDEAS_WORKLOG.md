@@ -23,25 +23,25 @@ nothing changes LIVE (dormant at Stop 0).
 ## A. Operator's list
 
 ### Research desk
-- [ ] **Remove the 3-tool-call limit.** The agent may now batch up to 8 tool calls per step, and they run in parallel
+- [x] **Remove the 3-tool-call limit.** The agent may now batch up to 8 tool calls per step, and they run in parallel
   (thread pool), so a wide step costs one round of latency, not eight.
-- [ ] **Research covers general news and the catalyst's own story.** Every run has three scopes: *market* (macro,
+- [x] **Research covers general news and the catalyst's own story.** Every run has three scopes: *market* (macro,
   sector, the asset class today), *catalyst trace* (the headline that triggered the case: the original source, who
   reported it first, what followed it) and *the asset itself*. The harness seeds the first step with one search per
   scope so neither is skipped, and the dossier carries separate `market_context` and `catalyst_trace` sections.
-- [ ] **Automatic compaction.** When the prompt passes 55% of the smallest model context in the chain, a compaction
+- [x] **Automatic compaction.** When the prompt passes 55% of the smallest model context in the chain, a compaction
   micro-pass folds old notes and step history into a dense digest (every URL and number kept, checked in code), and the
   run continues. Repeats as often as needed.
-- [ ] **Long-running research.** Two rings: a *fast* dossier is posted as soon as the core picture exists (the court
+- [x] **Long-running research.** Two rings: a *fast* dossier is posted as soon as the core picture exists (the court
   waits for this one), then the same run keeps going (*deep ring*, up to ~2 h, configurable) and posts a deeper
   version that replaces it. Held positions get *watch dossiers* (MLP3-003) that track the bear's kill criteria.
 
 ### Universe
-- [ ] **Every symbol can be watched and traded (generalisation).** Dynamic universe: any active, tradable Alpaca asset
+- [x] **Every symbol can be watched and traded (generalisation).** Dynamic universe: any active, tradable Alpaca asset
   passes a code screen (price ≥ $2, 20-day dollar volume, spread, fractionable for stocks, no leveraged or inverse
   ETF unless the constitution lists it, no OTC) and joins a hot `universe` table with a TTL. The doctrine watchlists
   stay as the permanent core.
-- [ ] **Scout that ports symbols in on demand.** News intake reads the whole Alpaca news stream (not just watchlist
+- [x] **Scout that ports symbols in on demand.** News intake reads the whole Alpaca news stream (not just watchlist
   symbols). A zero-neuron Tier 0.5 prefilter (keywords, source, symbol count, near-duplicate check) keeps Tier 1 costs
   flat; anything Tier 1 promotes for an unknown symbol is screened and hot-ported by the scout. The research desk also
   names related symbols (suppliers, peers, sector ETF), which the scout adds as *watch-only*.
@@ -49,12 +49,12 @@ nothing changes LIVE (dormant at Stop 0).
 ### Crowd / network
 - [~] **Crowd-sourced systems, forum, copy trading, leaderboards.** A marketplace and forum need users, moderation and
   payment rails (cost, liability). The foundation that works for one operator today and scales later:
-  - [ ] **Signed public feed** (`/feed.json`, `/feed.atom`, off by default): contracts, court verdicts, exits and
+  - [~] **Signed public feed** → built as the community hub instead (ADR-068): agents publish signed, hash-linked journal rows to a hub we host; the hub recomputes every hash. Original plan: (`/feed.json`, `/feed.atom`, off by default): contracts, court verdicts, exits and
     ideas, each with its journal hash, so anyone can follow and verify the record (track-record proof, MLP4-022).
-  - [ ] **Follower mode** (copy trading done safely): point a CORTEX instance at a leader's feed; the leader's
+  - [x] **Follower mode** (ADR-068: a followed agent's court approvals become Tier 2 leads; never orders). Original plan: (copy trading done safely): point a CORTEX instance at a leader's feed; the leader's
     contracts become *candidates* that go through this instance's own gates, court and sizer. No blind copying.
-  - [ ] **Forum** = GitHub Discussions on the public repo (free); the feed links there. No custom forum to run.
-- [ ] **Memory uploading.** `.scar` packs: `pnpm memory:export` writes scar rules + beliefs + lessons as a signed JSON
+  - [~] **Forum**: the repo goes private for the product, so GitHub Discussions is out; the hub's leaderboard + packs are the community core, with a Discord/Discourse forum as an operator choice. Original plan: GitHub Discussions on the public repo (free); the feed links there. No custom forum to run.
+- [x] **Memory uploading.** `.scar` packs: `pnpm memory:export` writes scar rules + beliefs + lessons as a signed JSON
   pack; `pnpm memory:import` turns a pack into a branch and PR (constitution U8: self-modification is a PR).
 - [~] **Strategy integration marketplace.** Running third-party code inside the risk path is the wrong trust model.
   Instead: a strategy plugin interface + manifest, and the existing gate (backtest DSR/PBO → LAB forward test → PR
@@ -67,7 +67,7 @@ nothing changes LIVE (dormant at Stop 0).
   added through one env var and used in any court chain. Dormant without keys.
 - [~] **Clef on local.** Clef's weights are not public, so it can't run locally. Built instead: a Clef-compatible
   shim (same request/answer shape: choice/score + probabilities) on any local or BYOK chat model, used by local mode.
-- [ ] **Fully local mode with background runner.** `pnpm local` runs the same Brain in Node: file-backed SQLite,
+- [x] **Fully local mode with background runner.** `pnpm local` runs the same Brain in Node: file-backed SQLite,
   a local journal, Alpaca paper (own account only) or a keyless simulated broker, free LLM chains, and Clef through the
   Cloudflare REST API or the shim. `pnpm local:install` writes a launchd (macOS), systemd (Linux) or Task Scheduler
   (Windows) service. `pnpm demo` runs it with no keys at all.
@@ -77,48 +77,48 @@ nothing changes LIVE (dormant at Stop 0).
 - [~] **Android app for close monitoring.** A native app costs a $25 Play fee and its own codebase. Built instead:
   push alerts through ntfy (free, open source, has an Android app) and the web terminal as an installable PWA with a
   phone layout.
-- [ ] **Kronos companions (Timer-S1 and others; research needed).** Research the current free time-series foundation
+- [x] **Kronos companions (Timer-S1 and others; research needed).** Research the current free time-series foundation
   models, then run the best CPU-friendly ones beside Kronos as SHADOW forecasts. They are logged and graded in LAB but
   don't reach the court until they beat Kronos on the same grading (keeps Kronos' own grade clean, FUTURE_PLANS W2-31).
 
 ### Exits and portfolio ("90% of IQ goes to entries")
-- [ ] **Excursion tracking:** MFE/MAE per position every pulse, plus 1h/4h/1d/3d post-exit excursions (MLP6-005).
-- [ ] **Breakeven ratchet:** once a position is +1R, the stop moves to entry + fees. It only ever tightens.
-- [ ] **Hold-or-harvest at target:** when the target is hit while momentum is intact, code converts the exit into a
+- [x] **Excursion tracking:** MFE/MAE per position every pulse, plus 1h/4h/1d/3d post-exit excursions (MLP6-005).
+- [x] **Breakeven ratchet:** once a position is +1R, the stop moves to entry + fees. It only ever tightens.
+- [x] **Hold-or-harvest at target:** when the target is hit while momentum is intact, code converts the exit into a
   trailing stop (width from ATR and regime volatility) instead of selling at the first touch (MLP2-002, MLP4-003).
-- [ ] **Re-underwriting hearings:** a material headline about a held symbol, or a tripwire (regime flip, Kronos p10
+- [x] **Re-underwriting hearings:** a material headline about a held symbol, or a tripwire (regime flip, Kronos p10
   breach, funding spike, a bear kill criterion), triggers a Clef review: HOLD, TIGHTEN or EXIT. Models choose the
   action class only; code computes the new stop (MLP4-001, MLP4-002, MLP0-001, MLP1-009, MLP3-009).
-- [ ] **Event de-risk:** equities exit before earnings inside the blackout window (MLP4-006).
-- [ ] **Opportunity-cost rotation:** a stagnant position (held > half its horizon, |R| < 0.25) is released when a
+- [x] **Event de-risk:** equities exit before earnings inside the blackout window (MLP4-006).
+- [x] **Opportunity-cost rotation:** a stagnant position (held > half its horizon, |R| < 0.25) is released when a
   better court-approved candidate is waiting and slots are full (MLP4-004, MLP3-004).
-- [ ] **Weekly book review:** concentration, correlation, net beta to BTC/SPY, stale positions and a worst-case
+- [x] **Weekly book review:** concentration, correlation, net beta to BTC/SPY, stale positions and a worst-case
   stress number, posted Sunday (MLP4-005, MLP4-032 light).
-- [ ] **Exit scorecard in the Governor:** money left on the table, give-back, saved-by-exit (MLP4-007).
+- [x] **Exit scorecard in the Governor:** money left on the table, give-back, saved-by-exit (MLP4-007).
 
 ---
 
 ## B. Ideas of my own (added while building)
 
-- [ ] **Lateness meter** (also dossier PSS-014 / MLP5-009 / MLP1-005): share of the catalyst's expected move already
+- [x] **Lateness meter** (also dossier PSS-014 / MLP5-009 / MLP1-005): share of the catalyst's expected move already
   done between first report and now, plus a volume z-score. It's a Tier 0 evidence field, and the court refuses at ≥ 0.7.
-- [ ] **Resting convictions** (also MLP6-003 / MLP6-009): when price runs past an approved entry zone, the contract
+- [x] **Resting convictions** (also MLP6-003 / MLP6-009): when price runs past an approved entry zone, the contract
   rests (up to its horizon, max 48 h) instead of being rejected; each pulse re-checks the zone and every gate.
-- [ ] **Temporal fact sheet** (also MLP0-013): every court prompt opens with today's date, the session and fresh
+- [x] **Temporal fact sheet** (also MLP0-013): every court prompt opens with today's date, the session and fresh
   regime numbers built in code.
-- [ ] **Stablecoin depeg + venue check** (also MLP0-021): crypto entries are refused when USDT or USDC sits more than
+- [x] **Stablecoin depeg + venue check** (also MLP0-021): crypto entries are refused when USDT or USDC sits more than
   50 bps from $1, or when Alpaca's mid disagrees with Coinbase's public ticker by more than 1%.
-- [ ] **`/why SYMBOL`** (also MLP0-011, MLP4-019): a deterministic answer from the hot state and journal (last contract,
+- [x] **`/why SYMBOL`** (also MLP0-011, MLP4-019): a deterministic answer from the hot state and journal (last contract,
   verdict, rejection reasons, exit reason). No LLM is needed, and nothing is invented.
-- [ ] **`/roast SYMBOL thesis`** (Co-Pilot, PSS-013): the operator's own idea goes through the full court and no
+- [x] **`/roast SYMBOL thesis`** (Co-Pilot, PSS-013): the operator's own idea goes through the full court and no
   order is ever placed.
-- [ ] **Model drift canary** (also MLP0-012): a weekly workflow sends golden prompts to every court model and checks
+- [x] **Model drift canary** (also MLP0-012): a weekly workflow sends golden prompts to every court model and checks
   JSON validity, schema, latency and refusals.
-- [ ] **Chaos test** (also MLP1-024): seeded broker faults (5xx, timeouts, lost responses, partial fills) across many
+- [x] **Chaos test** (also MLP1-024): seeded broker faults (5xx, timeouts, lost responses, partial fills) across many
   simulated pulses. The invariants must hold: no orphan, no unprotected position, no double order.
-- [ ] **Halt / restricted list** (also MLP0-005): Nasdaq trade halts feed, plus Alpaca asset status, as a Tier 0
+- [x] **Halt / restricted list** (also MLP0-005): Nasdaq trade halts feed, plus Alpaca asset status, as a Tier 0
   filter. This matters once the universe is dynamic.
-- [ ] **Universe budget guard**: hot-ported symbols are capped (count and TTL), and the free-tier budget doc is
+- [x] **Universe budget guard**: hot-ported symbols are capped (count and TTL), and the free-tier budget doc is
   updated for the wider intake.
 
 ---
@@ -195,7 +195,7 @@ nothing changes LIVE (dormant at Stop 0).
 - [⏸] MLP1-004 Source integrity agent: research already marks unread/invented sources; a domain reputation map comes
   back with Dawid-Skene (≥ 200 graded outcomes per source).
 - [→B] MLP1-005 Priced-in auditor: the lateness meter.
-- [ ] MLP1-006 Dilution detective: research flags S-3, 424B5 and ATM filings in the last 30 days, in code from the
+- [x] MLP1-006 Dilution detective: research flags S-3, 424B5 and ATM filings in the last 30 days, in code from the
   filing list (dynamic universe brings small caps).
 - [=] MLP1-007 Regime meteorologist: regime batches, HMM context, funding (ADR-055).
 - [-] MLP1-008 Execution plumber (TWAP/VWAP): $10 orders.
@@ -262,8 +262,8 @@ nothing changes LIVE (dormant at Stop 0).
 - [→A] MLP4-010 Contradiction hunter: the research's final phase.
 - [~] MLP4-011 Persistent symbol libraries: deep dossiers persist per symbol; full coverage files deferred (MLP0-003).
 - [→A] MLP4-012 Multi-angle research: research phases.
-- [ ] MLP4-013 Stake-weighted research budget: deeper budget for held symbols and high-quality Tier 2 cases.
-- [ ] MLP4-014 Missed-move forensics: daily scan for ≥ 3 ATR moves in the universe with no court case; journaled
+- [x] MLP4-013 Stake-weighted research budget: deeper budget for held symbols and high-quality Tier 2 cases.
+- [x] MLP4-014 Missed-move forensics: daily scan for ≥ 3 ATR moves in the universe with no court case; journaled
   with the intake stage that dropped them.
 - [-] MLP4-015 Social sentiment: X/StockTwits APIs are paid or closed; Reddit's API needs an app and is rate-capped.
 - [-] MLP4-016 Live earnings-call audio: paid transcripts, and no tradeable edge at $10 tickets.
@@ -338,3 +338,21 @@ because the operator asked: the Kronos challenger (as SHADOW, §A) and the per-a
 Newest last. Each entry says what landed, how it was tested, and what's left.
 
 - 2026-10-26: worklog written; every item has a verdict. Build starts with the research desk.
+- 2026-10-26: research desk v2 (057) and the dynamic universe + scout (058) landed with tests; prefilter tuned on 6 h
+  of real Alpaca news (≈ 20% pass).
+- 2026-10-26: exit intelligence (059), entry timing (060), Governor exit scorecard + monkey control + missed moves and
+  the /why /roast /book /universe commands (061), monitoring (062) landed with tests.
+- 2026-10-26: **direction change (operator):** commercial, closed-source, desktop + local mode + optional own cloud,
+  community, paste-to-agent setup, budgets no longer a constraint for paid options. Re-verdicts:
+  - BYOK frontier models: now built (063). Local Clef: built as REST + shim (063).
+  - Local mode, background runner, desktop app, headless image: built (064, 066).
+  - Widgets/Android: the desktop app's tray pill + ntfy + PWA cover it; native mobile stays out (store fees, a second
+    codebase) until customers ask.
+  - Crowd/copy trading/memory uploading: built as the community hub (068). Marketplace payments, tournaments, shared
+    jurors: still need a community first.
+  - Closed-source protection (PSS-029…033): obfuscation stays rejected as a moat; the bundle ships no TS source and
+    the hub is server-side value. Licensing + signed updates are the next commercial step (docs/DISTRIBUTION.md).
+- 2026-10-26: cloud without GitHub: job queue + desktop runner + `cortex deploy` (065), sanity vetoes (067), hub
+  (068), Chronos-2 companion (069), drift canary + chaos test (070). The canary found the free court chains fragile
+  today (Gemini 503, Qwen JSON/TPM, Nemotron cut off) and the fixes shipped; the chaos test found alert spam.
+- 2026-10-26: web-terminal bug found by local mode: every command answered "signed out" (isRevoked null/undefined).

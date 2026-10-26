@@ -33,6 +33,7 @@ function state(now: number, empty: boolean) {
     journalHead: { seq: 1184, sha: "9f2c4a81d0e3b7c6a5f41e2d9b8c7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b" },
     outboxPending: 0,
     equity: empty ? {} : { PAPER: curve(now, 54, 96, 0.7) },
+    benchmark: empty ? {} : { PAPER: { btc: curve(now, 54, 96, 1.6), spy: curve(now, 54, 96, 0.4) } },
     regimes: [
       {
         arena: "CRYPTO",

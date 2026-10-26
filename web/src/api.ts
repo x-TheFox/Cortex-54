@@ -63,6 +63,8 @@ export interface StatusView {
   journalHead: { seq: number; sha: string };
   outboxPending: number;
   equity: Partial<Record<AccountId, number[][]>>;
+  /** buy-and-hold BTC / SPY with the same starting equity (MLP0-024) */
+  benchmark?: Partial<Record<AccountId, { btc: number[][]; spy: number[][] }>>;
   regimes: RegimeView[];
   accounts: AccountView[];
 }

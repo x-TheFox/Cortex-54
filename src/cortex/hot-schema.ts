@@ -103,4 +103,6 @@ export const HOT_SCHEMA: readonly string[] = [
      inputs_json TEXT NOT NULL, created_at INTEGER NOT NULL, claimed_at INTEGER, claimed_by TEXT)`,
   // v8: journal rows waiting to be published to the community hub (ADR-068)
   `CREATE TABLE IF NOT EXISTS hub_outbox (seq INTEGER PRIMARY KEY, row_json TEXT NOT NULL)`,
+  // v8: hourly BTC and SPY prices for the buy-and-hold benchmark beside the equity line (MLP0-024)
+  `CREATE TABLE IF NOT EXISTS bench_history (at INTEGER PRIMARY KEY, btc REAL, spy REAL)`,
 ];

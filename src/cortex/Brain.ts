@@ -342,6 +342,8 @@ export interface StatusView {
   outboxPending: number;
   /** Hourly equity samples (last 7 days) per account: [epoch ms, USD]. */
   equity: Partial<Record<AccountId, number[][]>>;
+  /** MLP0-024: buy-and-hold BTC / SPY with the same starting equity, per account. */
+  benchmark?: Partial<Record<AccountId, { btc: number[][]; spy: number[][] }>>;
   regimes: {
     arena: string;
     posture: string;
@@ -746,7 +748,7 @@ export class Brain {
     await this.checkDispatchReceipts(started).catch(() => undefined);
 
     // 4. Persist, report, schedule.
-    this.sampleEquity(started);
+    await this.sampleEquity(started).catch(() => undefined);
     report.flushed = await this.flushJournal();
     await this.updateHud().catch(() => undefined);
     await this.flushTerminal().catch(() => undefined);
@@ -5547,6 +5549,9 @@ ${postmortem}`,
       journalHead: this.journal.head(),
       outboxPending: this.journal.pending(),
       equity: this.equityHistory(now - 7 * 86_400_000),
+      benchmark: Object.fromEntries(
+        ACCOUNTS.filter((a) => this.deps.brokers[a]).map((a) => [a, this.benchmark(a, now - 7 * 86_400_000)]),
+      ),
       regimes: this.sql
         .exec<{
           arena: string;
@@ -5936,9 +5941,18 @@ ${postmortem}`,
   }
 
   /** One equity sample per account per UTC hour (HUD chart, web terminal). */
-  private sampleEquity(now: number): void {
+  private async sampleEquity(now: number): Promise<void> {
     const hour = Math.floor(now / 3_600_000);
     if (getKV(this.sql, "equity_hour") === String(hour)) return;
+    // MLP0-024: what holding BTC or SPY would have done with the same money (one quotes call per hour)
+    const q = await this.quotesFor(["BTC/USD", "SPY"]).catch(() => ({}) as Record<string, Quote>);
+    const mid = (x: Quote | undefined) => (x && x.bid > 0 ? (x.bid + x.ask) / 2 : null);
+    this.sql.exec(
+      "INSERT OR REPLACE INTO bench_history (at, btc, spy) VALUES (?, ?, ?)",
+      hour * 3_600_000,
+      mid(q["BTC/USD"]),
+      mid(q.SPY),
+    );
     for (const row of this.sql.exec<AccountRow>("SELECT * FROM accounts")) {
       const eq = this.effectiveEquityCents(row);
       if (eq === null) continue;
@@ -5950,6 +5964,16 @@ ${postmortem}`,
       );
     }
     setKV(this.sql, "equity_hour", String(hour), now);
+  }
+
+  /** Buy-and-hold BTC and SPY with the account's own equity at the window's first sample (MLP0-024). */
+  benchmark(account: AccountId, since: number): { btc: number[][]; spy: number[][] } {
+    const eq = this.equityHistory(since)[account] ?? [];
+    const rows = this.sql.exec<{ at: number; btc: number | null; spy: number | null }>(
+      "SELECT at, btc, spy FROM bench_history WHERE at >= ? ORDER BY at",
+      since,
+    );
+    return benchmarkLines(eq, rows);
   }
 
   equityHistory(since: number): Partial<Record<AccountId, number[][]>> {
@@ -6111,18 +6135,71 @@ export function terminalLine(r: {
 }
 
 /** QuickChart line image for the HUD (rendered off-platform: zero Worker CPU). */
-export function equityChartUrl(points: number[][] | undefined): string | null {
+/** Benchmark lines: each series scaled so it starts at the account's first equity sample. Pure. */
+export function benchmarkLines(
+  equity: number[][],
+  rows: { at: number; btc: number | null; spy: number | null }[],
+): { btc: number[][]; spy: number[][] } {
+  const start = equity[0];
+  if (!start) return { btc: [], spy: [] };
+  const line = (k: "btc" | "spy") => {
+    const valid = rows.filter(
+      (r) => r.at >= (start[0] as number) && typeof r[k] === "number" && (r[k] as number) > 0,
+    );
+    const base = valid[0]?.[k];
+    return base
+      ? valid.map((r) => [r.at, Math.round((((start[1] as number) * (r[k] as number)) / base) * 100) / 100])
+      : [];
+  };
+  return { btc: line("btc"), spy: line("spy") };
+}
+
+export function equityChartUrl(
+  points: number[][] | undefined,
+  bench?: { btc: number[][]; spy: number[][] },
+): string | null {
   if (!points || points.length < 2) return null;
   const pts = points.slice(-72);
+  const align = (series: number[][] | undefined) => {
+    if (!series?.length) return null;
+    const at = new Map(series.map((p) => [p[0], p[1]]));
+    return pts.map((p) => at.get(p[0]) ?? null);
+  };
+  const extra = [
+    ["BTC hold", "#f5a524", align(bench?.btc)],
+    ["SPY hold", "#3ddc84", align(bench?.spy)],
+  ] as const;
   const cfg = {
     type: "line",
     data: {
       labels: pts.map(() => ""),
       datasets: [
-        { data: pts.map((p) => p[1]), fill: false, pointRadius: 0, borderColor: "#38bdf8", borderWidth: 2 },
+        {
+          label: "CORTEX",
+          data: pts.map((p) => p[1]),
+          fill: false,
+          pointRadius: 0,
+          borderColor: "#38bdf8",
+          borderWidth: 2,
+        },
+        ...extra
+          .filter(([, , d]) => d?.some((x) => x !== null))
+          .map(([label, color, d]) => ({
+            label,
+            data: d,
+            fill: false,
+            pointRadius: 0,
+            borderColor: color,
+            borderWidth: 1,
+            borderDash: [4, 3],
+            spanGaps: true,
+          })),
       ],
     },
-    options: { legend: { display: false }, scales: { xAxes: [{ display: false }] } },
+    options: {
+      legend: { display: true, labels: { fontColor: "#9ca3af", boxWidth: 10 } },
+      scales: { xAxes: [{ display: false }] },
+    },
   };
   return `https://quickchart.io/chart?w=500&h=140&bkg=%23111827&c=${encodeURIComponent(JSON.stringify(cfg))}`;
 }
@@ -6150,8 +6227,8 @@ const usd = (n: number | null) => (n === null ? "—" : `$${n.toFixed(2)}`);
 export function hudMessage(s: StatusView): DiscordMessage {
   const age = s.lastPulseAt === null ? "never" : `${Math.round((s.now - s.lastPulseAt) / 1000)}s ago`;
   const embeds = s.accounts.map((a) => ({
-    ...(equityChartUrl(s.equity[a.account])
-      ? { image: { url: equityChartUrl(s.equity[a.account]) as string } }
+    ...(equityChartUrl(s.equity[a.account], s.benchmark?.[a.account])
+      ? { image: { url: equityChartUrl(s.equity[a.account], s.benchmark?.[a.account]) as string } }
       : {}),
     title: `${a.account} · ${a.rung} · Stop ${a.autonomyStop} · ${a.breaker}${a.locked ? " 🔒" : ""}`,
     color: bandColor(a.breaker),

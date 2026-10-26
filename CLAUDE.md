@@ -21,6 +21,11 @@ command center (alerts, HUD, autonomy dial, kill-switch). Trading is fully auton
 Hard constraint from the operator: **$0 operating cost. No paid plans, no credit cards on file, ever.**
 If a feature needs money, it does not ship; we find the free path or cut it.
 
+**Product direction (operator, 2026-10-26):** CORTEX-54 is being commercialised as closed-source software customers run
+themselves: a desktop app (local mode), a headless image, and a community hub we host (docs/DISTRIBUTION.md). The $0
+rule still binds the operator's own deployment and every default; paid options (BYOK frontier models, the customer's
+own cloud) are the customer's choice and always optional.
+
 ---
 
 ## 2. The non-negotiables (constitution — `config/constitution.json`)
@@ -162,6 +167,13 @@ neurons/M, no output billing (ADR-043). **Jev** (TypeSafe AI) is not in our Work
 - **Re-verified 2026-10-26 (bull prompt, live BTC):** Gemini 3.5/3.8 returned 503 "high demand" at peak (3.5 answered ~14–20 s
   later); qwen and gpt-oss-20b answer in ~2 s; nemotron (NIM and OpenRouter) answers in prose, not JSON; deepseek-v4.1-flash
   times out at 60 s (out of the court chains, ADR-056).
+- **Canary 2026-10-26 (ADR-070):** Gemini 3.5/3.8 both 503 "high demand"; Groq `qwen/qwen3.8-27b` fails Groq's JSON
+  validation (400) and its TPM cap on a 3–4K prompt; gpt-oss-20b/120b answer valid JSON in ~1.2 s; NIM Nemotron is
+  valid 4/4 only with a ≥ 4,096-token output budget (it reasons first; at 1,500 it was cut off). Groq on this key also
+  lists allam-2-7b, whisper and prompt-guard only. NIM kimi-k2.6, mistral-large-2, gemma-3 return 404 ("Function not
+  found") and glm-5.3 times out at 60 s.
+- Alpaca crypto quotes and bars work **without keys**; news needs keys (local demo mode relies on this, 2026-10-26).
+- Chronos-2 (`amazon/chronos-2`, Apache-2.0) loads on CPU in ~65 s (first download) and forecasts in ~0.2 s per series.
 - NVIDIA NIM: enabled for this key — `deepseek-ai/deepseek-v4.1-flash`, `nvidia/nemotron-3-ultra-550b-a55b`
   (`nemotron-3-super` is *not* enabled). OpenRouter `:free` errored on every test (left out of chains).
 - **Verified 2026-10-24 (ADR-051):** Gemini Google Search grounding has no free quota; Groq `compound` is not on our key
@@ -270,6 +282,11 @@ workers/sentinel/         independent watchdog + kill-switch worker (own wrangle
 research/                 Python (uv): cortex_research.run crypto|equity|world — runs pinned upstream skills, signs,
                           POSTs /ingest/batch (research.yml); governor/ (ADR-030); options/ shadow lab (ADR-031);
                           pytest in CI. ADR-026
+local/                    cortexd local mode + `cortex` CLI (ADR-064/065): runtime, sandbox broker, jobs, service,
+                          deploy, runner, memory packs
+desktop/                  Tauri v2 app (ADR-066): src-tauri/ shell; bundles dist/cortexd + an official Node runtime
+hub/                      community hub Worker + D1 migrations (ADR-068), hosted by the publisher
+src/universe/ src/portfolio/ src/hub/   dynamic universe + scout (058), exits/lateness/book (059–061), hub protocol (068)
 test/                     vitest in Node: pure risk tests + full pulses against test/sim (FakeBroker + node:sqlite
                           with the real D1 migrations) — ADR-019
 .github/workflows/        ci.yml (+ research.yml, governor.yml added in later phases)
@@ -299,6 +316,10 @@ pnpm discord:register     # (global) slash commands for both Discord apps (needs
 gh workflow run governor -f weekly=true                     # governor now (report card + calibration proposal)
 # Discord /terminal → single-use link to the web terminal (https://cortex.samplayz2ks.workers.dev)
 gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATTEN ALL (ADR-022); action=rearm to clear
+pnpm cortex <setup|doctor|start|demo|link|service|kill|rearm|deploy|runner|hub|memory> [--json]   # local mode (ADR-064)
+pnpm demo                 # keyless local demo on live crypto prices (simulated broker)
+pnpm cortexd:build        # dist/cortexd bundle (no TS source); pnpm desktop:runtime && pnpm desktop:build → the app
+pnpm canary               # model drift canary against every court model (weekly in canary.yml, ADR-070)
 ```
 
 A doctrine value looser than the constitution fails `config:build`, which fails CI, which blocks deploy.
@@ -437,5 +458,10 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-26: first exits — LAB closed BTC/USD and AAVE/USD on TIME_STOP (+$0.08, +$0.10). ADR-056 gate review: REDUCE_ONLY
   admits court stock entries at half size under the coach's ceiling, transitional macro input, warm-up floor 0.5, court
   bull-decline fix and deepseek out of the chains.
+- 2026-10-26: ideas round (docs/IDEAS_WORKLOG.md, ADR-057…070): research desk v2, dynamic universe + scout, exit
+  intelligence, lateness meter + resting convictions, sanity vetoes, /why /roast /book /universe, ntfy + widgets, BYOK
+  models + portable Clef, cortexd local mode, desktop app, job queue + cortex deploy, community hub, Chronos-2 companion,
+  drift canary + chaos test. Product direction: closed-source desktop/headless software + a hosted hub
+  (docs/DISTRIBUTION.md).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

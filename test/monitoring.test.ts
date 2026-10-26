@@ -178,3 +178,26 @@ describe("ntfy push alerts (ADR-062)", () => {
     });
   });
 });
+
+describe("buy-and-hold benchmark (MLP0-024)", () => {
+  it("scales BTC and SPY to the account's first equity sample and skips gaps", async () => {
+    const { benchmarkLines, equityChartUrl } = await import("../src/cortex/Brain.ts");
+    const eq = [
+      [1000, 54],
+      [2000, 55],
+    ];
+    const b = benchmarkLines(eq, [
+      { at: 500, btc: 50, spy: 400 },
+      { at: 1000, btc: 100, spy: null },
+      { at: 2000, btc: 110, spy: 420 },
+    ]);
+    expect(b.btc).toEqual([
+      [1000, 54],
+      [2000, 59.4],
+    ]);
+    expect(b.spy).toEqual([[2000, 54]]); // starts where SPY first has a price
+    expect(benchmarkLines([], [])).toEqual({ btc: [], spy: [] });
+    const url = equityChartUrl(eq, b) as string;
+    expect(decodeURIComponent(url)).toContain('"label":"BTC hold"');
+  });
+});
