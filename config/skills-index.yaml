@@ -6,7 +6,7 @@ sources:
   tradermonty: { repo: tradermonty/claude-trading-skills, license: MIT }
   kronos: { repo: shiyu-coder/Kronos, license: MIT }
   staskh: { repo: staskh/trading_skills, license: MIT }
-  new: { repo: x-TheFox/Cortex-54, license: TBD }
+  new: { repo: cortex-54, license: proprietary } # our own skills (commercial, ADR-066)
 
 families:
   CTX: Market context and regime
