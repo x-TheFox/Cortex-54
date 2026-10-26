@@ -78,7 +78,7 @@ class ChaosBroker implements BrokerApi {
   }
 }
 
-function run(seed: number, pulses: number) {
+function run(seed: number) {
   const r = rng(seed);
   const T0 = Date.UTC(2026, 9, 22, 12);
   let now = T0;
@@ -143,7 +143,7 @@ function run(seed: number, pulses: number) {
 
 describe("chaos: random broker faults never break the money invariants (ADR-070)", () => {
   it.each([1, 7, 42, 1337])("seed %i", async (seed) => {
-    const t = run(seed, 300);
+    const t = run(seed);
     let p = 100;
     let checked = 0;
     for (let i = 0; i < 300; i++) {
