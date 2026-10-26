@@ -86,6 +86,9 @@ export const AlpacaAssetSchema = z.object({
   min_order_size: DecN,
   min_trade_increment: DecN,
   price_increment: DecN,
+  /** ADR-058: the universe screen reads these (leveraged-product names, OTC listings) */
+  name: z.string().nullable().optional(),
+  exchange: z.string().nullable().optional(),
 });
 export type AlpacaAsset = z.infer<typeof AlpacaAssetSchema>;
 
@@ -156,7 +159,7 @@ export interface NewsItem {
 
 /** Market data (shared by both accounts; any valid key works). */
 export interface MarketDataApi {
-  /** Benzinga news via Alpaca (free plan), oldest first, strictly after `sinceIso`. */
+  /** Benzinga news via Alpaca (free plan), oldest first, strictly after `sinceIso`. ["*"] = every symbol. */
   news(symbols: string[], sinceIso: string): Promise<NewsItem[]>;
   cryptoQuotes(symbols: string[]): Promise<Record<string, Quote>>;
   stockQuotes(symbols: string[]): Promise<Record<string, Quote>>;

@@ -84,11 +84,18 @@ export interface ResearchView {
   catalysts: { event: string; date: string | null }[];
   risks: string[];
   open_questions: string[];
+  /** ADR-057: general market picture today; where the catalyst story came from; cruxes; filing red flags */
+  market_context: string;
+  catalyst_trace: { first_reported: string | null; story: string; original_source: string | null } | null;
+  cruxes: { question: string; answer: string | null }[];
+  flags: string[];
+  stage: string;
   findings: {
     id: string;
     claim: string;
     published: string | null;
     stance: string;
+    scope: string;
     /** true = the agent read the page; false = only seen as a search headline */
     read: boolean;
     source: string;
@@ -121,15 +128,29 @@ export function researchView(d: Dossier, now: number): ResearchView {
     catalysts: d.catalysts.map((c) => ({ event: c.event, date: c.date })),
     risks: d.risks,
     open_questions: d.open_questions,
-    findings: d.findings.map((f, i) => ({
+    market_context: d.market_context,
+    catalyst_trace: d.catalyst_trace
+      ? {
+          first_reported: d.catalyst_trace.first_reported,
+          story: d.catalyst_trace.story,
+          original_source: d.catalyst_trace.original_source_url
+            ? host(d.catalyst_trace.original_source_url)
+            : null,
+        }
+      : null,
+    cruxes: d.cruxes,
+    flags: d.flags,
+    stage: d.stage,
+    findings: d.findings.slice(0, 20).map((f, i) => ({
       id: `res_${i + 1}`,
       claim: f.claim,
       published: f.published,
       stance: f.stance,
+      scope: f.scope,
       read: f.verified,
       source: host(f.source_url),
     })),
-    method: `${d.agent.steps} steps, ${d.agent.tool_calls} tool calls, ${d.agent.pages_read} pages read, ${d.sources.length} cited sources`,
+    method: `${d.stage} dossier: ${d.agent.steps} steps, ${d.agent.tool_calls} tool calls, ${d.agent.pages_read} pages read, ${d.sources.length} cited sources${d.agent.compactions ? `, compacted ${d.agent.compactions}×` : ""}`,
   };
 }
 

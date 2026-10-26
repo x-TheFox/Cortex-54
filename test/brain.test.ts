@@ -1066,7 +1066,8 @@ describe("court end-to-end (Phase 3)", () => {
     expect(await t.brain.requestCourt("BTC/USD", "test")).toMatch(/ended without a contract/);
     const card = t.notifier.sent.find((m) => m.channel === "court");
     expect(card?.msg.embeds?.at(-1)?.fields?.at(-1)?.value).toContain("No cross-family bear");
-    expect(await t.brain.requestCourt("PLTR", "test")).toMatch(/isn't in the tradeable universe/);
+    // ADR-058: an unknown symbol is screened by the scout; with no market data for it, the screen refuses
+    expect(await t.brain.requestCourt("PLTR", "test")).toMatch(/PLTR can't be traded: .*only 0 daily bars/);
   });
 
   const dossierBatch = (symbol: string, asOf: number) => ({
@@ -1150,7 +1151,9 @@ describe("court end-to-end (Phase 3)", () => {
 
     const ing = await t.brain.ingestBatch(dossierBatch("BTC/USD", T0 + 120_000));
     expect(ing).toEqual({ ok: true, message: "stored dossier for BTC/USD (1 findings)" });
-    expect(t.notifier.sent.some((m) => m.msg.embeds?.[0]?.title === "📚 Research desk — BTC/USD")).toBe(true);
+    expect(
+      t.notifier.sent.some((m) => m.msg.embeds?.[0]?.title === "⚡ Research desk (fast) — BTC/USD"),
+    ).toBe(true);
     t.advance(60_000);
     const r3 = await t.brain.pulse();
     expect(r3.courtContracts).toBe(1);

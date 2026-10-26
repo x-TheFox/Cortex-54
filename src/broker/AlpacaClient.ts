@@ -195,11 +195,13 @@ export class AlpacaMarketData implements MarketDataApi {
     private readonly fetcher: Fetcher = (u, i) => fetch(u, i),
   ) {}
 
+  /** `symbols` = ["*"] reads the whole news stream (ADR-058: the scout's universe-wide intake). */
   async news(symbols: string[], sinceIso: string): Promise<NewsItem[]> {
     if (symbols.length === 0) return [];
+    const all = symbols.length === 1 && symbols[0] === "*";
     const url =
       `${DATA_BASE}/v1beta1/news?sort=asc&limit=50&include_content=false` +
-      `&start=${encodeURIComponent(sinceIso)}&symbols=${encodeURIComponent(symbols.join(","))}`;
+      `&start=${encodeURIComponent(sinceIso)}${all ? "" : `&symbols=${encodeURIComponent(symbols.join(","))}`}`;
     const body = await call(this.fetcher, this.guard, this.creds, url, z.object({ news: z.array(NewsRow) }));
     return body.news.map((n) => ({
       id: String(n.id),

@@ -28,6 +28,8 @@ export class Market {
   quotes: Record<string, Quote> = {};
   news: NewsItem[] = [];
   bars: Record<string, Bar[]> = {};
+  /** per-symbol asset overrides (name, exchange, fractionable…) for universe-screen tests */
+  assets: Record<string, Partial<AlpacaAsset>> = {};
   constructor(public clock: () => number) {}
   set(symbol: string, bid: number, ask: number): void {
     this.quotes[symbol] = { bid, ask, at: this.clock() };
@@ -187,15 +189,19 @@ export class FakeBroker implements BrokerApi {
   }
 
   async asset(symbol: string): Promise<AlpacaAsset> {
+    const crypto = symbol.includes("/");
     return {
       symbol,
-      class: "crypto",
+      class: crypto ? "crypto" : "us_equity",
       tradable: true,
       fractionable: true,
       status: "active",
       min_order_size: "0.01",
       min_trade_increment: "0.001",
       price_increment: "0.001",
+      name: crypto ? `${symbol} coin` : `${symbol} Inc. Common Stock`,
+      exchange: crypto ? "CRYPTO" : "NASDAQ",
+      ...this.market.assets[symbol],
     };
   }
 
@@ -260,7 +266,10 @@ export class FakeMarketData implements MarketDataApi {
   async news(symbols: string[], sinceIso: string): Promise<NewsItem[]> {
     const since = Date.parse(sinceIso);
     // Alpaca's `start` is inclusive (this hid a re-queue bug when the fake was exclusive).
-    return this.m.news.filter((n) => n.createdAt >= since && n.symbols.some((s) => symbols.includes(s)));
+    const all = symbols.length === 1 && symbols[0] === "*";
+    return this.m.news.filter(
+      (n) => n.createdAt >= since && (all || n.symbols.some((s) => symbols.includes(s))),
+    );
   }
   async cryptoQuotes(symbols: string[]): Promise<Record<string, Quote>> {
     return Object.fromEntries(

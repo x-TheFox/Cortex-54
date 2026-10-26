@@ -199,6 +199,39 @@ export const DoctrineSchema = z.object({
     }),
   ),
   watchlists: z.record(z.string(), z.array(z.string())),
+  /**
+   * ADR-058: dynamic universe. The scout hot-ports any Alpaca asset that passes the code screen when a catalyst about
+   * it reaches Tier 2; research-named related symbols are watched. The doctrine watchlists stay the permanent core.
+   */
+  universe: z
+    .object({
+      enabled: z.boolean(),
+      /** news intake: only watched symbols, or the whole Alpaca news stream behind the Tier 0.5 prefilter */
+      news_scope: z.enum(["watchlist", "all"]),
+      max_dynamic: z.number().int().min(0).max(200),
+      ttl_days: z.number().positive().max(60),
+      min_price_usd: z.number().nonnegative(),
+      min_dollar_volume_usd: z.record(z.enum(["CRYPTO", "EQUITIES"]), z.number().nonnegative()),
+      max_spread_bps: z.record(z.enum(["CRYPTO", "EQUITIES"]), z.number().positive()),
+      max_ports_per_day: z.number().int().nonnegative(),
+      max_watch: z.number().int().nonnegative(),
+      prefilter_min_score: z.number(),
+      /** headlines about non-priority symbols allowed into Tier 1 per UTC day (neuron guard) */
+      max_open_intake_per_day: z.number().int().nonnegative(),
+    })
+    .default({
+      enabled: false,
+      news_scope: "watchlist",
+      max_dynamic: 0,
+      ttl_days: 7,
+      min_price_usd: 5,
+      min_dollar_volume_usd: { CRYPTO: 1_000_000, EQUITIES: 20_000_000 },
+      max_spread_bps: { CRYPTO: 40, EQUITIES: 20 },
+      max_ports_per_day: 0,
+      max_watch: 0,
+      prefilter_min_score: 2,
+      max_open_intake_per_day: 0,
+    }),
 });
 
 export type Doctrine = z.infer<typeof DoctrineSchema>;

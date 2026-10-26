@@ -3,7 +3,7 @@
  * Small, transactional, current-state only. History goes to D1 via the outbox.
  * Once deployed: bump HOT_SCHEMA_VERSION and append statements; never edit applied ones.
  */
-export const HOT_SCHEMA_VERSION = 7;
+export const HOT_SCHEMA_VERSION = 8;
 
 export const HOT_SCHEMA: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -84,4 +84,9 @@ export const HOT_SCHEMA: readonly string[] = [
      received_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS court_waits (candidate_id TEXT PRIMARY KEY, symbol TEXT NOT NULL,
      until_at INTEGER NOT NULL)`,
+  // v8: dynamic universe (ADR-058) and the prefilter's near-duplicate memory
+  `CREATE TABLE IF NOT EXISTS universe (symbol TEXT PRIMARY KEY, arena TEXT NOT NULL, status TEXT NOT NULL,
+     source TEXT NOT NULL, reason TEXT NOT NULL, metrics_json TEXT NOT NULL, added_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS headline_ring (id TEXT PRIMARY KEY, tokens TEXT NOT NULL, at INTEGER NOT NULL)`,
 ];

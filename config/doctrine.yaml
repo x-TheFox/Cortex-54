@@ -525,3 +525,21 @@ watchlists:
   equities_core: [SPY, QQQ, IWM]
   # Mega-caps: frequent news and SEC filings, fractionable, tight spreads.
   equities_catalyst: [AAPL, MSFT, NVDA, AMZN, META, GOOGL, TSLA, AMD, AVGO, NFLX, JPM, XOM]
+
+# ADR-058: dynamic universe. The doctrine watchlists above stay the permanent core (rule strategies, Kronos, regime
+# proxies). The whole Alpaca news stream is intake behind a zero-neuron prefilter; a catalyst about any other symbol
+# that reaches Tier 2 is screened in code and hot-ported for ttl_days. Thresholds were set from live data on
+# 2026-10-26: Alpaca's own crypto venue trades ~$5k/day in DOT and ~$200k/day in BTC; the free IEX stock feed is ~2%
+# of consolidated volume (NVDA ≈ $670M/day on IEX), and IEX quotes are wider than the real market.
+universe:
+  enabled: true
+  news_scope: all
+  max_dynamic: 40 # hot-ported TRADE symbols at once (oldest unheld evicted)
+  ttl_days: 7 # a new catalyst renews it; a held symbol never expires
+  min_price_usd: 3 # equities only
+  min_dollar_volume_usd: { CRYPTO: 1000, EQUITIES: 5000000 } # 20-day average on Alpaca's venue / IEX
+  max_spread_bps: { CRYPTO: 40, EQUITIES: 60 } # screen only; the validator still applies execution.max_spread_bps
+  max_ports_per_day: 12 # screens per UTC day (3 data calls each)
+  max_watch: 60 # research-named related symbols
+  prefilter_min_score: 2
+  max_open_intake_per_day: 150 # non-watchlist headlines into Tier 1 (≈180 clef-flash neurons)

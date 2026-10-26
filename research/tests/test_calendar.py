@@ -23,3 +23,42 @@ def test_screener_candidates_filter_and_map_symbols():
     ]}
     out = candidates("stockbee-momentum-burst-screener", rep, {to_key("SOL/USD"): "SOL/USD", "AAPL": "AAPL", "NVDA": "NVDA"}, 1)
     assert [c["symbol"] for c in out] == ["SOL/USD"] and out[0]["score"] == 81 and "momentum burst" in out[0]["headline"]
+
+
+def test_merge_covers_every_us_ticker_inside_the_blackout_window():
+    ev = [{"symbol": "PLTR", "date": "2026-10-28"}, {"symbol": "PLTR", "date": "2026-11-05"},
+          {"symbol": "9434", "date": "2026-10-28"}, {"symbol": "BRK.B", "date": "2026-10-27"},
+          {"symbol": "AAPL", "date": "2026-11-05"}]
+    got = merge(ev, {"AAPL"}, all_until="2026-10-30")
+    assert got == [{"symbol": "BRK.B", "date": "2026-10-27"}, {"symbol": "PLTR", "date": "2026-10-28"},
+                   {"symbol": "AAPL", "date": "2026-11-05"}]  # far-off non-watch rows and foreign codes dropped
+
+
+def test_calendar_claims_full_coverage_only_when_nasdaq_answered_every_day(monkeypatch):
+    from cortex_research import calendar as C
+
+    class R:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": {"rows": self.rows}}
+
+    calls = []
+
+    def get(url, params=None, **kw):
+        calls.append(params["date"])
+        if len(calls) == 3:
+            raise C.requests.ConnectionError("blip")
+        return R([{"symbol": "PLTR"}])
+
+    monkeypatch.setattr(C.requests, "get", get)
+    monkeypatch.delenv("FMP_API_KEY", raising=False)
+    out = C.earnings_calendar(set(), date(2026, 10, 26), 8)
+    assert out["coverage"] == "watchlist"  # one day missing → hot-ported stocks stay uncovered (fail closed)
+    calls.clear()
+    monkeypatch.setattr(C.requests, "get", lambda url, params=None, **kw: R([{"symbol": "PLTR"}]))
+    assert C.earnings_calendar(set(), date(2026, 10, 26), 8)["coverage"] == "all"

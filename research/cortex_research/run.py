@@ -232,8 +232,18 @@ def main() -> int:
     if a.job == "dossier":
         from .deep.job import dossier_job
 
-        b = dossier_job(REPO / "config" / "doctrine.yaml", os.environ.get("DOSSIER_SYMBOL", ""),
-                        os.environ.get("DOSSIER_CONTEXT", ""), now_ms(), run_url())
+        def post(batch: dict) -> bool:
+            if a.dry_run:
+                return True
+            r = sign_and_post(P.dumps(batch))
+            print(f"ingest (fast) → HTTP {r.status_code}: {r.text[:200]}")
+            return r.ok
+
+        env = os.environ.get
+        b = dossier_job(REPO / "config" / "doctrine.yaml", env("DOSSIER_SYMBOL", ""), env("DOSSIER_CONTEXT", ""),
+                        now_ms(), run_url(), arena=env("DOSSIER_ARENA", ""), mode=env("DOSSIER_MODE", "case"),
+                        depth=env("DOSSIER_DEPTH", "standard"), catalyst=env("DOSSIER_CATALYST", ""),
+                        kill=env("DOSSIER_KILL", ""), post=post)
         if b is None:
             return 1
     elif a.job == "screeners":

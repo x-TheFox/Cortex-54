@@ -210,12 +210,26 @@ const Day = z
   .regex(/^20\d\d-[01]\d-[0-3]\d$/)
   .nullable();
 const Stance = z.enum(["BULL", "BEAR", "NEUTRAL"]);
+const Scope = z.enum(["MARKET", "CATALYST", "ASSET", "CONTRA"]);
 export const DossierPayloadSchema = z.object({
   symbol: z.string().min(1).max(16),
   arena: z.enum(["CRYPTO", "EQUITIES"]),
   question: z.string().max(300),
   as_of: z.number().int(),
+  /** ADR-057: fast (the court's copy), deep (replaces it later), watch (an open position). Older runs: absent. */
+  stage: z.enum(["fast", "deep", "watch"]).default("fast"),
   summary: z.string().max(1200),
+  /** ADR-057: the general market picture today (the MARKET scope). */
+  market_context: z.string().max(700).default(""),
+  /** ADR-057: where the triggering story came from (only URLs a tool returned survive). */
+  catalyst_trace: z
+    .object({
+      first_reported: Day,
+      original_source_url: z.string().max(500).nullable(),
+      story: z.string().max(500),
+    })
+    .nullable()
+    .default(null),
   bull_case: z.string().max(700),
   bear_case: z.string().max(700),
   catalysts: z
@@ -225,6 +239,22 @@ export const DossierPayloadSchema = z.object({
     .max(8),
   risks: z.array(z.string().max(200)).max(6),
   open_questions: z.array(z.string().max(200)).max(4),
+  /** ADR-057 (crux-first, MLP6-001): the questions the decision turns on and what the research found. */
+  cruxes: z
+    .array(z.object({ question: z.string().max(200), answer: z.string().max(300).nullable() }))
+    .max(3)
+    .default([]),
+  /** ADR-057: related symbols the research named (the scout screens them before watching any). */
+  related: z
+    .array(z.object({ symbol: z.string().min(1).max(16), relation: z.string().max(20) }))
+    .max(8)
+    .default([]),
+  /** ADR-057: code-computed red flags from the filings a tool returned (dilution_filing:FORM:DATE, recent_8k:DATE). */
+  flags: z.array(z.string().max(60)).max(6).default([]),
+  /** ADR-057 watch mode: is the reason the position was bought still alive? */
+  thesis: z
+    .object({ status: z.enum(["INTACT", "WEAKENED", "BROKEN"]), reason: z.string().max(300) })
+    .optional(),
   findings: z
     .array(
       z.object({
@@ -233,10 +263,11 @@ export const DossierPayloadSchema = z.object({
         source_title: z.string().max(160),
         published: Day,
         stance: Stance,
+        scope: Scope.default("ASSET"),
         verified: z.boolean(),
       }),
     )
-    .max(16),
+    .max(24),
   sources: z
     .array(
       z.object({
@@ -246,7 +277,7 @@ export const DossierPayloadSchema = z.object({
         read: z.boolean(),
       }),
     )
-    .max(24),
+    .max(32),
   agent: z.object({
     prompt_version: z.string().max(40),
     models: z.array(z.string().max(80)).max(5),
@@ -256,6 +287,7 @@ export const DossierPayloadSchema = z.object({
     wall_s: z.number().nonnegative(),
     tokens: z.number().int().nonnegative(),
     stop_reason: z.string().max(60),
+    compactions: z.number().int().nonnegative().default(0),
   }),
 });
 export type Dossier = z.infer<typeof DossierPayloadSchema>;

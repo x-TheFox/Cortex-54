@@ -31,6 +31,26 @@ on:
         description: "dossier only: why the court is convening"
         required: false
         type: string
+      arena:
+        description: "dossier only: CRYPTO or EQUITIES (the brain sends it; needed for symbols outside the watchlists)"
+        required: false
+        type: string
+      mode:
+        description: "dossier only: case (before a court) or watch (an open position)"
+        required: false
+        type: string
+      depth:
+        description: "dossier only: quick | standard | deep"
+        required: false
+        type: string
+      catalyst:
+        description: "dossier only: the headline that triggered the case"
+        required: false
+        type: string
+      kill:
+        description: "dossier only (watch): the bear's kill criteria, separated by |"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -49,7 +69,7 @@ env:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 45 # Kronos-base: ~25 s per pair on CPU
+    timeout-minutes: 160 # Kronos-base ~25 s per pair on CPU; the deep research ring up to ~2 h (ADR-057)
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -105,7 +125,7 @@ jobs:
       - name: Deep research dossier (ADR-051; read-only web tools, free LLM chain)
         if: steps.pick.outputs.job == 'dossier'
         working-directory: research
-        timeout-minutes: 25
+        timeout-minutes: 150 # ADR-057: fast dossier posts within ~15 min; the deep ring may run up to ~2 h
         env:
           CORTEX_URL: ${{ vars.CORTEX_URL }}
           INGEST_HMAC_SECRET: ${{ secrets.INGEST_HMAC_SECRET }}
@@ -118,6 +138,11 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DOSSIER_SYMBOL: ${{ inputs.symbol }}
           DOSSIER_CONTEXT: ${{ inputs.context }}
+          DOSSIER_ARENA: ${{ inputs.arena }}
+          DOSSIER_MODE: ${{ inputs.mode }}
+          DOSSIER_DEPTH: ${{ inputs.depth }}
+          DOSSIER_CATALYST: ${{ inputs.catalyst }}
+          DOSSIER_KILL: ${{ inputs.kill }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: uv run python -m cortex_research.run dossier
       - name: Run and ingest

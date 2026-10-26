@@ -61,7 +61,6 @@ import {
   evidenceForModels,
   KRONOS_ABOUT,
   researchView,
-  resolveTradeable,
 } from "../court/evidence.ts";
 import type { HopAttempt, LlmRouter } from "../court/llm.ts";
 import {
@@ -132,6 +131,9 @@ import {
   kronosParams,
   kronosSignal,
 } from "../strategy/KronosForecast.ts";
+import { prefilter } from "../universe/prefilter.ts";
+import { normalizeSymbol, screenAsset } from "../universe/screen.ts";
+import { Universe } from "../universe/Universe.ts";
 import { dueJobs, type WorkflowDispatcher } from "./dispatch.ts";
 import { getKV, one, type SqlLike, type SqlValue, setKV } from "./store.ts";
 
@@ -347,6 +349,8 @@ export interface StatusView {
 export class Brain {
   readonly journal: Journal;
   readonly budget: FreeTierBudget;
+  /** ADR-058: dynamic universe (scout-ported and research-watched symbols beyond the doctrine watchlists) */
+  readonly universe: Universe;
   /** Most recent risk-engine rejection reasons per contract (for the courtroom card). */
   private readonly lastRejections = new Map<string, string[]>();
   /** Notable journal events waiting for the #agent-terminal stream (posted once per pulse). */
@@ -367,6 +371,7 @@ export class Brain {
       if (this.termBuffer.length > 40) this.termBuffer.shift();
     };
     this.budget = new FreeTierBudget(deps.sql, deps.d);
+    this.universe = new Universe(deps.sql, deps.d, deps.c);
     // Audit W2-06: court providers respect per-provider daily call caps (free-tier RPD with margin).
     if (deps.llm) {
       const key = (p: string) => `llm_calls:${p}:${utcDay(deps.now())}`;
@@ -792,6 +797,7 @@ export class Brain {
     this.sql.exec("DELETE FROM dossiers WHERE received_at < ?", now - 7 * day);
     this.sql.exec("DELETE FROM court_waits WHERE until_at < ?", now - day);
     this.sql.exec("DELETE FROM settings WHERE key LIKE 'research_pending:%' AND updated_at < ?", now - day);
+    this.universe.compact(now);
   }
 
   // ------------------------------------------------------------------ broker sync / reconcile
@@ -1800,9 +1806,15 @@ ${postmortem}`,
     const r = DossierPayloadSchema.safeParse(b.items.find((x) => x.skill_id === "deep-research")?.payload);
     if (!r.success) return { ok: false, message: "dossier payload failed the schema" };
     const dz = r.data;
-    const target = resolveTradeable([dz.symbol], this.d);
+    const target = this.universe.resolve([dz.symbol], now);
     if (!target || target.symbol !== dz.symbol)
       return { ok: false, message: `${dz.symbol} is not tradeable` };
+    // ADR-058: symbols the research named as related are watched (their news always reaches Tier 1)
+    const watched = this.universe.watch(
+      dz.related.map((x) => x.symbol),
+      `related:${dz.symbol}`,
+      now,
+    );
     this.sql.exec(
       "INSERT OR REPLACE INTO dossiers (symbol, as_of, json, received_at) VALUES (?, ?, ?, ?)",
       dz.symbol,
@@ -1822,6 +1834,8 @@ ${postmortem}`,
         findings: dz.findings.length,
         read: dz.findings.filter((f) => f.verified).length,
         sources: dz.sources.length,
+        stage: dz.stage,
+        watched,
         ...dz.agent,
       },
       now,
@@ -2195,15 +2209,35 @@ ${postmortem}`,
     return [...s].map((x) => x.replace("/", "")).slice(0, 40);
   }
 
-  /** Pull new headlines into triage_queue (deduped, capped at TRIAGE_QUEUE_MAX). Returns how many were queued. */
+  /**
+   * Pull new headlines into triage_queue (deduped, capped at TRIAGE_QUEUE_MAX). Returns how many were queued.
+   * ADR-058: with `universe.news_scope: all` the whole Alpaca news stream comes in, and the zero-neuron prefilter
+   * keeps Tier 1 spend flat: core/held/watched symbols always pass, other headlines need catalyst words and a daily
+   * slot, and near-duplicates of the last 4 h are dropped.
+   */
   private async intakeNews(): Promise<number> {
     const m = this.deps.market;
     if (!m) return 0;
     const now = this.deps.now();
+    const u = this.d.universe;
+    const open = u.enabled && u.news_scope === "all";
     const cursor = one<{ value: string }>(this.sql, "SELECT value FROM cursors WHERE name = 'news'")?.value;
     const since = cursor ?? new Date(now - 3_600_000).toISOString();
-    const items = await m.news(this.newsSymbols(), since);
+    let items = await m.news(open ? ["*"] : this.newsSymbols(), since);
+    if (open && items.length >= 50) {
+      // a busy hour: one more page so the cursor keeps up with the wire
+      const next = new Date((items.at(-1)?.createdAt ?? now) + 1000).toISOString();
+      items = [...items, ...(await m.news(["*"], next))];
+    }
+    const priority = new Set<string>([
+      ...this.newsSymbols(),
+      ...this.universe.watched(now),
+      ...this.symbolsInPlay(),
+    ]);
+    for (const s of [...priority]) priority.add(s.replace("/", ""));
+    const recent = open ? this.universe.recentTokens(now) : [];
     let queued = 0;
+    let dropped = 0;
     let last = since;
     for (const n of items) {
       // Alpaca's `start` is inclusive: step 1 s past the newest item, and remember ids so a dropped item
@@ -2211,6 +2245,21 @@ ${postmortem}`,
       last = new Date(Math.max(Date.parse(last), n.createdAt + 1000)).toISOString();
       const id = `news:${n.id}`;
       if (!this.markSeen(id, now)) continue;
+      if (open) {
+        const v = prefilter(
+          { headline: n.headline, summary: n.summary, symbols: n.symbols, source: n.source },
+          { priority, recent, minScore: u.prefilter_min_score },
+        );
+        const isPriority = v.why === "core/held/watched symbol";
+        const slot = isPriority || this.daily("open_intake", now) < u.max_open_intake_per_day;
+        if (!v.pass || !slot) {
+          dropped++;
+          continue;
+        }
+        if (!isPriority) this.bumpDaily("open_intake", now);
+        recent.push(v.tokens);
+        this.universe.rememberHeadline(id, v.tokens, now);
+      }
       this.sql.exec(
         "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 1, ?, ?, ?)",
         id,
@@ -2228,8 +2277,80 @@ ${postmortem}`,
     this.sql.exec(
       `DELETE FROM triage_queue WHERE candidate_id NOT IN (SELECT candidate_id FROM triage_queue ORDER BY enqueued_at DESC LIMIT ${TRIAGE_QUEUE_MAX})`,
     );
-    if (queued > 0) this.journal.append("SYSTEM", "NEWS_INTAKE", null, { queued, since }, now);
+    if (queued > 0 || dropped > 0)
+      this.journal.append("SYSTEM", "NEWS_INTAKE", null, { queued, prefiltered: dropped, since }, now);
     return queued;
+  }
+
+  /**
+   * ADR-058 scout: a symbol outside the universe got a promoted catalyst. Screen it in code (asset record, 30+ daily
+   * bars, dollar volume, spread, no leveraged/inverse product, no stablecoin) and, if it passes, hot-port it as a
+   * TRADE symbol for `ttl_days`. Cached rejections stop re-screening for a day. Never trades by itself.
+   */
+  private async scoutPort(
+    symbols: string[],
+    why: string,
+    now: number,
+    source = "scout",
+  ): Promise<{ symbol: string; arena: "CRYPTO" | "EQUITIES" } | { reason: string }> {
+    const u = this.d.universe;
+    if (!u.enabled) return { reason: "no tradeable symbol" };
+    const m = this.deps.market;
+    const via = (["PAPER", "LIVE"] as AccountId[]).find((a) => this.deps.brokers[a]);
+    if (!m || !via) return { reason: "no tradeable symbol (no market data to screen it)" };
+    const cands = [
+      ...new Map(
+        symbols
+          .map(normalizeSymbol)
+          .filter((x): x is NonNullable<typeof x> => x !== null)
+          .map((x) => [x.symbol, x]),
+      ).values(),
+    ].slice(0, 3);
+    if (cands.length === 0) return { reason: "no tradeable symbol" };
+    let reason = "no tradeable symbol";
+    for (const c of cands) {
+      const prev = this.universe.row(c.symbol);
+      if (prev?.status === "REJECTED" && prev.expires_at > now) {
+        reason = `${c.symbol} failed the universe screen: ${prev.reason}`;
+        continue;
+      }
+      if (this.daily("ports", now) >= u.max_ports_per_day)
+        return { reason: "scout port cap reached for today" };
+      this.bumpDaily("ports", now);
+      const [asset, bars, quotes] = await Promise.all([
+        this.assetMeta(c.symbol, via).catch(() => null),
+        (c.arena === "CRYPTO"
+          ? m.cryptoDailyBars([c.symbol], 45, now)
+          : m.stockDailyBars([c.symbol], 45, now)
+        )
+          .then((b) => b[c.symbol])
+          .catch(() => undefined),
+        this.quotesFor([c.symbol]).catch(() => ({}) as Record<string, Quote>),
+      ]);
+      const res = screenAsset(
+        { symbol: c.symbol, arena: c.arena, asset, bars, quote: quotes[c.symbol] },
+        this.d,
+        this.c,
+      );
+      this.universe.record(c.symbol, c.arena, res, source, why, now);
+      this.journal.append(
+        "SYSTEM",
+        res.ok ? "UNIVERSE_PORT" : "UNIVERSE_REJECT",
+        null,
+        {
+          symbol: c.symbol,
+          arena: c.arena,
+          source,
+          why: why.slice(0, 160),
+          reasons: res.reasons,
+          ...res.metrics,
+        },
+        now,
+      );
+      if (res.ok) return { symbol: c.symbol, arena: c.arena };
+      reason = `${c.symbol} failed the universe screen: ${res.reasons.slice(0, 2).join("; ")}`;
+    }
+    return { reason };
   }
 
   /** True the first time an intake id is seen (then remembered for 3 days). */
@@ -2312,6 +2433,9 @@ ${postmortem}`,
     if (contract.arena === "EQUITIES") {
       const asOf = Number(getKV(this.sql, "earnings_as_of") ?? 0);
       if (now - asOf > EARNINGS_CALENDAR_MAX_AGE_MS) return "earnings calendar stale (fail closed)";
+      // ADR-058: a hot-ported stock needs a calendar that covers the whole market, not just the watchlists
+      if (this.universe.isDynamic(contract.symbol, now) && getKV(this.sql, "earnings_coverage") !== "all")
+        return "earnings calendar doesn't cover hot-ported stocks (fail closed)";
       const today = utcDay(now);
       const horizon = utcDay(now + this.d.execution.earnings_blackout_hours * 3_600_000);
       const e = one<{ date: string }>(
@@ -2564,7 +2688,14 @@ ${postmortem}`,
     const p = JSON.parse(row.payload_json) as Record<string, unknown>;
     const t1 = (p.tier1 ?? null) as { material: number; direction: string; escalate: number } | null;
     const symbols = Array.isArray(p.symbols) ? (p.symbols as string[]) : [];
-    const target = resolveTradeable(symbols, this.d);
+    let target: { symbol: string; arena: "CRYPTO" | "EQUITIES" } | null = this.universe.resolve(symbols, now);
+    if (target && this.universe.isDynamic(target.symbol, now)) this.universe.touch(target.symbol, now);
+    if (!target && t1?.direction !== "down") {
+      const ported = await this.scoutPort(symbols, String(p.headline ?? "").slice(0, 200), now);
+      if ("reason" in ported)
+        return { ok: false, reason: ported.reason, symbol: symbols[0] ?? "", arena: "?" };
+      target = ported;
+    }
     if (!target) return { ok: false, reason: "no tradeable symbol", symbol: symbols[0] ?? "", arena: "?" };
     const { symbol, arena } = target;
     if (t1?.direction === "down") return { ok: false, reason: "bearish catalyst (long-only)", symbol, arena };
@@ -2756,6 +2887,11 @@ ${postmortem}`,
       ev.evidence.arena,
       `Tier 2 passed it (quality ${dcs.quality100}/100). Catalyst: ${ev.evidence.catalyst.headline}`,
       now,
+      {
+        // MLP4-013: the strongest cases (and exception-lane ones) get the long research budget
+        depth: dcs.quality100 >= 90 || ev.evidence.regimeException ? "deep" : "standard",
+        catalyst: ev.evidence.catalyst.headline,
+      },
     );
     return 1;
   }
@@ -2782,6 +2918,7 @@ ${postmortem}`,
     arena: "CRYPTO" | "EQUITIES",
     context: string,
     now: number,
+    opts: { depth?: "quick" | "standard" | "deep"; catalyst?: string } = {},
   ): Promise<boolean> {
     const cfg = this.d.funnel.research;
     const dispatcher = this.deps.dispatcher;
@@ -2805,6 +2942,11 @@ ${postmortem}`,
         job: "dossier",
         symbol,
         context: context.replace(/\s+/g, " ").slice(0, 280),
+        // ADR-057: arena (scout-ported symbols aren't in the watchlists), stake-weighted depth, the catalyst itself
+        arena,
+        mode: "case",
+        depth: opts.depth ?? "standard",
+        catalyst: (opts.catalyst ?? "").replace(/\s+/g, " ").slice(0, 280),
       });
     } catch (e) {
       await this.alertOnce("research", `⚠️ research dispatch failed (${symbol}): ${errText(e).slice(0, 200)}`);
@@ -2812,7 +2954,13 @@ ${postmortem}`,
     }
     this.bumpDaily("research", now);
     setKV(this.sql, pendingKey, String(now), now);
-    this.journal.append("SYSTEM", "RESEARCH_REQUEST", candidateId, { symbol, arena, context }, now);
+    this.journal.append(
+      "SYSTEM",
+      "RESEARCH_REQUEST",
+      candidateId,
+      { symbol, arena, context, depth: opts.depth ?? "standard" },
+      now,
+    );
     return hold(now);
   }
 
@@ -2822,8 +2970,18 @@ ${postmortem}`,
    */
   async requestCourt(symbolInput: string, by: string): Promise<string> {
     const now = this.deps.now();
-    const target = resolveTradeable([symbolInput.trim()], this.d);
-    if (!target) return `${symbolInput} isn't in the tradeable universe (doctrine watchlists).`;
+    let target: { symbol: string; arena: "CRYPTO" | "EQUITIES" } | null = this.universe.resolve(
+      [symbolInput.trim()],
+      now,
+    );
+    if (!target && !this.universe.enabled)
+      return `${symbolInput} isn't in the tradeable universe (doctrine watchlists).`;
+    if (!target) {
+      // ADR-058: the operator may name any symbol; the scout screens it like a catalyst would
+      const ported = await this.scoutPort([symbolInput.trim()], `operator /court by ${by}`, now, "operator");
+      if ("reason" in ported) return `${symbolInput} can't be traded: ${ported.reason}.`;
+      target = ported;
+    }
     const kill = await this.readKill();
     if (kill !== "CLEAR") return `Kill flag is ${kill}; no court sessions.`;
     if (this.budget.snapshot(now).mode === "REDUCE_ONLY")
@@ -3333,8 +3491,8 @@ ${postmortem}`,
           this.rejectCandidate(
             {
               candidateId: it.candidateId,
-              symbol: resolveTradeable(it.symbols, this.d)?.symbol ?? it.symbols[0] ?? "?",
-              arena: resolveTradeable(it.symbols, this.d)?.arena ?? "CRYPTO",
+              symbol: this.universe.resolve(it.symbols, now)?.symbol ?? it.symbols[0] ?? "?",
+              arena: this.universe.resolve(it.symbols, now)?.arena ?? "CRYPTO",
               source: "tier1",
             },
             "TIER1",
@@ -3529,11 +3687,14 @@ ${postmortem}`,
       now,
     );
     const cal = b.items.find((x) => x.skill_id === "earnings-calendar")?.payload as
-      | { events?: { symbol?: unknown; date?: unknown }[] }
+      | { events?: { symbol?: unknown; date?: unknown }[]; coverage?: unknown }
       | undefined;
     if (cal && Array.isArray(cal.events)) {
       this.sql.exec("DELETE FROM earnings");
-      for (const ev of cal.events.slice(0, 3000)) {
+      // ADR-058: a truncated full-market calendar would pass dynamic stocks unchecked, so it doesn't count as "all"
+      const complete = cal.events.length <= EARNINGS_MAX_ROWS;
+      setKV(this.sql, "earnings_coverage", cal.coverage === "all" && complete ? "all" : "watchlist", now);
+      for (const ev of cal.events.slice(0, EARNINGS_MAX_ROWS)) {
         if (
           typeof ev.symbol !== "string" ||
           typeof ev.date !== "string" ||
@@ -4834,6 +4995,8 @@ ${postmortem}`,
 
 // ---------------------------------------------------------------------- helpers
 
+/** Earnings rows kept per calendar batch (ADR-058: the whole market for 4 days ≈ 1–3k rows in earnings season). */
+const EARNINGS_MAX_ROWS = 5000;
 /** An equity earnings calendar older than this blocks equity entries (fail closed, ADR-035). */
 const EARNINGS_CALENDAR_MAX_AGE_MS = 4 * 86_400_000;
 
@@ -5180,6 +5343,26 @@ export function dossierCard(d: Dossier): DiscordMessage {
     .map((c) => `• **${c.date ?? "date?"}** ${cut(c.event, 160)}`)
     .join("\n");
   const fields: { name: string; value: string; inline?: boolean }[] = [];
+  if (d.thesis)
+    fields.push({
+      name: `${{ INTACT: "✅", WEAKENED: "⚠️", BROKEN: "💥" }[d.thesis.status]} Thesis ${d.thesis.status}`,
+      value: cut(d.thesis.reason || "—", 400),
+    });
+  if (d.market_context) fields.push({ name: "🌍 Market today", value: cut(d.market_context, 500) });
+  if (d.catalyst_trace?.story)
+    fields.push({
+      name: `🧵 Where the story came from${d.catalyst_trace.first_reported ? ` (first ${d.catalyst_trace.first_reported})` : ""}`,
+      value: cut(
+        `${d.catalyst_trace.story}${d.catalyst_trace.original_source_url ? ` [origin](${d.catalyst_trace.original_source_url})` : ""}`,
+        500,
+      ),
+    });
+  if (d.cruxes.length)
+    fields.push({
+      name: "🎯 Cruxes",
+      value: cut(d.cruxes.map((c) => `• ${c.question} → ${c.answer ?? "**open**"}`).join("\n"), 700),
+    });
+  if (d.flags.length) fields.push({ name: "🚩 Filing flags", value: cut(d.flags.join(" · "), 300) });
   if (cats) fields.push({ name: "📅 What's coming", value: cut(cats, 900) });
   if (d.bull_case) fields.push({ name: "🐂 Case for", value: cut(d.bull_case, 500), inline: true });
   if (d.bear_case) fields.push({ name: "🐻 Case against", value: cut(d.bear_case, 500), inline: true });
@@ -5194,13 +5377,13 @@ export function dossierCard(d: Dossier): DiscordMessage {
   return {
     embeds: [
       {
-        title: `📚 Research desk — ${d.symbol}`,
+        title: `${{ fast: "⚡", deep: "🔬", watch: "👁" }[d.stage]} Research desk (${d.stage}) — ${d.symbol}`,
         description: cut(`${d.summary || "(no summary)"}\n\n**Key findings**\n${findings || "none"}`, 3500),
         color: COLORS.cyan,
         fields,
         footer: {
           text: cut(
-            `${a.steps} steps · ${a.tool_calls} tool calls · ${a.pages_read} pages read · ${Math.round(a.wall_s)} s · ${a.models.join(", ")} · web text is unverified`,
+            `${a.steps} steps · ${a.tool_calls} tool calls · ${a.pages_read} pages read · ${Math.round(a.wall_s)} s${a.compactions ? ` · compacted ${a.compactions}×` : ""} · ${a.models.join(", ")} · web text is unverified`,
             300,
           ),
         },
