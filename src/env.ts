@@ -33,6 +33,15 @@ export interface Env {
   GROQ_API_KEY?: string;
   NVIDIA_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
+  /** ADR-063 BYOK (optional): frontier and self-hosted models for the court. */
+  ANTHROPIC_API_KEY?: string;
+  OPENAI_API_KEY?: string;
+  OPENAI_MODEL?: string;
+  OLLAMA_BASE_URL?: string;
+  OLLAMA_MODEL?: string;
+  CUSTOM_LLM_BASE_URL?: string;
+  CUSTOM_LLM_API_KEY?: string;
+  CUSTOM_LLM_MODEL?: string;
   /** "owner/name" of this repo; the brain dispatches its batch workflows there (ADR-032). */
   GITHUB_REPO?: string;
   /** Fine-grained token, this repo only, Actions: read and write. Absent → GitHub's own crons only. */

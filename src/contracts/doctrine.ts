@@ -166,6 +166,13 @@ export const DoctrineSchema = z.object({
     hearing_deadline_ms: z.number().int().positive().default(150_000),
     /** Audit W2-06: calls per provider per UTC day (free-tier RPD with margin); an exhausted provider is skipped. */
     daily_call_caps: z.record(z.string(), z.number().int().nonnegative()).default({}),
+    /**
+     * ADR-063 BYOK: hops tried FIRST when the user brought a key for that provider (anthropic, openai, ollama,
+     * custom). Absent keys leave the free chains untouched; the cross-family rule still applies.
+     */
+    byok: z
+      .object({ bull: z.array(LlmHop), bear: z.array(LlmHop), panel: z.array(LlmHop) })
+      .default({ bull: [], bear: [], panel: [] }),
   }),
   regime_gates: z.object({
     crypto_composite_min_for_longs: z.number().min(0).max(100),

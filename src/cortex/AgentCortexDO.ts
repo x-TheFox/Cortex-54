@@ -4,7 +4,8 @@ import type { BrokerApi } from "../broker/types.ts";
 import { InvocationMeter } from "../budget/FreeTierBudget.ts";
 import { WorkersAiClef } from "../clef/ClefClient.ts";
 import { WorkersAiClairic } from "../clef/clairic.ts";
-import { GeminiProvider, type LlmProvider, LlmRouter, OpenAICompatProvider } from "../court/llm.ts";
+import { LlmRouter } from "../court/llm.ts";
+import { buildProviders, withByok } from "../court/providers.ts";
 import { DiscordNotifier, type Notifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
 import type { Env } from "../env.ts";
 import {
@@ -87,9 +88,12 @@ export class AgentCortexDO extends DurableObject<Env> {
           ? { keyId: env.ALPACA_LIVE_KEY_ID, secret: env.ALPACA_LIVE_SECRET }
           : null;
 
+    // ADR-063: the user's own frontier keys (if any) lead the court chains; the free chains follow
+    const providers = buildProviders(env);
+    const d = withByok(DOCTRINE, providers, env);
     this.brain = new Brain({
       sql: this.sql,
-      d: DOCTRINE,
+      d,
       c: CONSTITUTION,
       brokers,
       market: dataKey ? new AlpacaMarketData(dataKey, guard) : null,
@@ -110,7 +114,7 @@ export class AgentCortexDO extends DurableObject<Env> {
       readKillFlag: async () => parseKillFlag(await env.FLAGS.get("killed")),
       clef: new WorkersAiClef(env.AI),
       clairic: new WorkersAiClairic(env.AI),
-      llm: new LlmRouter(llmProviders(env), DOCTRINE),
+      llm: new LlmRouter(providers, d),
       calibration: CALIBRATION,
       scar: SCAR_TISSUE,
       dispatcher:
@@ -362,41 +366,13 @@ function fromDurable(sql: SqlStorage): SqlLike {
   };
 }
 
-/** Court providers from secrets; a missing key just removes that hop (verified endpoints — ADR-028). */
-function llmProviders(env: Env): Partial<Record<string, LlmProvider>> {
-  const p: Partial<Record<string, LlmProvider>> = {};
-  if (env.GEMINI_API_KEY) p.gemini = new GeminiProvider(env.GEMINI_API_KEY);
-  if (env.GROQ_API_KEY) {
-    p.groq = new OpenAICompatProvider("groq", "https://api.groq.com/openai/v1", env.GROQ_API_KEY, {
-      jsonMode: true,
-      reasoningEffort: "low",
-    });
-  }
-  if (env.NVIDIA_API_KEY) {
-    p.nim = new OpenAICompatProvider("nim", "https://integrate.api.nvidia.com/v1", env.NVIDIA_API_KEY, {
-      jsonMode: false,
-    });
-  }
-  if (env.OPENROUTER_API_KEY) {
-    p.openrouter = new OpenAICompatProvider(
-      "openrouter",
-      "https://openrouter.ai/api/v1",
-      env.OPENROUTER_API_KEY,
-      {
-        jsonMode: true,
-      },
-    );
-  }
-  return p;
-}
-
-/** ADR-045: LAB brain wiring — LAB paper keys, LAB journal, LAB doctrine view, no AI and no dispatching. */
 /** ADR-062: phone pushes via ntfy when NTFY_TOPIC is set (PAPER/LIVE brain only; LAB stays in #agent-terminal). */
 function withPush(inner: Notifier, env: Env, guard: () => void): Notifier {
   const url = ntfyUrl(env.NTFY_TOPIC, env.NTFY_URL);
   return url ? new PushNotifier(inner, url, guard) : inner;
 }
 
+/** ADR-045: LAB brain wiring — LAB paper keys, LAB journal, LAB doctrine view, no AI and no dispatching. */
 function labBrain(sql: SqlLike, env: Env, guard: () => void): Brain {
   const paper = DOCTRINE.accounts.PAPER;
   const brokers: Partial<Record<AccountId, BrokerApi>> = {};
