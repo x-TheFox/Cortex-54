@@ -105,3 +105,14 @@ def test_indicators_and_ledger():
           {"trade_id": "b", "kind": "OPEN", "legs_json": "[]", "sizer_permits_live": 0},
           {"trade_id": "a", "kind": "CLOSE"}]
     assert [t["trade_id"] for t in open_trades(ev)] == ["b"]
+
+
+def test_short_leg_in_the_money_near_expiry_closes_for_assignment_risk():
+    exp = (TODAY + timedelta(days=2)).isoformat()
+    legs = [{"symbol": "S1", "side": "short", "kind": "put", "strike": 95, "expiry": exp},
+            {"symbol": "L1", "side": "long", "kind": "put", "strike": 90, "expiry": exp}]
+    t = _trade("vertical_credit", 1.0, legs)
+    p = {"take_profit_pct": 0.1, "stop_multiple": 9.0, "exit_dte": 0}
+    q = {"S1": S.Quote("S1", "put", 95, TODAY, 2.9, 3.0), "L1": S.Quote("L1", "put", 90, TODAY, 0.4, 0.45)}
+    assert S.exit_decision(t, p, q, 94.0, TODAY)[0] == "ASSIGNMENT_RISK"  # short 95 put is in the money
+    assert S.exit_decision(t, p, q, 96.0, TODAY) is None  # out of the money: hold to the plan

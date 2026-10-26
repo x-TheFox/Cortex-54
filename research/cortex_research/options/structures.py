@@ -304,6 +304,13 @@ def exit_decision(trade: dict, p: dict, quotes: dict[str, Quote], spot: float | 
     entry = trade["cash"]
     days = dte(first_exp, today)
     s = trade["structure"]
+    # Assignment stub (W3-07): a short leg in the money with ≤ 3 days left can be assigned early (a cash account can't
+    # carry the resulting shares/short). Close it at natural prices instead of modelling the assignment.
+    if spot is not None and days <= 3:
+        for leg in legs:
+            itm = (leg["kind"] == "call" and spot > leg["strike"]) or (leg["kind"] == "put" and spot < leg["strike"])
+            if leg["side"] == "short" and itm:
+                return "ASSIGNMENT_RISK", cc, False
     if s == "vertical_credit":
         cost = -cc
         if cost <= p["take_profit_pct"] * entry:

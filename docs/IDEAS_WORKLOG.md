@@ -183,7 +183,7 @@ nothing changes LIVE (dormant at Stop 0).
 - [→B] MLP0-021 Depeg + venue veto.
 - [⏸] MLP0-022 Overnight gap budget: at R2 (equities are a small share of trades today).
 - [=] MLP0-023 Time-of-day liquidity: typical-spread sampling per symbol (ADR-054).
-- [ ] MLP0-024 Equal-risk BTC/SPY benchmark lines on the equity chart.
+- [x] MLP0-024 BTC/SPY buy-and-hold benchmark lines on the equity chart (HUD image and web terminal); same starting equity, not vol-matched.
 - [-] MLP0-025 Extracting a governance kernel: commercial.
 
 ### Pod architecture (MLP1)
@@ -328,7 +328,7 @@ because the operator asked: the Kronos challenger (as SHADOW, §A) and the per-a
 - [⏸] LIVE-only items (twin divergence breaker, hot-state snapshot, per-capability HMAC, cluster correlation,
   vol-targeted risk): at RATIFY / R2–R3.
 - [⏸] Operator items (Healthchecks.io, CI deploy token, D1 retention, ambiguous-grade migration).
-- [ ] Options lab realism (per-contract fees, tick size, short-leg DTE blackout): small; done in this round if time
+- [x] Options lab realism: per-contract fees and natural fills were already there; added an assignment-risk exit (short leg ITM with ≤ 3 days left). Quoted prices are already on ticks. Original note: per-contract fees, tick size, short-leg DTE blackout: small; done in this round if time
   allows.
 
 ---
