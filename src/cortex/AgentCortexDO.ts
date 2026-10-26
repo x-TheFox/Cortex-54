@@ -22,6 +22,7 @@ import { Brain, parseKillFlag, type SloView, type StatusView } from "./Brain.ts"
 import { GitHubDispatcher } from "./dispatch.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "./hot-schema.ts";
 import { LabNotifier, labDoctrine } from "./lab.ts";
+import { QueueDispatcher } from "./queue.ts";
 import { getKV, type Row, type SqlLike, type SqlValue, setKV } from "./store.ts";
 
 export interface Health {
@@ -49,6 +50,8 @@ export class AgentCortexDO extends DurableObject<Env> {
   private readonly sql: SqlLike;
   private readonly meter = { current: new InvocationMeter(DOCTRINE.budgets.per_invocation.subrequests - 5) };
   private readonly brain: Brain;
+  /** ADR-065: research jobs for linked desktop runners (RUNNER_MODE=queue). */
+  private readonly queue: QueueDispatcher;
 
   /** LabCortexDO sets this (ADR-045): a second brain on the LAB paper account, journal and doctrine view. */
   static readonly lab: boolean = false;
@@ -56,6 +59,7 @@ export class AgentCortexDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = fromDurable(ctx.storage.sql);
+    this.queue = new QueueDispatcher(this.sql, () => Date.now());
     const guard = () => this.meter.current.guard();
     const lab = (this.constructor as typeof AgentCortexDO).lab;
     if (lab) {
@@ -117,10 +121,13 @@ export class AgentCortexDO extends DurableObject<Env> {
       llm: new LlmRouter(providers, d),
       calibration: CALIBRATION,
       scar: SCAR_TISSUE,
+      // ADR-065: RUNNER_MODE=queue hands jobs to a linked desktop runner; otherwise GitHub Actions when configured
       dispatcher:
-        env.GITHUB_REPO && env.GH_DISPATCH_TOKEN
-          ? new GitHubDispatcher(env.GITHUB_REPO, env.GH_DISPATCH_TOKEN, guard)
-          : null,
+        env.RUNNER_MODE === "queue"
+          ? this.queue
+          : env.GITHUB_REPO && env.GH_DISPATCH_TOKEN
+            ? new GitHubDispatcher(env.GITHUB_REPO, env.GH_DISPATCH_TOKEN, guard)
+            : null,
       now: () => Date.now(),
     });
 
@@ -316,6 +323,12 @@ export class AgentCortexDO extends DurableObject<Env> {
   universe(): string {
     this.begin();
     return this.brain.universeView();
+  }
+
+  /** ADR-065: a linked desktop runner asks for its next job (the router has verified the HMAC). */
+  claimJob(runner: string): { id: number; workflow: string; inputs: Record<string, string> } | null {
+    this.begin();
+    return this.queue.claim(runner);
   }
 
   async resetAccount(account: AccountId, by: string): Promise<{ ok: boolean; message: string }> {

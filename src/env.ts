@@ -46,6 +46,8 @@ export interface Env {
   GITHUB_REPO?: string;
   /** Fine-grained token, this repo only, Actions: read and write. Absent → GitHub's own crons only. */
   GH_DISPATCH_TOKEN?: string;
+  /** ADR-065: "queue" = research jobs wait for a linked CORTEX desktop runner instead of GitHub Actions. */
+  RUNNER_MODE?: string;
   /** HMAC key for web-terminal login links and session cookies (ADR-034). */
   WEB_SESSION_SECRET?: string;
   /** ADR-062: ntfy push alerts (topic = 16–64 url-safe chars; optional self-hosted https base). Absent → off. */

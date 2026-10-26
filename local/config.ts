@@ -55,6 +55,8 @@ export const LocalConfigSchema = z.object({
     pill_token: z.string().min(32),
   }),
   keys: z.partialRecord(z.enum(KEY_NAMES), z.string()).default({}),
+  /** ADR-065: the user's own cloud brain (cortex deploy), which this machine serves as a research runner */
+  cloud: z.object({ url: z.string(), worker: z.string(), ingest_hmac: z.string().min(32) }).optional(),
 });
 export type LocalConfig = z.infer<typeof LocalConfigSchema>;
 

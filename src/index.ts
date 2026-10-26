@@ -282,6 +282,22 @@ export default {
       return governorExport(request, env);
     }
 
+    // ADR-065: a linked desktop runner claims the next research job (HMAC like ingest)
+    if (request.method === "POST" && url.pathname === "/runner/claim") {
+      if (!env.INGEST_HMAC_SECRET) return new Response("not configured", { status: 503 });
+      const body = await request.text();
+      if (body.length > 500) return new Response("too large", { status: 413 });
+      const ok = await verifySignedBody(
+        env.INGEST_HMAC_SECRET,
+        request.headers.get("x-cortex-signature"),
+        request.headers.get("x-cortex-timestamp"),
+        body,
+      );
+      if (!ok) return new Response("bad signature", { status: 401 });
+      const runner = String((JSON.parse(body) as { runner?: unknown }).runner ?? "runner").slice(0, 60);
+      return Response.json({ job: await brain(env).claimJob(runner) });
+    }
+
     if (request.method === "POST" && url.pathname === "/discord/interactions") {
       return handleInteraction(request, env, ctx);
     }

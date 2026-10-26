@@ -17,6 +17,9 @@ import {
   newConfig,
   saveConfig,
 } from "./config.ts";
+import { deploy } from "./deploy.ts";
+import { LocalJobs } from "./jobs.ts";
+import { claimOnce } from "./runner.ts";
 import { LocalCortex } from "./runtime.ts";
 import { install, plan, uninstall } from "./service.ts";
 
@@ -32,6 +35,8 @@ import { install, plan, uninstall } from "./service.ts";
  *   cortex service install|uninstall|print                           run at login, restart on crash
  *   cortex kill [reason] | cortex rearm                              local kill switch (blocks all entries)
  *   cortex keys                                                      list which key names are set (never values)
+ *   cortex deploy [--name cortex]                                    deploy brain + sentinel to YOUR Cloudflare account
+ *   cortex runner                                                    run the cloud brain's research jobs on this machine
  */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -314,6 +319,51 @@ async function main(): Promise<void> {
     case "rearm":
       rmSync(join(home, "KILLED"), { force: true });
       return out("Kill switch cleared.", { ok: true, killed: false });
+    case "deploy": {
+      const cfg = loadConfig(home);
+      if (!cfg) throw new Error("no config: run `cortex setup` first");
+      const name = opt("name") ?? cfg.cloud?.worker ?? "cortex";
+      const r = deploy({
+        root: ROOT,
+        home,
+        cfg,
+        name,
+        log: (s) => {
+          if (!json) console.log(s);
+        },
+        run: (cmd, a, env) => {
+          const p = spawnSync(cmd, a, { cwd: ROOT, env: { ...process.env, ...env }, encoding: "utf8" });
+          return { status: p.status ?? 1, stdout: p.stdout ?? "", stderr: p.stderr ?? "" };
+        },
+      });
+      saveConfig({ ...cfg, cloud: r.cloud }, home);
+      return out(
+        `Deployed ${name}: ${r.url}\nSentinel: ${r.sentinelUrl}\nResearch jobs wait for this machine: run \`cortex runner\` (or \`cortex service install\`).`,
+        { ok: true, ...r, cloud: { url: r.cloud.url, worker: r.cloud.worker } },
+      );
+    }
+    case "runner": {
+      const cfg = loadConfig(home);
+      if (!cfg?.cloud?.url) throw new Error("no cloud brain linked: run `cortex deploy` first");
+      const cloud = cfg.cloud;
+      const jobs = new LocalJobs({
+        researchDir: join(ROOT, "research"),
+        home,
+        url: cloud.url,
+        cfg: { ...cfg, secrets: { ...cfg.secrets, ingest_hmac: cloud.ingest_hmac } },
+      });
+      out(`Runner polling ${cloud.url} every 60 s (Ctrl+C to stop).`, { ok: true, url: cloud.url });
+      const loop = async () => {
+        try {
+          const got = await claimOnce(cloud.url, cloud.ingest_hmac, jobs);
+          if (got) console.log(`${new Date().toISOString()} running ${got}`);
+        } catch (e) {
+          console.error(`${new Date().toISOString()} ${String(e).slice(0, 200)}`);
+        }
+        setTimeout(() => void loop(), 60_000);
+      };
+      return loop();
+    }
     case "keys": {
       const cfg = loadConfig(home);
       return out(cfg ? keyNames(cfg).join("\n") : "no config", { keys: cfg ? keyNames(cfg) : [] });
