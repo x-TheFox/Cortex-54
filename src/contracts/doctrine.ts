@@ -77,6 +77,14 @@ export const DoctrineSchema = z.object({
     reservation_ttl_seconds: z.number().int().positive(),
     /** Venue minimum order cost per arena (Alpaca crypto: $10, verified 2026-10-24 from a 403). */
     min_order_notional_usd: z.record(Arena, z.number().nonnegative()),
+    /** ADR-067: stablecoin depeg, cross-venue price and exchange-halt vetoes on new entries. */
+    sanity: z
+      .object({
+        enabled: z.boolean(),
+        max_depeg_bps: z.number().positive(),
+        max_venue_gap_pct: z.number().positive(),
+      })
+      .default({ enabled: false, max_depeg_bps: 50, max_venue_gap_pct: 1 }),
   }),
   cadence: z.object({
     pulse_seconds_exposed: z.number().int().min(30),

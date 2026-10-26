@@ -128,6 +128,10 @@ export class AgentCortexDO extends DurableObject<Env> {
           : env.GITHUB_REPO && env.GH_DISPATCH_TOKEN
             ? new GitHubDispatcher(env.GITHUB_REPO, env.GH_DISPATCH_TOKEN, guard)
             : null,
+      http: (u, i) => {
+        guard();
+        return fetch(u, i);
+      },
       now: () => Date.now(),
     });
 

@@ -112,6 +112,7 @@ import { correlation, correlationVeto } from "../risk/correlation.ts";
 import { type Arena, modeledPaperCostCents, roundTripFeeRate } from "../risk/fees.ts";
 import { type AccountView, type AssetView, validateEntry } from "../risk/PreTradeValidator.ts";
 import { effectiveRung, type RungName } from "../risk/rungs.ts";
+import { coinbaseProduct, depegBps, haltedSymbols, venueGapPct } from "../risk/sanity.ts";
 import { type Facts, type ScarTissue, scarLessons, scarVetoes } from "../risk/scar.ts";
 import {
   BOUNCE_ID,
@@ -308,6 +309,8 @@ export interface BrainDeps {
   dispatcher?: WorkflowDispatcher | null;
   /** Operator-merged scar tissue (config/scar-tissue.yaml). Hard filters veto entries; context rules are lessons. */
   scar?: ScarTissue | null;
+  /** ADR-067: plain HTTP for the public sanity sources (Coinbase ticker, Nasdaq halts). Null skips those checks. */
+  http?: ((url: string, init?: RequestInit) => Promise<Response>) | null;
 }
 
 export interface PulseReport {
@@ -3109,6 +3112,8 @@ ${postmortem}`,
       if (e)
         return `earnings on ${e.date} (inside the ${this.d.execution.earnings_blackout_hours} h blackout)`;
     }
+    const insane = await this.sanityVeto(contract, now);
+    if (insane) return insane;
     const held = this.positions(account)
       .map((p) => p.symbol)
       .filter((s) => s !== contract.symbol);
@@ -3137,6 +3142,72 @@ ${postmortem}`,
     const heldBars = Object.fromEntries(held.filter((h) => bars[h]).map((h) => [h, bars[h] as Bar[]]));
     const hit = correlationVeto(cand, heldBars, g.max_corr, since);
     return hit ? `correlated with ${hit.symbol} (ρ=${hit.corr} > ${g.max_corr})` : null;
+  }
+
+  /**
+   * ADR-067 sanity vetoes: a depegged stablecoin or a cross-venue price gap blocks crypto entries; a Nasdaq halt blocks
+   * a stock entry. Sources are cached (venue 60 s, halts 5 min). An unreachable source is counted as a policy vacuum
+   * and doesn't block: the validator's own quote, spread and staleness gates still fail closed.
+   */
+  private async sanityVeto(contract: DecisionContract, now: number): Promise<string | null> {
+    const cfg = this.d.execution.sanity;
+    if (!cfg.enabled) return null;
+    const http = this.deps.http;
+    const cached = async (key: string, ttl: number, load: () => Promise<string>): Promise<string | null> => {
+      const hit = getKV(this.sql, key);
+      const at = Number(getKV(this.sql, `${key}:at`) ?? 0);
+      if (hit !== null && now - at < ttl) return hit;
+      try {
+        const v = await load();
+        setKV(this.sql, key, v, now);
+        setKV(this.sql, `${key}:at`, String(now), now);
+        return v;
+      } catch {
+        this.vacuum(`sanity:${key.split(":")[0]}`, now);
+        return null;
+      }
+    };
+    if (contract.arena === "CRYPTO") {
+      const q = await this.quotesFor(["USDT/USD", "USDC/USD", contract.symbol]).catch(
+        () => ({}) as Record<string, Quote>,
+      );
+      for (const st of ["USDT/USD", "USDC/USD"]) {
+        const x = q[st];
+        const bps = x ? depegBps((x.bid + x.ask) / 2) : null;
+        if (bps !== null && bps > cfg.max_depeg_bps)
+          return `${st.slice(0, 4)} is ${bps} bps off its $1 peg (sanity veto)`;
+      }
+      const own = q[contract.symbol];
+      if (http && own) {
+        const raw = await cached(`venue:${contract.symbol}`, 60_000, async () => {
+          const r = await http(
+            `https://api.exchange.coinbase.com/products/${coinbaseProduct(contract.symbol)}/ticker`,
+            {
+              headers: { "user-agent": "cortex-54" },
+              signal: AbortSignal.timeout(4_000),
+            },
+          );
+          if (!r.ok) throw new Error(String(r.status));
+          const t = (await r.json()) as { bid?: string; ask?: string };
+          return String((Number(t.bid) + Number(t.ask)) / 2);
+        });
+        const gap = venueGapPct((own.bid + own.ask) / 2, raw === null ? null : Number(raw));
+        if (gap !== null && gap > cfg.max_venue_gap_pct)
+          return `Alpaca and Coinbase disagree by ${gap}% on ${contract.symbol} (sanity veto)`;
+      }
+    }
+    if (contract.arena === "EQUITIES" && http) {
+      const raw = await cached("halts:nasdaq", 5 * 60_000, async () => {
+        const r = await http("https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts", {
+          headers: { "user-agent": "Mozilla/5.0 (cortex-54)" },
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (!r.ok) throw new Error(String(r.status));
+        return [...haltedSymbols(await r.text())].join(",");
+      });
+      if (raw?.split(",").includes(contract.symbol)) return `${contract.symbol} is halted (Nasdaq halt feed)`;
+    }
+    return null;
   }
 
   /** What a scar rule can see about an entry (ADR-033). Unknown facts never match a rule. */

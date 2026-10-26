@@ -210,6 +210,7 @@ export class LocalCortex {
       calibration: CALIBRATION,
       scar: SCAR_TISSUE,
       dispatcher: cfg.research.enabled ? this.jobs : null,
+      http: o.overrides?.market ? null : (u, i) => fetch(u, i),
     });
     this.brain.init({
       constitution_sha256: CONSTITUTION_SHA256,

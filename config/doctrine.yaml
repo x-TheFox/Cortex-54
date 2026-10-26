@@ -101,6 +101,7 @@ execution:
   max_spread_bps: { CRYPTO: 30, EQUITIES: 25, OPTIONS: 500 }
   reservation_ttl_seconds: 120
   min_order_notional_usd: { CRYPTO: 10, EQUITIES: 1, OPTIONS: 0 } # Alpaca: crypto cost basis ≥ $10
+  sanity: { enabled: true, max_depeg_bps: 50, max_venue_gap_pct: 1.0 } # ADR-067: USDT/USDC off $1, Alpaca vs Coinbase, Nasdaq halts
 
 cadence:
   pulse_seconds_exposed: 60
