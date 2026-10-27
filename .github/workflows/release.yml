@@ -90,6 +90,9 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       CORTEX_LICENSE_PUBKEY: ${{ vars.CORTEX_LICENSE_PUBKEY }}
       CORTEX_VERSION: ${{ needs.plan.outputs.version }}
+      # ADR-086: where the app activates Whop licence keys and where "Buy / manage" points (repository variables)
+      SAVANT_LICENSE_URL: ${{ vars.SAVANT_LICENSE_URL }}
+      SAVANT_STORE_URL: ${{ vars.SAVANT_STORE_URL }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
@@ -156,6 +159,7 @@ jobs:
         run: |
           v=${{ needs.plan.outputs.version }}
           node scripts/msix.ts "out/Savant_${v}_${{ matrix.platform }}.msi" "$v" "out/Savant_${v}_${{ matrix.platform }}.msix"
+          cp "out/Savant_${v}_${{ matrix.platform }}.msix" "out/Savant_${{ matrix.platform }}.msix"
       - name: Upload to the draft release
         shell: bash
         env:
@@ -222,7 +226,9 @@ jobs:
 
   publish:
     needs: [plan, build, demo]
-    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    # audit F-A5-12: paying customers update from this release, so it goes live only when every platform built and
+    # the demo built; otherwise the draft stays a draft for a look
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.build.result == 'success' && needs.demo.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

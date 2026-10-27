@@ -61,6 +61,8 @@ export interface WebSettings {
   cashOnly?(account: "PAPER" | "LIVE"): Promise<{ ok: boolean; message: string }>;
   /** ADR-077: install a licence file */
   license?(q: { file?: string; key?: string; release?: boolean }): Promise<{ ok: boolean; message: string }>;
+  /** ADR-087: accept the current terms, EULA and risk disclosure (first launch, and again when they change) */
+  terms?(q: { accept: boolean }): Promise<{ ok: boolean; message: string }>;
   /** ADR-076: stop the service and delete everything Savant keeps on this computer */
   reset?(q: { confirm: string }): Promise<{ ok: boolean; message: string }>;
 }
@@ -284,7 +286,17 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
       case "/api/settings/license":
         return json(
           b.settings.license
-            ? await b.settings.license({ file: str("file") })
+            ? await b.settings.license({
+                ...(str("file") ? { file: str("file") } : {}),
+                ...(str("key") ? { key: str("key") } : {}),
+                ...(body.release === true ? { release: true } : {}),
+              })
+            : { ok: false, message: "Not available here." },
+        );
+      case "/api/settings/terms":
+        return json(
+          b.settings.terms
+            ? await b.settings.terms({ accept: body.accept === true })
             : { ok: false, message: "Not available here." },
         );
       case "/api/settings/pair":

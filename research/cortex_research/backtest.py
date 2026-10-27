@@ -355,7 +355,9 @@ def backtest_job(doctrine_path: Path, now_ms: int, run_url: str | None) -> dict:
     adj = M.bh_fdr({sid: r.get("p_value") for sid, r in results.items()})
     # audit W2-28: deflate each Sharpe by how many strategies were tried; W2-27: PBO across the lab on a monthly
     # calendar (does the in-sample winner keep winning out of sample?)
-    n_trials = max(1, len(results))
+    # audit F-B1-05: the trial count includes variants tried and abandoned before they reached doctrine (ADR-046
+    # tested at least ten), not only the strategies listed today
+    n_trials = max(MIN_TRIALS, len(results))
     months = sorted({str(t)[:7] for ts in trades.values() for t, _ in ts})
     monthly = {sid: [sum(r for t, r in ts if str(t)[:7] == m) for m in months] for sid, ts in trades.items()}
     pbo = M.pbo_cscv(monthly)
@@ -365,7 +367,7 @@ def backtest_job(doctrine_path: Path, now_ms: int, run_url: str | None) -> dict:
         r["q_value"] = adj.get(sid)
         r["status"] = st[sid]["status"]
         r["lab"] = sid in (d.get("lab") or {}).get("strategies", [])
-        r["verdict"] = verdict(r)
+        r["verdict"] = verdict(r, pbo)
     body = {
         "years": YEARS,
         "start": start[:10],
@@ -374,14 +376,25 @@ def backtest_job(doctrine_path: Path, now_ms: int, run_url: str | None) -> dict:
         "pbo": pbo,
         "limits": "daily bars, pessimistic stop-first fills, taker fees, each strategy alone, results in R; "
         "inverse-ETF regime approximated by the underlying below its 50-day average",
+        # audit F-B1-03: said out loud in every result, not just in a doc
+        "bias": SURVIVORSHIP_NOTE,
     }
     item = P.item("backtest-lab", "bt@1", now_ms, P.dumps(body).encode(), body)
     return P.batch("backtest", now_ms, run_url, [item], None)
 
 
-def verdict(r: dict) -> str:
+MIN_TRIALS = 10
+SURVIVORSHIP_NOTE = (
+    "survivorship bias: each strategy replays today's universe over the whole sample, so symbols that were delisted "
+    "or dropped are missing and results lean optimistic; a PASS here is necessary, not sufficient — graduation also "
+    "needs the LAB forward test (ADR-045)"
+)
+
+
+def verdict(r: dict, pbo: float | None = None) -> str:
     """Plain-language call. PASS needs a positive edge that survives the multiple-testing correction, holds up in the
-    last third of the sample, and has a deflated Sharpe ≥ 0.95."""
+    last third of the sample, has a deflated Sharpe ≥ 0.95 (audit F-B1-04: a missing DSR is not a pass), and the lab
+    as a whole must not look overfit (PBO ≤ 0.5 when it can be computed)."""
     n, e, q, late = r.get("n", 0), r.get("expectancy_r"), r.get("q_value"), r.get("last_third_r")
     dsr = r.get("dsr")
     if n < 20:
@@ -389,6 +402,8 @@ def verdict(r: dict) -> str:
     if e is None or e <= 0:
         return "LOSES"
     # audit W2-28: also the deflated Sharpe — the edge must beat the best of n_trials lucky strategies
-    if q is not None and q < 0.1 and late is not None and late > 0 and (dsr is None or dsr >= 0.95):
+    if pbo is not None and pbo > 0.5:
+        return "UNPROVEN"
+    if q is not None and q < 0.1 and late is not None and late > 0 and dsr is not None and dsr >= 0.95:
         return "PASS"
     return "UNPROVEN"

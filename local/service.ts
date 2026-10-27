@@ -99,7 +99,8 @@ WantedBy=default.target
           "/TN",
           "CORTEX54",
           "/TR",
-          `cmd /c set CORTEX_HOME=${env.CORTEX_HOME}&& ${cmd}`,
+          // audit F-A6-05: `set "VAR=value"` keeps a home path with spaces (C:\Users\Jane Doe\…) whole
+          `cmd /c set "CORTEX_HOME=${env.CORTEX_HOME}" && ${cmd}`,
         ],
       ],
       disable: [["schtasks", "/Delete", "/F", "/TN", "CORTEX54"]],

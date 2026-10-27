@@ -179,21 +179,27 @@ filter checks → opens a PR touching `config/doctrine.yaml`, `config/calibratio
 
 ## 11. Web terminal (Phase 6)
 
-Static assets on the same `cortex` worker (`public/`, free, no build step). Auth: `/terminal` in Discord
-returns a single-use, 10-minute login link; the page trades it for an HMAC-signed HttpOnly session cookie
-(ADR-034; replaces the OAuth plan). Live state by polling `/api/state` every 15 s while visible (replaces the
+Static assets on the same `cortex` worker (`public/`, built by `pnpm web:build`). Auth: `/terminal` in Discord
+(or the app's Deploy screen) returns a single-use, 10-minute login link; the page trades it for an HMAC-signed
+HttpOnly session cookie (ADR-034; there is no Discord OAuth). Sessions last 12 h on a cloud brain and 30 days in the
+local app (your own computer); a phone on the Wi-Fi needs a sign-in from the last 10 minutes for flatten, kill,
+re-arm, resume, dial and unlock (audit F-A6-02). Signing out revokes the session for reads and commands for as long
+as any session could live (31 days). Live state by polling `/api/state` every 15 s while visible (replaces the
 WebSocket plan). Workspaces: Command Deck (accounts, positions, equity, regime, every control), Court (sessions,
 rejections), Memory Vault (scar tissue, reputation, beliefs, latest Governor report), Options Lab (shadow
 ledger). Discord and web share one command runner (parity test).
 
 ## 12. Sentinel
 
-- Cron every minute: `GET cortex/health` (checks DO `last_pulse_at`). Missed > 3 min → Discord webhook alert;
-  > 15 min with LIVE positions open → place/verify broker-side stops directly (it has its own LIVE keys copy).
+- Cron every minute: `GET cortex/health` (checks DO `last_pulse_at`). Older than `STALE_ALERT_MINUTES` (8) →
+  Discord webhook alert; older than `FLATTEN_ON_BRAIN_DEATH_MINUTES` (60) with LIVE positions open → flatten LIVE
+  (it has its own LIVE keys copy). It also alerts on constitution invariant violations, an unarmed or overdue alarm
+  and a Discord failure streak, all read from the public part of `/health`.
 - Independent LIVE daily-loss check from Alpaca `/v2/account` (`equity` vs `last_equity`). Breach of
   constitution daily loss → cancel all orders + close all positions + set a "KILLED" flag the brain reads.
 - `/kill` slash command (SENTINEL app) → same flatten path. Requires the operator ID. `/rearm` clears the flag,
-  `/sentinel` shows it.
-- Kill state is the KV key `killed` in the shared `FLAGS` namespace (ADR-015). Brain-death flatten fires after
-  `FLATTEN_ON_BRAIN_DEATH_MINUTES` (default 60) only if LIVE holds positions.
-- Kept tiny: no shared modules with `cortex` except a vendored, frozen copy of the HMAC/Ed25519 helpers.
+  `/sentinel` shows it. HTTP `/rearm` needs a reason and may use its own secret (`SENTINEL_REARM_SECRET`).
+- Kill state is the KV key `killed` in the shared `FLAGS` namespace (ADR-015). With an optional sentinel-only `STATE`
+  namespace bound, the sentinel keeps its own copy and puts the shared flag back if anything else removed it (audit
+  F-A5-03).
+- Kept tiny: no shared modules with `cortex`; only the Discord Ed25519 verifier (`verify.ts`) is vendored.

@@ -32,7 +32,7 @@ export function manifest(o: { version: string; exe: string; publisher?: string; 
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap rescap">
-  <Identity Name="${xml(o.name ?? "CORTEX54.Desktop")}" Publisher="${xml(publisher)}" Version="${msixVersion(o.version)}" ProcessorArchitecture="x64" />
+  <Identity Name="${xml(o.name ?? "Savant.Desktop")}" Publisher="${xml(publisher)}" Version="${msixVersion(o.version)}" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>Savant</DisplayName>
     <PublisherDisplayName>Savant</PublisherDisplayName>

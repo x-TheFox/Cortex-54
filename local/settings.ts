@@ -24,6 +24,7 @@ import {
 import { KEY_NAMES, type KeyName, type LocalConfig, LocalConfigSchema, saveConfig } from "./config.ts";
 import { configChecks, runtimeChecks } from "./health.ts";
 import { secretBackend } from "./keychain.ts";
+import { TERMS_VERSION } from "../src/legal/version.ts";
 import { activateKey, installLicense, readLicense, releaseKey, STORE_URL } from "./license.ts";
 
 /**
@@ -182,6 +183,11 @@ export class LocalSettings implements WebSettings {
       },
       lan: { enabled: c.lan.enabled, port: c.port },
       secretStore: { mode: c.secret_store, backend: keychainName(this.d.home) },
+      terms: {
+        current: TERMS_VERSION,
+        accepted: c.terms?.version === TERMS_VERSION,
+        acceptedAt: c.terms?.accepted_at ?? null,
+      },
       license: readLicense(this.d.home),
       licenseKey: { set: Boolean(c.keys.SAVANT_LICENSE_KEY), hint: hint(c.keys.SAVANT_LICENSE_KEY) },
       storeUrl: STORE_URL,
@@ -364,6 +370,11 @@ export class LocalSettings implements WebSettings {
       )
         c = { ...c, clef: patch.clef };
       if (typeof patch.onboarded === "boolean") c = { ...c, onboarded: patch.onboarded };
+      if (patch.terms && typeof patch.terms === "object") {
+        const t = patch.terms as { version?: unknown; accepted_at?: unknown };
+        if (t.version === TERMS_VERSION && typeof t.accepted_at === "number")
+          c = { ...c, terms: { version: TERMS_VERSION, accepted_at: Math.floor(t.accepted_at) } };
+      }
       if (patch.court && typeof patch.court === "object") {
         const v = (patch.court as { max_per_day?: unknown }).max_per_day;
         c = {
@@ -483,6 +494,13 @@ export class LocalSettings implements WebSettings {
     } catch (e) {
       return { ok: false, message: plain(e) };
     }
+  }
+
+  /** ADR-087: record that the user accepted the current legal set. */
+  async terms(q: { accept: boolean }) {
+    if (!q.accept) return { ok: false, message: "Tick the box to accept the terms first." };
+    await this.save({ terms: { version: TERMS_VERSION, accepted_at: Date.now() } });
+    return { ok: true, message: "Thanks. Savant can trade now." };
   }
 
   /** ADR-077: install a licence file (checked against this build's publisher key before it is saved). */

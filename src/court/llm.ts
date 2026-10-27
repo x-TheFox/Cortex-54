@@ -1,4 +1,5 @@
 import type { Doctrine } from "../contracts/doctrine.ts";
+import { lineage } from "./lineage.ts";
 
 /**
  * Free-tier LLM providers for the court (verified live 2026-10-22):
@@ -296,7 +297,7 @@ export class LlmRouter {
 
   familyOf(provider: string, model: string): string {
     const f = this.d.llm_routing.families;
-    return f[`${provider}/${model}`] ?? f[provider] ?? "unknown";
+    return f[`${provider}/${model}`] ?? f[provider] ?? (lineage(model) || "unknown");
   }
 
   async run<T>(

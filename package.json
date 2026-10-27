@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "CORTEX-54: free-tier autonomous trading harness on Cloudflare Workers with Discord C2",
+  "description": "Savant: an autonomous trading agent (Cortex) with a constitutional risk engine",
   "packageManager": "pnpm@10.18.0",
   "engines": {
     "node": ">=22"

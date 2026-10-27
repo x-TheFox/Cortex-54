@@ -1342,8 +1342,9 @@ export function PhoneSection({ s, save, saving }: { s: SettingsView; save: Save;
       <h4>Use it from your phone</h4>
       <p className="cost">
         Turn this on to open the cockpit on a phone connected to the same Wi-Fi. It's plain HTTP inside your
-        own network, so only turn it on at home or on a network you trust. A phone can watch and use the
-        controls (pause, kill switch); settings and keys can only be changed on this computer.
+        own network, so only turn it on at home or on a network you trust. A phone can watch and pause at any
+        time; closing positions, resuming or changing autonomy from a phone needs a fresh scan of the code
+        below. Settings and keys can only be changed on this computer.
       </p>
       <label className="toggle">
         <input

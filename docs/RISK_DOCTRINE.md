@@ -60,18 +60,25 @@ beta bucket) share one slot's risk.
 | Band | Condition | Effect |
 |---|---|---|
 | GREEN | DD < 3% | `M_breaker = 1.0` |
-| YELLOW | 3% ≤ DD < 6% | `M_breaker = 0.5`, Tier 3 quota halved |
+| YELLOW | 3% ≤ DD < 6% | `M_breaker = 0.5`, Tier 3 (court) daily quota halved while any account is off GREEN (`Brain.courtCap`) |
 | ORANGE | 6% ≤ DD < 10% | `M_breaker = 0` → REDUCE_ONLY; existing stops tightened to breakeven where possible |
 | RED | DD ≥ 10% **or** daily loss ≥ 5% **or** 3 consecutive stop-outs in 24 h | flatten all, lock loop; unlock = operator postmortem modal |
 
 Constitution caps: Red at no worse than 12% DD and 6% daily loss.
 
+**Which "day" (audit F-A2-06).** Two independent checks use two clocks on purpose. The brain's daily loss is measured
+from equity at 00:00 UTC (its `DAY_ROLL`), trips RED at 5% and is the normal path. The sentinel's backstop uses
+Alpaca's own `last_equity` (the previous trading session's close, ET) and flattens LIVE at 6%. Near the UTC/ET
+boundaries the two can disagree by a few hours of P&L; either one tripping is enough, so the pair is conservative.
+
 ## 5. Settlement (equities, cash account)
 
-Each buy lot records `funded_by` (settled cash vs unsettled proceeds). A lot funded by unsettled proceeds
-may not be sold before those proceeds settle (T+1, business days from Alpaca calendar) → otherwise a
-good-faith violation. The sizer uses `settled_cash_available` for equities. Crypto proceeds are tracked
-separately (verify Alpaca's crypto settlement behavior in Phase 1 and record it here).
+What is enforced today: equity entries are sized only from **settled** cash (the brain tracks unsettled sale
+proceeds in aggregate and subtracts them, T+1 on Alpaca's trading calendar), so a buy is never funded by money that
+hasn't settled. That alone prevents good-faith violations, because a lot can only be bought with settled funds and
+may then be sold at any time. Per-lot `funded_by` tracking and a sell-side check are **not** implemented; they would
+only matter if entries were ever allowed on unsettled proceeds, which the sizer forbids. Crypto settles immediately on
+Alpaca and is not restricted. (Audit 2026-10-27: this section used to promise per-lot tracking.)
 
 ## 6. Autonomy dial (per account)
 
@@ -86,13 +93,15 @@ separately (verify Alpaca's crypto settlement behavior in Phase 1 and record it 
 `/dial` command rejects it and boot migrates any stored Stop 1. `#bull-vs-bear-court` shows contracts for
 information only. Valid stops: PAPER {0, 2, 4}, LIVE {0, 3, 4}.
 
-Initial: PAPER = Stop 2 (fully autonomous). LIVE = Stop 0 (dormant) until §7's LIVE gate is met.
+Initial: PAPER = Stop 2 (fully autonomous). LIVE = Stop 0 (dormant) until the operator ratifies it. §7's LIVE gate
+is shown next to the ratify control, in red until it passes; since ADR-083 it is **advice, not a block**: each
+customer decides when their own real money starts.
 
 ## 7. Capital ladder graduation (two consecutive weekly reviews, measured with modeled fees)
 
 | From → To | Gate |
 |---|---|
-| LIVE Stop 0 → Stop 3 (real money switches on) | **(a) Total implementation:** ROADMAP Phases 0–6 complete and merged (full funnel, learning loop, cockpit). **(b) Fully autonomous PAPER run:** ≥30 consecutive days with no operator intervention in trading (no /pause, /flatten, /unlock, kill), ≥25 closed trades, positive post-fee expectancy, profit factor > 1.2, zero rail violations, heartbeat ≥99.9%, calibrated Brier < 0.25, every RED trip self-recovered and reviewed. **(c)** Live kill drill passed. **(d)** Operator ratifies with `/dial account:LIVE stop:3 confirm:RATIFY` |
+| LIVE Stop 0 → Stop 3 (real money switches on). *Advisory since ADR-083: the app shows each criterion; the operator's RATIFY is what switches LIVE on.* | **(a) Total implementation:** ROADMAP Phases 0–6 complete and merged (full funnel, learning loop, cockpit). **(b) Fully autonomous PAPER run:** ≥30 consecutive days with no operator intervention in trading (no /pause, /flatten, /unlock, kill), ≥25 closed trades, positive post-fee expectancy, profit factor > 1.2, zero rail violations, heartbeat ≥99.9%, calibrated Brier < 0.25, every RED trip self-recovered and reviewed. **(c)** Live kill drill passed. **(d)** Operator ratifies with `/dial account:LIVE stop:3 confirm:RATIFY` |
 | R1 → R2 | equity ≥ $100 (or operator deposit) + above |
 | R2 → R3 | ≥1 YELLOW recovered cleanly, Sharpe (daily, 60 d) > 1.0, ≥2 strategies with positive expectancy |
 | R3 → R4 | Monte Carlo 5th-pct drawdown within RED band; p < 0.05 vs random entry timing (BH-FDR adjusted); cognitive cost $0 maintained |

@@ -1915,3 +1915,12 @@ fieldset.ratify {
   margin: 0;
   padding: 0;
 }
+
+/* ADR-087: first-launch terms */
+.terms-points {
+  margin: 12px 0 14px;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+  line-height: 1.45;
+}

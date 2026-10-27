@@ -275,7 +275,8 @@ def calibration_pairs(trades: list[dict], rejections: list[dict], grades: list[d
     return [(it["p"], it["y"]) for it in M.purge_overlaps(items)]
 
 
-def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict], brier_value: float | None, n_pairs: int, now: int) -> list[dict]:
+def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict], brier_value: float | None, n_pairs: int, now: int,
+                calibrated: bool = False) -> list[dict]:
     """RISK_DOCTRINE §7 LIVE gate (b)+(c) from data; (a) phases and (d) ratification are manual."""
     def ok(cond, value):
         return {"status": "PASS" if cond else "FAIL", "value": value}
@@ -306,7 +307,7 @@ def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict],
         {"criterion": "(b) profit factor > 1.2", **(ok((st["profit_factor"] or 0) > 1.2, st["profit_factor"]) if st["n"] else {"status": "WAIT", "value": None})},
         {"criterion": "(b) zero rail violations", **ok(rail == 0, rail)},
         {"criterion": "(b) heartbeat (max daily gap ≤ 10 min)", **(ok(max(gaps) <= 600, f"worst {max(gaps):.0f}s over {len(gaps)} day(s)") if gaps else {"status": "WAIT", "value": "no full day yet"})},
-        {"criterion": "(b) calibrated Brier < 0.25 (≥20 pairs)", **(ok(brier_value < 0.25, round(brier_value, 4)) if brier_value is not None and n_pairs >= 20 else {"status": "WAIT", "value": f"{n_pairs} pairs"})},
+        {"criterion": "(b) calibrated Brier < 0.25 (≥20 pairs)", **(ok(brier_value < 0.25, round(brier_value, 4) if calibrated else f"{round(brier_value, 4)} (raw: no calibration map yet)") if brier_value is not None and n_pairs >= 20 else {"status": "WAIT", "value": f"{n_pairs} pairs"})},
         {"criterion": "(b) RED trips self-recovered", **{"status": "INFO", "value": reds}},
         {"criterion": "(c) live kill drill", **{"status": "MANUAL", "value": "after LIVE keys exist"}},
         {"criterion": "(d) operator RATIFY", **{"status": "MANUAL", "value": "/dial account:LIVE stop:3 confirm:RATIFY"}},
@@ -375,6 +376,12 @@ def main() -> int:
     ]
     pairs = calibration_pairs(trades, rejections, graded_rows + new_grades, contracts)
     b_raw = M.brier(pairs)
+    # audit F-B1-08: the LIVE gate asks for a *calibrated* Brier, so score the probabilities through the map the
+    # brain actually applies (config/calibration.json); with no map yet the brain shrinks toward 0.5, so raw is the
+    # honest stand-in and the criterion says so
+    live_map = (json.loads((REPO / "config" / "calibration.json").read_text()).get("maps", {}).get("court.win_prob")
+                or {}).get("points")
+    b_gate = M.brier([(M.apply_map([tuple(x) for x in live_map], x), o) for x, o in pairs]) if live_map else b_raw
 
     # strategy fitness (+ BH-FDR across strategies with enough trades)
     by_strat: dict[str, list[float]] = defaultdict(list)
@@ -407,7 +414,7 @@ def main() -> int:
     llm_ok = defaultdict(lambda: [0, 0])
     for c in llm:
         llm_ok[f"{c['role']} {c['provider']}"][0 if c["outcome"] == "OK" else 1] += 1
-    gate = gate_status(journal, trades, rejections, b_raw, len(pairs), now)
+    gate = gate_status(journal, trades, rejections, b_gate, len(pairs), now, calibrated=bool(live_map))
     gate += options_gate(options)
     fills = []
     for r in journal:

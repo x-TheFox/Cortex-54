@@ -131,8 +131,12 @@ describe("OS keychain (ADR-076)", () => {
     const file = readFileSync(join(h, "config.json"), "utf8");
     expect(file).not.toContain("gsk_topsecret_1111");
     expect(file).not.toContain("sk-endpoint-2222");
-    expect(file).toContain("web_session"); // generated local secrets stay (the tray reads its pill token there)
+    // audit F-A6-07: the session-signing secrets move to the keychain too; the read-only tray token stays
+    expect(file).not.toContain(cfg.secrets.web_session);
+    expect(file).not.toContain(cfg.secrets.ingest_hmac);
+    expect(file).toContain(cfg.secrets.pill_token);
     const back = loadConfig(h);
+    expect(back?.secrets.web_session).toBe(cfg.secrets.web_session);
     expect(back?.keys.GROQ_API_KEY).toBe("gsk_topsecret_1111");
     expect(back?.llm.endpoints[0]?.key).toBe("sk-endpoint-2222");
     // and back to the file: the keychain item is removed

@@ -876,6 +876,7 @@ answers Clef's question format with any chat model (answers pass the same confor
 a structured stand-in when it is missing (ADR-072).
 
 ## ADR-064 — cortexd local mode (2026-10-26)
+*Superseded in part by ADR-083: local mode now accepts live keys (LIVE joins at Stop 0 and trades only after RATIFY).*
 **Decision:** the same Brain runs in Node: SQLite files for hot state and the journal (same migrations), a keyless
 sandbox broker on live public crypto prices (demo) or the user's own Alpaca paper account, research jobs as local
 `uv` subprocesses (no GitHub), the web terminal on localhost, a background service (launchd / systemd user unit /

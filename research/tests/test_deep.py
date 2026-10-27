@@ -414,3 +414,16 @@ def test_research_desk_uses_the_users_model_pool(monkeypatch):
     assert obj == {"ok": True} and name == "ep:box/qwen3"
     assert sent[0][0] == "http://127.0.0.1:8799/v1/chat/completions"
     assert "max_completion_tokens" in sent[1][1] and "response_format" not in sent[1][1]
+
+
+def test_public_host_checks_resolved_addresses():
+    from cortex_research.deep.tools import public_host
+
+    def fake(ip):
+        return lambda h, p: [(2, 1, 6, "", (ip, 0))]
+
+    assert public_host("example.com", fake("93.184.216.34"))
+    assert not public_host("evil.example", fake("10.0.0.5"))
+    assert not public_host("evil.example", fake("169.254.169.254"))
+    assert not public_host("evil.example", fake("127.0.0.1"))
+    assert not public_host("[::1]", fake("::1"))

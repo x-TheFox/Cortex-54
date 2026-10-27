@@ -100,6 +100,8 @@ describe("savant deploy (ADR-065)", () => {
       "GROQ_API_KEY=g",
       "ALPACA_PAPER_KEY_ID=k",
       "ALPACA_PAPER_SECRET=s",
+      "ALPACA_LIVE_KEY_ID=LIVEKEY",
+      "ALPACA_LIVE_SECRET=LIVESECRET",
     ]);
     const calls: string[] = [];
     let d1: { name: string; uuid: string }[] = [];
@@ -146,6 +148,11 @@ describe("savant deploy (ADR-065)", () => {
     });
     expect(secretsSeen[0]).not.toHaveProperty("CLOUDFLARE_API_TOKEN"); // the deploy token never goes into the worker
     expect(secretsSeen[1]).toHaveProperty("SENTINEL_TICK_SECRET");
+    // audit F-A6-13: a cloud deploy carries PAPER keys only, even when the app holds live keys
+    for (const s of secretsSeen) {
+      expect(Object.keys(s).filter((k) => k.includes("LIVE"))).toEqual([]);
+      expect(Object.values(s)).not.toContain("LIVESECRET");
+    }
     // second run: nothing new is created
     calls.length = 0;
     deploy({ root, home, cfg: { ...cfg, cloud: r.cloud }, name: "acme", run });

@@ -3996,7 +3996,7 @@ ${postmortem}`,
     if (kill !== "CLEAR") return `Kill flag is ${kill}; no court sessions.`;
     if (this.budget.snapshot(now).mode === "REDUCE_ONLY")
       return "Budget is in REDUCE_ONLY; no court sessions.";
-    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day)
+    if (this.daily("court", now) >= this.courtCap())
       return "Daily court cap reached.";
     const id = `operator:${target.symbol}:${now}`;
     this.sql.exec(
@@ -4052,7 +4052,7 @@ ${postmortem}`,
     }
     if (!target) return `${symbolInput} isn't in the tradeable universe.`;
     if ((await this.readKill()) !== "CLEAR") return "Kill flag is set; no court sessions.";
-    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day)
+    if (this.daily("court", now) >= this.courtCap())
       return "Daily court cap reached.";
     const id = `roast:${target.symbol}:${now}`;
     this.sql.exec(
@@ -4267,12 +4267,22 @@ ${postmortem}`,
    * Tier 3 court: bull (chain A) → bear (chain B, different family) → Clef 27B synthesis → calibrated COURT
    * contract → the same validator/sizer as everything else. One sprint per pulse, capped per day.
    */
+  /**
+   * Daily court sessions allowed today. RISK_DOCTRINE §4 (audit doc-vs-code): halved while any trading account sits in
+   * the YELLOW band or worse, so a drawdown spends less model time on new ideas.
+   */
+  private courtCap(): number {
+    const max = this.d.funnel.tier3.max_sprints_per_day;
+    const bands = this.sql.exec<{ breaker: string }>("SELECT breaker FROM accounts");
+    return bands.some((b) => b.breaker !== "GREEN") ? Math.floor(max / 2) : max;
+  }
+
   private async runCourt(): Promise<number> {
     const llm = this.deps.llm;
     const clef = this.deps.clef;
     if (!llm || !clef) return 0;
     const now = this.deps.now();
-    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day) return 0;
+    if (this.daily("court", now) >= this.courtCap()) return 0;
     // ADR-051: cases waiting for their research dossier are skipped until it lands or the wait expires.
     const row = one<{ candidate_id: string; payload_json: string; enqueued_at: number }>(
       this.sql,

@@ -36,9 +36,10 @@ import { ntfyUrl, PushNotifier } from "../src/notify/push.ts";
 import { handleWeb, loginLink, type WebBrain, type WebSettings } from "../src/web/api.ts";
 import { pill, pillAuthorized, swiftbar } from "../src/web/pill.ts";
 import { snapshotDb } from "./backup.ts";
-import type { LocalConfig } from "./config.ts";
+import { type LocalConfig, loadConfig } from "./config.ts";
 import { runtimeChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
+import { TERMS_VERSION } from "../src/legal/version.ts";
 import { entriesBlocked, readLicense } from "./license.ts";
 import { loadLocalScar, mergeScar } from "./memory.ts";
 import { SimBroker } from "./simbroker.ts";
@@ -257,9 +258,11 @@ export class LocalCortex {
       d1: this.d1,
       // the local kill switch; on a licensed build, paper mode without a valid licence holds entries the same way
       // (exits and stops keep working: ADR-077)
+      // ADR-087: and until the current terms are accepted, no new entries on a real broker account either
       readKillFlag: async () =>
         existsSync(join(home, "KILLED")) ||
-        ((cfg.mode === "paper" || Boolean(liveKey)) && entriesBlocked(readLicense(home))),
+        ((cfg.mode === "paper" || Boolean(liveKey)) &&
+          (entriesBlocked(readLicense(home)) || loadConfig(home)?.terms?.version !== TERMS_VERSION)),
       now,
       clef: o.overrides?.clef !== undefined ? o.overrides.clef : clef,
       clairic,
@@ -366,6 +369,8 @@ export class LocalCortex {
     const lic = readLicense(this.o.home);
     if (this.o.cfg.mode === "paper" && entriesBlocked(lic) && lic.required && !lic.ok)
       return `Licence: ${lic.reason} No new trades until it's fixed; open positions keep their stops.`;
+    if (this.o.cfg.mode === "paper" && loadConfig(this.o.home)?.terms?.version !== TERMS_VERSION)
+      return "Accept the terms (Settings) before Savant trades your account";
     if (this.pool?.notes.some((n) => n.level === "block")) return "The court needs AI models (Settings)";
     const bad = runtimeChecks(this.health() as Parameters<typeof runtimeChecks>[0]).find((c) => !c.ok);
     return bad ? `${bad.name}: ${bad.detail}` : null;

@@ -8,21 +8,21 @@ web
 
 ## Stack
 
-React (operator's explicit request, 2026-10-23), built to static files and served as Cloudflare Workers static
-assets from the `cortex` worker. $0 hosting, no third-party runtime services, strict CSP (self-hosted fonts and
-scripts only). The Worker bundle must stay small; the web build lives outside it.
+React (2026-10-23), built to static files. The same cockpit is served by the local Savant app (desktop, from
+cortexd) and by a customer's own cloud brain (Cloudflare Workers static assets). No third-party runtime services,
+strict CSP (self-hosted fonts and scripts only). The Worker bundle must stay small; the web build lives outside it.
 
 ## Users
 
-One user: the operator (owner of the repo and both Alpaca accounts). Primarily on a desktop/laptop; the
-phone is a secondary glance surface (Discord covers mobile alerts). The operator does not approve trades; they
-govern an autonomous system and must not touch controls casually, because any manual command restarts the
-30-day autonomous paper clock that gates real money.
+Each customer is the single operator of their own install: one person, their own Alpaca accounts, usually a
+desktop or laptop (the app), sometimes a phone on the same Wi-Fi (glance and pause; destructive commands need a
+fresh pairing). They do not approve trades; they govern an autonomous system. Manual trading commands count as
+interventions on the 30-day paper record shown next to LIVE, so the controls are present but never inviting.
 
 ## Product Purpose
 
-Savant is an autonomous trading agent that trades a $54 paper account (later a $54 live account) entirely on
-free tiers. The web terminal is the operator's workstation for three jobs, all first-class:
+Savant is an autonomous trading agent (Cortex) for accounts of any size, free tiers by default. The cockpit is the
+operator's workstation for three jobs, all first-class:
 1. **Glance** — is it healthy? equity, P&L, breaker band, mode, heartbeat, budget, regime.
 2. **Watch it think** — the funnel (news/screeners → Clef triage → Clef 27B → bull-vs-bear court → contract),
    rejections, and what the brain did each pulse.
@@ -35,23 +35,26 @@ alone.
 
 Not a broker dashboard and not a chat bot: a governance console for a self-improving trading organism whose
 hard rails (constitution, risk engine, kill-switch) sit outside any model. The panel shows reasoning and rails
-side by side, at a $54 scale where every cent and basis point is visible.
+side by side, down to the cent and the basis point, so it works at very small account sizes ($54 is the worked
+example in the docs).
 
 ## Operating Context
 
-Signed in via a single-use `/terminal` link from Discord (12 h session). Data arrives by polling the brain
-(`/api/state` every 15 s while visible) plus D1 reads. Controls: pause, resume, autonomy dial (LIVE needs a
-typed RATIFY), flatten (sells everything), unlock after RED (written postmortem), convene the court on a symbol.
-Discord carries the same controls and the alarm stream.
+Desktop: the app signs you in on your own computer (30-day session); a phone pairs once from a QR code. A cloud
+brain: a single-use sign-in link (12 h session). Data arrives by polling the brain (`/api/state` every 15 s while
+visible). Controls: pause, resume, autonomy dial (LIVE needs a typed RATIFY on a fresh sign-in), flatten (sells
+everything), unlock after RED (written postmortem), convene the court on a symbol. Discord is an optional add-on
+with the same controls and the alarm stream.
 
 ## Capabilities and Constraints
 
-- Every control has a Discord twin (shared command runner, parity test).
+- The app and the optional Discord bot share one command runner (parity test), so a control behaves the same in both.
 - Manual controls count as operator interventions for the LIVE gate; the UI must make that cost visible and
   make destructive actions (flatten, LIVE ratify) deliberate.
 - Money in USD to the cent; quantities as decimals; times in UTC internally, ET only for display.
 - Data that is stale, unknown, or failing must look different from healthy data (fail-closed system).
-- No live trading yet: LIVE is dormant until ratified.
+- LIVE joins at Stop 0 and trades only after the operator ratifies it; the paper graduation gate is shown as advice
+  (red until it passes), not enforced (ADR-083).
 
 ## Brand Commitments
 

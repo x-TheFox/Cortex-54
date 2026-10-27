@@ -210,7 +210,7 @@ neurons/M, no output billing (ADR-043). **Jev** (TypeSafe AI) is not in our Work
 | Options live at $75–$125 | The sizer forbids it until ~$1,000+. Options are paper shadow lab only. |
 | Containers for Monte Carlo/backtests | Paid only. GitHub Actions (Python) does batch compute. |
 | satori + resvg PNG HUD in the Worker | 10 ms CPU and 3 MB bundle on Free. Discord embeds + QuickChart image URLs instead. |
-| Cloudflare Access for the web terminal | Avoided (card risk). Discord OAuth restricted to the operator's user ID. |
+| Cloudflare Access for the web terminal | Avoided (card risk). Single-use sign-in links from `/terminal` or the app (ADR-034), no OAuth. |
 | R2 archives, Vectorize semantic memory | R2 avoided. Beliefs live in D1 with tags; Vectorize only if D1 search proves insufficient. |
 | Cron `0 13 * * 1-5` = 8:30 ET | UTC crons drift with DST. Session logic uses Alpaca `/v2/clock` + `/v2/calendar`. |
 | Copy HKUDS/AI-Trader skills | No license. Ideas only. |

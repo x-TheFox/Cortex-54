@@ -377,6 +377,8 @@ export interface SettingsView {
   live?: { mode: string; reason: string | null; equityUsd: number | null; autonomyStop: number } | null;
   /** ADR-081: the paper account's mode and why */
   account?: { mode: string; reason: string | null; startUsd: number; equityUsd: number | null } | null;
+  /** ADR-087: the legal set the user accepted */
+  terms?: { current: string; accepted: boolean; acceptedAt: number | null };
   /** ADR-086 */
   licenseKey?: { set: boolean; hint: string };
   storeUrl?: string;

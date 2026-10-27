@@ -48,6 +48,32 @@ def run_url() -> str | None:
     return f"{s}/{r}/actions/runs/{i}" if s and r and i else None
 
 
+# Audit F-B1-01: upstream skills get only what they need (public data keys and the OS basics), never the ingest
+# secret, broker keys or LLM keys. A bumped or compromised UPSTREAM_SHA can't read what it isn't given.
+_SKILL_ENV_KEYS = {"FMP_API_KEY", "FRED_API_KEY", "SEC_USER_AGENT", "COINGECKO_API_KEY"}
+_SKILL_ENV_PREFIXES = ("LC_", "PYTHON", "UV_", "SSL_CERT", "REQUESTS_CA", "CURL_CA")
+_SKILL_ENV_BASICS = {"PATH", "HOME", "LANG", "TMPDIR", "TEMP", "TMP", "TZ", "SYSTEMROOT", "VIRTUAL_ENV", "USERPROFILE"}
+_SECRET_NAMES = ("KEY", "SECRET", "TOKEN", "PASSWORD")
+
+
+def skill_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if env is None else env)
+    return {
+        k: v
+        for k, v in env.items()
+        if k in _SKILL_ENV_KEYS or k in _SKILL_ENV_BASICS or k.startswith(_SKILL_ENV_PREFIXES)
+    }
+
+
+def redact(text: str, env: dict[str, str] | None = None) -> str:
+    """Audit F-B1-02: scrub every secret-looking value we hold out of an error tail, not just the FMP key."""
+    env = dict(os.environ if env is None else env)
+    for k, v in env.items():
+        if v and len(v) >= 6 and any(n in k for n in _SECRET_NAMES):
+            text = text.replace(v, "***")
+    return text
+
+
 def run_skill(skill: str, script: str, args: list[str], out_dir: Path) -> None:
     """Run an upstream skill script from its own directory (it imports sibling modules).
 
@@ -56,17 +82,14 @@ def run_skill(skill: str, script: str, args: list[str], out_dir: Path) -> None:
     upstream = Path(os.environ["UPSTREAM_DIR"]) / "skills" / skill / "scripts"
     cmd = [sys.executable, script, *args]
     for attempt in range(2):
-        res = subprocess.run(cmd, cwd=upstream, capture_output=True, text=True, timeout=TIMEOUT_S, env=os.environ.copy())
+        res = subprocess.run(cmd, cwd=upstream, capture_output=True, text=True, timeout=TIMEOUT_S, env=skill_env())
         if res.returncode == 0:
             return
         if attempt == 0:
             print(f"{skill} failed ({res.returncode}); retrying once in 20 s", file=sys.stderr)
             time.sleep(20)
     if res.returncode != 0:
-        tail = (res.stderr or res.stdout)[-800:]
-        fmp = os.environ.get("FMP_API_KEY")
-        if fmp:
-            tail = tail.replace(fmp, "***")
+        tail = redact((res.stderr or res.stdout)[-800:])
         raise RuntimeError(f"{skill} failed ({res.returncode}): {tail}")
 
 

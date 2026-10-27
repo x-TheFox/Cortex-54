@@ -18,6 +18,7 @@ import { Onboarding } from "./onboarding.tsx";
 import { AccountPanel, CourtPanel } from "./overhead.tsx";
 import { AcctPage, FunnelPage, GovPage, MemPage, OptPage, StsPage } from "./pages.tsx";
 import { SettingsPage } from "./settings.tsx";
+import { TermsGate } from "./terms.tsx";
 import { Today } from "./today.tsx";
 
 // ADR-071: the app is the main dashboard; FEED and ASK carry everything Discord used to, SET configures it all.
@@ -447,7 +448,11 @@ export function App() {
         </section>
       )}
 
-      {onb && settings.data && (
+      {settings.data?.managed === "local" && settings.data.terms && !settings.data.terms.accepted && (
+        <TermsGate s={settings.data} reload={settings.reload} />
+      )}
+
+      {onb && settings.data && (settings.data.terms?.accepted ?? true) && (
         <Onboarding
           s={settings.data}
           reload={settings.reload}

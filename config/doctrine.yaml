@@ -176,15 +176,15 @@ budgets:
     cf_service_subrequests: 1000
 
 llm_routing:
-  # Verified live 2026-10-22 (ADR-028). family = model lineage; bull and bear must differ (ADR-009).
+  # Verified live 2026-10-22 (ADR-028), re-checked by the canary 2026-10-26 (ADR-070). family = model lineage; bull and
+  # bear must differ (ADR-009). Only models in a chain are listed (audit 2026-10-27: deepseek and the OpenRouter gemma
+  # entry were out of every chain); any other model gets its family from its name (src/court/models.ts).
   families:
     gemini: google
     groq/openai/gpt-oss-120b: openai-oss
     groq/qwen/qwen3.8-27b: qwen
     groq/openai/gpt-oss-20b: openai-oss
-    nim/deepseek-ai/deepseek-v4.1-flash: deepseek
     nim/nvidia/nemotron-3-ultra-550b-a55b: nvidia
-    openrouter/google/gemma-4-31b-it:free: google
   # Probe 2026-10-26 (bull prompt, live BTC): gemini-3.5 ok in ~14 s (503 at peak), qwen ok in ~2 s, gpt-oss-20b ok in
   # ~2 s; nemotron (NIM and OpenRouter) answers in prose, not JSON; deepseek times out at 60 s, so it is out of both
   # chains (one timeout ate 40% of the hearing deadline).
