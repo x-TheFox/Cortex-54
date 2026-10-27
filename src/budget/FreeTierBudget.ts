@@ -30,10 +30,19 @@ const PROJECTION_SAFETY = 1.15;
 
 export const utcDay = (now: number): string => new Date(now).toISOString().slice(0, 10);
 
+/**
+ * What this brain meters (ADR-081). "cloudflare": the operator's Workers Free deployment, every platform quota.
+ * "workers_ai": local mode with the user's own Cloudflare AI key — only its free daily neuron allowance is real;
+ * Worker / Durable Object / D1 quotas don't exist on the user's computer. "none": local mode without Cloudflare AI
+ * (an LLM stands in for Clef), nothing to meter here; the model pool's own caps and spend limits apply instead.
+ */
+export type BudgetScope = "cloudflare" | "workers_ai" | "none";
+
 export class FreeTierBudget {
   constructor(
     private readonly sql: SqlLike,
     private readonly d: Doctrine,
+    readonly scope: BudgetScope = "cloudflare",
   ) {}
 
   private limitOf(r: DailyResource): number {
@@ -56,6 +65,7 @@ export class FreeTierBudget {
 
   add(r: DailyResource, amount: number, now: number): void {
     if (amount <= 0) return;
+    if (this.scope === "none" || (this.scope === "workers_ai" && !r.startsWith("neurons_"))) return;
     this.sql.exec(
       "INSERT INTO budget_counters (day, resource, used) VALUES (?, ?, ?) ON CONFLICT(day, resource) DO UPDATE SET used = used + excluded.used",
       utcDay(now),
@@ -75,6 +85,7 @@ export class FreeTierBudget {
 
   /** Record that the platform itself returned a limit error today; forces REDUCE_ONLY until 00:00 UTC. */
   markLimitHit(resource: string, now: number): void {
+    if (this.scope !== "cloudflare") return; // a local SQLite file has no platform quota to hit
     this.sql.exec(
       "INSERT INTO budget_counters (day, resource, used) VALUES (?, ?, 1) ON CONFLICT(day, resource) DO UPDATE SET used = used + 1",
       utcDay(now),
@@ -88,6 +99,7 @@ export class FreeTierBudget {
     neurons: number,
     now: number,
   ): boolean {
+    if (this.scope === "none") return true;
     return this.used(tier, now) + neurons <= this.limitOf(tier) * this.d.budgets.hard_stop_fraction;
   }
 
@@ -98,6 +110,9 @@ export class FreeTierBudget {
     /** Audit W1-16: today's use extrapolated to midnight UTC (rate-limited resources only). */
     projected: { resource: string; fraction: number };
     resets_in_s: number;
+    /** ADR-081: what is metered, and today's Cloudflare AI use per tier (fractions of each tier's allowance) */
+    scope: BudgetScope;
+    neurons: Record<string, number>;
   } {
     const rows = this.sql.exec<{ resource: string; used: number }>(
       "SELECT resource, used FROM budget_counters WHERE day = ?",
@@ -105,13 +120,19 @@ export class FreeTierBudget {
     );
     const fractions: Record<string, number> = {};
     let worst = { resource: "none", fraction: 0 };
+    const neurons: Record<string, number> = {};
     let limitHit = false;
     for (const { resource, used } of rows) {
       if (resource.startsWith("limit_hit:")) {
-        limitHit = true;
+        limitHit = this.scope === "cloudflare";
         continue;
       }
-      if (resource.startsWith("neurons_")) continue; // tier allocations gate their own tier, not the account mode
+      if (resource.startsWith("neurons_")) {
+        // tier allocations gate their own tier, not the account mode
+        if (this.scope !== "none") neurons[resource] = used / this.limitOf(resource as DailyResource);
+        continue;
+      }
+      if (this.scope !== "cloudflare") continue; // old counters from before a scope change
       const f = used / this.limitOf(resource as DailyResource);
       fractions[resource] = f;
       if (f > worst.fraction) worst = { resource, fraction: f };
@@ -136,6 +157,8 @@ export class FreeTierBudget {
       fractions,
       projected,
       resets_in_s: Math.round((dayStart + 86_400_000 - now) / 1000),
+      scope: this.scope,
+      neurons,
     };
   }
 

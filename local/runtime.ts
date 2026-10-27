@@ -50,7 +50,7 @@ import { fileD1, fileSql, type LocalD1 } from "./store.ts";
  * subprocesses, and the router becomes a small HTTP server bound to localhost. Two modes:
  *   demo  – a keyless simulated broker on live public crypto prices (nothing to sign up for);
  *   paper – the user's own Alpaca paper account (CORTEX needs it exclusively: don't share it with a cloud brain).
- * LIVE trading stays a cloud-and-ratification decision (constitution U8); local mode never holds live keys.
+ * A live account can be connected too (ADR-083); it stays at Stop 0 until the user ratifies LIVE autonomy (U8).
  */
 
 const MIME: Record<string, string> = {
@@ -141,6 +141,8 @@ export interface LocalOptions {
   settings?: WebSettings;
   overrides?: {
     broker?: BrokerApi;
+    /** tests: a fake live broker (never a real one) */
+    liveBroker?: BrokerApi;
     market?: MarketDataApi;
     clef?: ClefApi | null;
     quiet?: boolean;
@@ -174,10 +176,17 @@ export class LocalCortex {
       k.ALPACA_PAPER_KEY_ID && k.ALPACA_PAPER_SECRET
         ? { keyId: k.ALPACA_PAPER_KEY_ID, secret: k.ALPACA_PAPER_SECRET }
         : null;
+    // ADR-083: the user's live account. It connects at Stop 0 (dormant): no order is placed for it until the user
+    // ratifies LIVE autonomy twice on a fresh sign-in. Market data prefers the paper key.
+    const liveKey =
+      k.ALPACA_LIVE_KEY_ID && k.ALPACA_LIVE_SECRET
+        ? { keyId: k.ALPACA_LIVE_KEY_ID, secret: k.ALPACA_LIVE_SECRET }
+        : null;
+    const dataKey = alpacaKey ?? liveKey;
     const noGuard = () => undefined;
     const rawMarket =
-      o.overrides?.market ?? new AlpacaMarketData(alpacaKey ?? { keyId: "", secret: "" }, noGuard);
-    const market = alpacaKey || o.overrides?.market ? rawMarket : keylessNews(rawMarket);
+      o.overrides?.market ?? new AlpacaMarketData(dataKey ?? { keyId: "", secret: "" }, noGuard);
+    const market = dataKey || o.overrides?.market ? rawMarket : keylessNews(rawMarket);
     let broker: BrokerApi;
     if (o.overrides?.broker) broker = o.overrides.broker;
     else if (cfg.mode === "paper") {
@@ -189,6 +198,15 @@ export class LocalCortex {
         noGuard,
       );
     } else broker = new SimBroker(this.sql, market, cfg.starting_cash, now);
+    const live: BrokerApi | null =
+      o.overrides?.liveBroker ??
+      (liveKey
+        ? new AlpacaClient(
+            DOCTRINE.accounts.LIVE?.alpaca_base_url ?? "https://api.alpaca.markets",
+            liveKey,
+            noGuard,
+          )
+        : null);
 
     // ADR-072: built-in free providers + the user's endpoints, as one pool in round robin
     const built = buildPool(
@@ -233,14 +251,15 @@ export class LocalCortex {
       sql: this.sql,
       d,
       c: CONSTITUTION,
-      brokers: { PAPER: broker },
+      brokers: { PAPER: broker, ...(live ? { LIVE: live } : {}) },
       market,
       notifier,
       d1: this.d1,
       // the local kill switch; on a licensed build, paper mode without a valid licence holds entries the same way
       // (exits and stops keep working: ADR-077)
       readKillFlag: async () =>
-        existsSync(join(home, "KILLED")) || (cfg.mode === "paper" && entriesBlocked(readLicense(home))),
+        existsSync(join(home, "KILLED")) ||
+        ((cfg.mode === "paper" || Boolean(liveKey)) && entriesBlocked(readLicense(home))),
       now,
       clef: o.overrides?.clef !== undefined ? o.overrides.clef : clef,
       clairic,
@@ -250,12 +269,17 @@ export class LocalCortex {
       dispatcher: cfg.research.enabled ? this.jobs : null,
       http: o.overrides?.http ?? (o.overrides?.market ? null : (u, i) => fetch(u, i)),
       hub: hubFromEnv(k),
+      // ADR-081: on the user's computer only their own Cloudflare AI allowance is a real limit (if they use it)
+      budgetScope: this.clefMode === "cloudflare" ? "workers_ai" : "none",
+      adoptAccountSize: true,
     });
+    this.broker = broker;
+    this.liveBroker = live;
     this.brain.init({
       constitution_sha256: CONSTITUTION_SHA256,
       doctrine_sha256: DOCTRINE_SHA256,
       hot_schema_version: HOT_SCHEMA_VERSION,
-      accounts: ["PAPER"],
+      accounts: live ? ["PAPER", "LIVE"] : ["PAPER"],
       host: "local",
       mode: cfg.mode,
     });
@@ -268,6 +292,33 @@ export class LocalCortex {
   /** see resolveClef */
   clefMode = "off";
   private router: LlmRouter | null = null;
+  private broker: BrokerApi | null = null;
+  private liveBroker: BrokerApi | null = null;
+
+  /**
+   * ADR-081: "make it cash-only" — Alpaca's paper accounts allow margin by default, which the constitution forbids,
+   * so the brain holds them in reduce-only. This caps borrowing at 1x and turns shorting off at the broker (it only
+   * ever tightens), then reports what the broker now says.
+   */
+  async makeCashOnly(account: "PAPER" | "LIVE" = "PAPER"): Promise<{ ok: boolean; message: string }> {
+    const b = account === "LIVE" ? this.liveBroker : this.broker;
+    if (!b?.configure || !b.configuration)
+      return { ok: false, message: "Only a paper account has this setting." };
+    await b.configure({ max_margin_multiplier: "1", no_shorting: true });
+    const [cfg, acct] = await Promise.all([b.configuration(), b.account()]);
+    this.sql.exec("DELETE FROM settings WHERE key = ?", `broker_cash_only:${account}`);
+    const capped = Number(cfg.max_margin_multiplier) === 1;
+    return capped
+      ? {
+          ok: true,
+          message: `Done: borrowing is capped at 1x and shorting is off at Alpaca (the account reports multiplier ${acct.multiplier ?? "?"}). New trades resume at the next pulse.`,
+        }
+      : {
+          ok: false,
+          message:
+            "Alpaca didn't keep the change. Reset the paper account in Alpaca's dashboard and try again.",
+        };
+  }
   private pricing: Record<string, { in: number; out: number; cap?: number }> = {};
 
   /** ADR-075 cost meter: today's tokens and USD for every priced endpoint. */

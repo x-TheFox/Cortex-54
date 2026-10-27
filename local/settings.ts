@@ -125,6 +125,17 @@ export interface SettingsDeps {
   pairLink?: () => Promise<string | null>;
   /** ADR-076: stop the service and wipe the CORTEX home */
   wipe?: () => Promise<void>;
+  /** ADR-081: cap the paper account's borrowing at 1x at the broker */
+  cashOnly?: (account: "PAPER" | "LIVE") => Promise<{ ok: boolean; message: string }>;
+  /** ADR-081: the PAPER account's mode and why (so the page can offer the fix) */
+  account?: () => { mode: string; reason: string | null; startUsd: number; equityUsd: number | null } | null;
+  /** ADR-083: the LIVE account's state (null when no live keys) */
+  liveAccount?: () => {
+    mode: string;
+    reason: string | null;
+    equityUsd: number | null;
+    autonomyStop: number;
+  } | null;
 }
 
 export class LocalSettings implements WebSettings {
@@ -172,6 +183,8 @@ export class LocalSettings implements WebSettings {
       lan: { enabled: c.lan.enabled, port: c.port },
       secretStore: { mode: c.secret_store, backend: keychainName(this.d.home) },
       license: readLicense(this.d.home),
+      account: this.d.account?.() ?? null,
+      live: this.d.liveAccount?.() ?? null,
       discord: {
         connected: Boolean(c.keys.DISCORD_BOT_TOKEN && c.keys.DISCORD_CHANNELS),
         channels: Object.keys(safeJson(c.keys.DISCORD_CHANNELS)),
@@ -269,19 +282,22 @@ export class LocalSettings implements WebSettings {
     const c = this.d.cfg();
     const str = (k: string) => (typeof q[k] === "string" ? (q[k] as string) : "");
     try {
-      if (q.kind === "alpaca") {
-        const keyId = str("keyId") || c.keys.ALPACA_PAPER_KEY_ID || "";
-        const secret = str("secret") || c.keys.ALPACA_PAPER_SECRET || "";
+      if (q.kind === "alpaca" || q.kind === "alpaca_live") {
+        // ADR-083: reads the account only; nothing is ever placed from a test
+        const live = q.kind === "alpaca_live";
+        const keyId = str("keyId") || (live ? c.keys.ALPACA_LIVE_KEY_ID : c.keys.ALPACA_PAPER_KEY_ID) || "";
+        const secret = str("secret") || (live ? c.keys.ALPACA_LIVE_SECRET : c.keys.ALPACA_PAPER_SECRET) || "";
         if (!keyId || !secret) return { ok: false, message: "Paste both the key id and the secret." };
         const a = await new AlpacaClient(
-          "https://paper-api.alpaca.markets",
+          live ? "https://api.alpaca.markets" : "https://paper-api.alpaca.markets",
           { keyId, secret },
           () => undefined,
           this.f,
         ).account();
+        const margin = Number(a.multiplier ?? 1) > 1;
         return {
           ok: true,
-          message: `Connected to your paper account: equity $${Number(a.equity).toFixed(2)}.`,
+          message: `Connected to your ${live ? "live (real-money)" : "paper"} account: equity $${Number(a.equity).toFixed(2)}.${margin ? " It allows margin: CORTEX holds new trades until you make it cash-only (button below, after saving)." : ""}`,
         };
       }
       if (q.kind === "cloudflare") {
@@ -389,6 +405,8 @@ export class LocalSettings implements WebSettings {
           },
         };
       }
+      if (Boolean(c.keys.ALPACA_LIVE_KEY_ID) !== Boolean(c.keys.ALPACA_LIVE_SECRET))
+        return { ok: false, message: "The live account needs both its key id and its secret." };
       if (c.mode === "paper" && !(c.keys.ALPACA_PAPER_KEY_ID && c.keys.ALPACA_PAPER_SECRET))
         return {
           ok: false,
@@ -453,6 +471,16 @@ export class LocalSettings implements WebSettings {
       ok: true,
       message: `Restoring the backup from ${b.madeAt.slice(0, 10)} (${mode} mode): CORTEX restarts on it in a few seconds.${b.withKeys ? "" : " It had no keys: add them in SETTINGS."} If the old computer still runs CORTEX on the same paper account, stop it there.`,
     };
+  }
+
+  /** ADR-081: make the paper account cash-only at the broker (the user presses the button). */
+  async cashOnly(account: "PAPER" | "LIVE" = "PAPER") {
+    if (!this.d.cashOnly) return { ok: false, message: "Not available here." };
+    try {
+      return await this.d.cashOnly(account);
+    } catch (e) {
+      return { ok: false, message: plain(e) };
+    }
   }
 
   /** ADR-077: install a licence file (checked against this build's publisher key before it is saved). */

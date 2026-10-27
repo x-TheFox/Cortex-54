@@ -15,6 +15,9 @@ import { accountFor, secretBackend } from "./keychain.ts";
 export const KEY_NAMES = [
   "ALPACA_PAPER_KEY_ID",
   "ALPACA_PAPER_SECRET",
+  /** ADR-083: the user's live (real-money) Alpaca account; LIVE stays at Stop 0 until they ratify */
+  "ALPACA_LIVE_KEY_ID",
+  "ALPACA_LIVE_SECRET",
   "GEMINI_API_KEY",
   "GROQ_API_KEY",
   "NVIDIA_API_KEY",

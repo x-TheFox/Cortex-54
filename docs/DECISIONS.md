@@ -1069,3 +1069,45 @@ bundled Node/V8, network client and server). Verified: `codesign --verify --deep
 runs under the new signature, and a quarantined copy keeps a valid signature. Gatekeeper then shows its normal
 "can't verify the developer" prompt (System Settings → Privacy & Security → Open Anyway) until the Apple secrets of
 ADR-079 make releases notarized; `APPLE_SIGNING_IDENTITY` replaces the ad-hoc identity in CI.
+
+## ADR-081 — Any account size, account switches, margin accounts, no Cloudflare meter on your computer (2026-10-27)
+**Context:** the operator connected the app to a default Alpaca paper account ($100,000, margin enabled). The cockpit
+said "SINCE $54 +$99,946", the BTC benchmark started at $54 (the demo's history from before the switch was still in
+the hot store), and the account never traded: the margin multiplier and the "equity ≫ doctrine start" check both held
+it reduce-only. Separately, local mode showed and enforced Cloudflare free-tier quotas that don't exist on a
+user's computer.
+**Decision:** each account's start is its equity when CORTEX first saw it (or since its last fresh start), stored in
+the hot store and sent as `startUsd`; the cockpit, TODAY and the guide use it. A different broker account behind the
+same slot (Alpaca `id` changes: demo → paper, new keys) starts the account fresh (positions, orders, history; RESET is
+journaled); a first run on a home whose history is ≥ 2× off the account and holds no positions does the same. Local
+mode trades the account the user connected, whatever its size (`adoptAccountSize`), inside the same percentage
+limits; the cloud keeps the fail-closed check. A margin account stays reduce-only (U3) unless the broker's own
+configuration caps borrowing at 1x (`/v2/account/configurations`, re-read every 30 min): SETTINGS offers "Make it
+cash-only", which sets `max_margin_multiplier: "1"` and `no_shorting: true` at Alpaca (it only ever tightens) when
+the user presses it. The free-tier meter has a scope: the cloud meters every Workers Free quota; local mode meters only
+the user's own Cloudflare AI allowance when Clef runs there, and nothing when an LLM stands in; the STS page, the
+status memo and the guide say which.
+
+## ADR-082 — Outside links open in the system browser (2026-10-27)
+**Context:** in the desktop app, the setup guide's links (key pages, Alpaca, ntfy, Cloudflare) did nothing: they open
+a new tab, and the app's window can't open windows.
+**Decision:** the shell builds the main window itself with navigation and new-window handlers: the cockpit (the
+bundled page and the local brain on 127.0.0.1 / localhost) stays in the app; every other http(s) or mailto link opens
+in the user's default browser (tauri-plugin-opener, called from Rust, so the page gets no new permissions); anything
+else is ignored. A unit test pins which URLs count as local (`127.0.0.1.evil.example` doesn't).
+
+## ADR-083 — Live accounts in the app; ratify whenever the user chooses; setup without the agent path (2026-10-27)
+**Context:** operator: setup should let people connect a live Alpaca account, and the "let my AI agent do it" path
+should leave the app's setup. Asked when real money may start, the operator chose "whenever they ratify" over
+"after the paper graduation gate".
+**Decision:** SETTINGS → Trading account (and the wizard's first step) can connect a live account (`ALPACA_LIVE_KEY_ID`
+/ `ALPACA_LIVE_SECRET`; test is read-only; half a key pair is refused). Local mode then runs LIVE beside PAPER, and
+the cockpit shows the LIVE column once it is connected. LIVE joins at Stop 0 (orders are journaled as SHADOW, nothing
+is sent). Turning it on is the constitution's ratification, unchanged: the LIVE dial with RATIFY typed in the app,
+confirmed a second time 10 minutes to 24 hours later, both on a sign-in younger than 10 minutes. The Governor's LIVE
+gate is now kept by the brain (`liveGate` in status) and the ratify box shows it; a gate that hasn't passed is a red
+warning listing the open checks, not a block. Everything else still binds LIVE: cash only (a margin live account is
+held until it's made cash-only, the same button as paper), the sizer and caps, breakers (LIVE never self-unlocks from
+RED), the kill switch, and the licence check (a licence problem holds entries on live too). The first-launch screen
+now leads straight into the wizard; the agent prompt stays available outside the app (docs/SETUP_WITH_AN_AGENT.md,
+the `cortex` CLI). The operator's own cloud deployment is unchanged.

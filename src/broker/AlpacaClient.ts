@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { Bar } from "../strategy/indicators.ts";
 import {
+  type AccountConfig,
+  AccountConfigSchema,
   type AlpacaAccount,
   AlpacaAccountSchema,
   type AlpacaActivity,
@@ -98,6 +100,22 @@ export class AlpacaClient implements BrokerApi {
 
   account(): Promise<AlpacaAccount> {
     return this.get("/v2/account", AlpacaAccountSchema);
+  }
+
+  configuration(): Promise<AccountConfig> {
+    return this.get("/v2/account/configurations", AccountConfigSchema);
+  }
+
+  /** ADR-081: only ever tightens (borrowing capped at 1x, shorting off); never called by the trading pulse. */
+  configure(patch: { max_margin_multiplier?: "1"; no_shorting?: true }): Promise<AccountConfig> {
+    return call(
+      this.fetcher,
+      this.guard,
+      this.creds,
+      `${this.baseUrl}/v2/account/configurations`,
+      AccountConfigSchema,
+      { method: "PATCH", body: JSON.stringify(patch) },
+    );
   }
 
   positions(): Promise<AlpacaPosition[]> {

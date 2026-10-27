@@ -68,7 +68,8 @@ function AccountColumn({ a, s, local = false }: { a: AccountView; s: StatusView;
   }
   const dd = drawdown(a);
   const h = heat(a);
-  const pnl = a.hwmUsd !== null ? a.equityUsd - 54 : null;
+  const start = a.startUsd ?? 54;
+  const pnl = a.hwmUsd !== null ? a.equityUsd - start : null;
   return (
     <div className="acct">
       <div className="acct-head">
@@ -83,7 +84,7 @@ function AccountColumn({ a, s, local = false }: { a: AccountView; s: StatusView;
           {a.equityUsd.toFixed(2)}
         </div>
         <div className="sub">
-          SINCE $54{" "}
+          SINCE {usd(start)}{" "}
           <span className={pnl !== null && pnl < 0 ? "down" : "up"}>
             {pnl === null ? "—" : `${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}`}
           </span>
@@ -198,12 +199,12 @@ export function App() {
     [st],
   );
 
-  // local mode is paper-only: no LIVE column, no LIVE controls (a dormant LIVE account there only confuses)
+  // local mode shows LIVE only once a live account is connected (ADR-083); a keyless LIVE column only confuses
   const local = settings.data?.managed === "local";
   const s = useMemo(
     () =>
       st.data && local
-        ? { ...st.data, accounts: st.data.accounts.filter((a) => a.account !== "LIVE") }
+        ? { ...st.data, accounts: st.data.accounts.filter((a) => a.account !== "LIVE" || a.configured) }
         : st.data,
     [st.data, local],
   );
@@ -440,7 +441,7 @@ export function App() {
       {s && (
         <section className="overhead" aria-label="Overhead panel" data-guide="overhead">
           {s.accounts.map((a) => (
-            <AccountPanel key={a.account} a={a} run={run} busy={busy} />
+            <AccountPanel key={a.account} a={a} run={run} busy={busy} gate={s.liveGate ?? null} />
           ))}
           <CourtPanel run={run} busy={busy} />
         </section>

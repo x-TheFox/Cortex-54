@@ -168,7 +168,9 @@ export function ecam(s: StatusView, now: number): Ecam {
     else if (a.mode === "NORMAL") memos.push(`${a.account} AUTO · STOP ${a.autonomyStop} · ${a.rung}`);
   }
   if (age <= PULSE_LATE_MS) memos.push(`PULSE ${Math.round(age / 1000)} S`);
-  if (s.budget.mode === "NORMAL") memos.push(`BUDGET ${Math.round(s.budget.worst.fraction * 100)}%`);
+  // ADR-081: the Cloudflare free-tier meter only means something on the cloud brain
+  if (s.budget.mode === "NORMAL" && (s.budget.scope ?? "cloudflare") === "cloudflare")
+    memos.push(`BUDGET ${Math.round(s.budget.worst.fraction * 100)}%`);
   memos.push(`JOURNAL #${s.journalHead.seq}`);
   return { warnings, cautions, memos };
 }

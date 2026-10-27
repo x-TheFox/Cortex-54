@@ -33,7 +33,8 @@ export function Today({
   const a =
     s.accounts.find((x) => x.account === "PAPER" && x.configured) ?? s.accounts.find((x) => x.configured);
   if (!a) return null;
-  const pnl = a.equityUsd !== null ? a.equityUsd - 54 : null; // the $54 start, as on the cockpit's equity line
+  const start = a.startUsd ?? 54; // where the account started (ADR-081), as on the cockpit's equity line
+  const pnl = a.equityUsd !== null ? a.equityUsd - start : null;
   const held = a.positions.map((p) => p.symbol);
   // the latest thing worth reading: skip housekeeping (journal anchors, day rolls)
   const last = feed.data?.find((f) => !/^🔗/.test(headline(f) ?? "🔗"));
@@ -51,7 +52,7 @@ export function Today({
               <span className={pnl >= 0 ? "green" : "red"}>
                 {" "}
                 ({pnl >= 0 ? "+" : "−"}
-                {usd(Math.abs(pnl))} since it started with $54)
+                {usd(Math.abs(pnl))} since it started with {usd(start)})
               </span>
             )}
             .{" "}

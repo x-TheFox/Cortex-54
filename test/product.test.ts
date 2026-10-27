@@ -384,3 +384,45 @@ describe("MSIX package (ADR-079)", async () => {
     expect(store).toContain('Executable="a&amp;b.exe"');
   });
 });
+
+describe("live account in local mode (ADR-083)", () => {
+  it("connects dormant: no live order before RATIFY, and RATIFY takes two confirmations", async () => {
+    const home = tmp();
+    let now = Date.parse("2026-10-27T12:00:00Z");
+    const m = new Market(() => now);
+    m.set("BTC/USD", 100, 100.05);
+    const { FakeBroker } = await import("./sim/FakeBroker.ts");
+    const live = new FakeBroker(m, 54, () => now);
+    const c = new LocalCortex({
+      home,
+      root: process.cwd(),
+      cfg: { ...newConfig("demo"), research: { enabled: false, max_parallel: 1 } },
+      now: () => now,
+      overrides: { market: new FakeMarketData(m), clef: null, quiet: true, liveBroker: live },
+    });
+    await c.pulse();
+    const st = c.brain.status().accounts.find((a) => a.account === "LIVE");
+    expect(st?.configured).toBe(true);
+    expect(st?.autonomyStop).toBe(0);
+    expect(live.calls.some((x) => x.startsWith("submit"))).toBe(false);
+    expect(c.brain.setDial("LIVE", 3, "web:local", false)).toMatch(/RATIFY/);
+    expect(c.brain.setDial("LIVE", 3, "web:local", true)).toMatch(/Confirm again/);
+    expect(c.brain.status().accounts.find((a) => a.account === "LIVE")?.autonomyStop).toBe(0);
+    now += 11 * 60_000;
+    expect(c.brain.setDial("LIVE", 3, "web:local", true)).toMatch(/Stop 3/);
+    await c.stop();
+  });
+
+  it("refuses half a live key pair", async () => {
+    const h = tmp();
+    saveConfig(newConfig("demo"), h);
+    const s = new LocalSettings({
+      home: h,
+      cfg: () => loadConfig(h) ?? newConfig(),
+      reload: () => undefined,
+      pool: () => null,
+      clef: () => ({ ok: false, level: "off", text: "off" }),
+    });
+    expect((await s.save({ keys: { ALPACA_LIVE_KEY_ID: "AKxxxx" } })).ok).toBe(false);
+  });
+});

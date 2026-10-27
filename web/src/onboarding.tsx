@@ -3,16 +3,15 @@ import type { SettingsView } from "./api.ts";
 import { AlertsSection, ClefSection, ModelsSection, TradingSection, useSaver } from "./settings.tsx";
 
 /**
- * First-launch onboarding (ADR-073). Two ways in: a guided wizard (the same sections as SETTINGS, one at a time, in
- * plain words), or a prompt to paste into any AI agent that can run commands (it asks for each key and configures
- * everything with the `cortex` CLI; the app picks up its changes live). Either way can be left and resumed.
+ * First-launch onboarding (ADR-073): a guided wizard, the same sections as SETTINGS one at a time, in plain words. It
+ * can be left and resumed. (The paste-into-an-agent path was removed from the app by the operator, ADR-083; the
+ * `cortex` CLI and docs/SETUP_WITH_AN_AGENT.md still work for people who want it.)
  */
 const STEPS = ["Account", "AI models", "Cloudflare AI", "Alerts", "Done"] as const;
 
 export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () => void; close: () => void }) {
-  const [path, setPath] = useState<"choose" | "wizard" | "agent">("choose");
+  const [path, setPath] = useState<"choose" | "wizard">("choose");
   const [step, setStep] = useState(0);
-  const [copied, setCopied] = useState(false);
   const { save, saving } = useSaver(reload);
   const blocked = s.pool?.notes.some((n) => n.level === "block") ?? true;
   const finish = async () => {
@@ -28,68 +27,19 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
             <p className="label dim">WELCOME</p>
             <h2 className="onb-title">Let's get your robot ready.</h2>
             <p className="onb-lead">
-              CORTEX-54 trades a small paper account on its own: it reads the news, argues every trade with
-              two AI models, and a risk engine decides the size. Right now it is running in <b>demo mode</b>{" "}
-              with no keys. Pick how you'd like to finish setting it up. You can change anything later in
+              CORTEX-54 trades on its own: it reads the news, argues every trade with two AI models, and a
+              risk engine decides the size. Right now it is running in <b>demo mode</b> with no keys. Five
+              short steps, with links to every free key, finish the setup. You can change anything later in
               SETTINGS.
             </p>
-            <div className="onb-choices">
-              <button type="button" className="onb-choice" onClick={() => setPath("wizard")}>
-                <b>Guide me</b>
-                <span>Five short steps with links to every free key. About 5 minutes.</span>
-              </button>
-              <button type="button" className="onb-choice" onClick={() => setPath("agent")}>
-                <b>Let my AI agent do it</b>
-                <span>
-                  Copy one prompt into Claude Code, Codex, Cursor or any agent that runs commands. It asks you
-                  for each key and sets everything up.
-                </span>
+            <div className="onb-nav">
+              <button type="button" className="onb-btn primary" onClick={() => setPath("wizard")}>
+                Start setup (about 5 minutes)
               </button>
             </div>
             <button type="button" className="onb-skip" onClick={close}>
               Just look around in demo mode first
             </button>
-          </>
-        )}
-
-        {path === "agent" && (
-          <>
-            <p className="label dim">SET UP WITH AN AI AGENT</p>
-            <h2 className="onb-title">Paste this into your agent.</h2>
-            <p className="onb-lead">
-              It asks for one thing at a time and tells you where to get it. Changes show up here within
-              seconds. Prefer not to paste keys into a chat? Tell the agent; it will let you type them in your
-              own terminal.
-            </p>
-            <pre className="onb-prompt">{s.agentPrompt}</pre>
-            <div className="onb-nav">
-              <button type="button" className="onb-btn" onClick={() => setPath("choose")}>
-                Back
-              </button>
-              <button
-                type="button"
-                className="onb-btn primary"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(s.agentPrompt ?? "");
-                    setCopied(true);
-                  } catch {
-                    setCopied(false);
-                  }
-                }}
-              >
-                {copied ? "Copied ✓" : "Copy prompt"}
-              </button>
-              <button type="button" className="onb-btn" onClick={reload}>
-                Check progress
-              </button>
-            </div>
-            <Progress s={s} />
-            {s.onboarded && (
-              <button type="button" className="onb-btn primary" onClick={close}>
-                All set: open the dashboard
-              </button>
-            )}
           </>
         )}
 
@@ -108,7 +58,8 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
               <>
                 <p className="onb-lead">
                   Start in <b>demo</b> (nothing to set up) or connect a free <b>paper</b> account: fake money,
-                  real market, and the robot gets stocks and news too.
+                  real market, and the robot gets stocks and news too. A <b>live</b> account (real money) can
+                  be connected here too; it stays switched off until you turn it on.
                 </p>
                 <TradingSection s={s} save={save} saving={saving} />
               </>

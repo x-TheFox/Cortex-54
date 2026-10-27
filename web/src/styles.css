@@ -1892,3 +1892,26 @@ a {
   color: var(--glass);
   background: var(--amber);
 }
+/* ADR-083: turning on real money */
+.ratify {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 300px;
+}
+.ratify-gate {
+  margin: 0;
+  padding-left: 16px;
+  font: 400 12px / 1.4 var(--ui);
+  color: var(--amber);
+}
+.live-acct {
+  margin-top: 14px;
+  border-top: 1px solid var(--rule);
+  padding-top: 10px;
+}
+fieldset.ratify {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}

@@ -492,11 +492,33 @@ export function StsPage({ s, now }: { s: StatusView; now: number }) {
       </section>
       <section className="sd-block">
         <h4>
-          Free-tier budget ·{" "}
-          <span className={s.budget.mode === "NORMAL" ? "green" : "amber"}>{s.budget.mode}</span>
+          {(s.budget.scope ?? "cloudflare") === "cloudflare" ? "Free-tier budget" : "Cloudflare AI allowance"}{" "}
+          · <span className={s.budget.mode === "NORMAL" ? "green" : "amber"}>{s.budget.mode}</span>
         </h4>
         <div className="bars">
-          {fr.length === 0 ? (
+          {s.budget.scope === "none" ? (
+            <p className="empty">
+              Nothing to meter on your computer: no Cloudflare quotas here. AI model limits and spend caps are
+              in SETTINGS → AI models.
+            </p>
+          ) : s.budget.scope === "workers_ai" ? (
+            Object.keys(s.budget.neurons ?? {}).length === 0 ? (
+              <p className="empty">
+                No Cloudflare AI used yet today (free daily allowance on your own account).
+              </p>
+            ) : (
+              Object.entries(s.budget.neurons ?? {}).map(([k, v]) => (
+                <Bar
+                  key={k}
+                  label={k.replace(/^neurons_/, "").replace(/_/g, " ")}
+                  value={v}
+                  amber={0.7}
+                  red={0.9}
+                  fmt={(x) => pct(x, 0)}
+                />
+              ))
+            )
+          ) : fr.length === 0 ? (
             <p className="empty">Nothing metered yet today.</p>
           ) : (
             fr.map(([k, v]) => (

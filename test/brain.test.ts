@@ -59,6 +59,8 @@ function setup(
     dispatcher?: WorkflowDispatcher;
     scar?: ScarTissue;
     clairic?: ClairicApi;
+    adoptAccountSize?: boolean;
+    budgetScope?: "cloudflare" | "workers_ai" | "none";
   } = {},
 ) {
   let now = T0;
@@ -91,6 +93,8 @@ function setup(
     dispatcher: opts.dispatcher ?? null,
     scar: opts.scar ?? null,
     clairic: opts.clairic ?? null,
+    ...(opts.adoptAccountSize ? { adoptAccountSize: true } : {}),
+    ...(opts.budgetScope ? { budgetScope: opts.budgetScope } : {}),
   });
   brain.init({ test: true });
   return {
@@ -2400,5 +2404,78 @@ describe("Audit fixes (2026-10-24)", () => {
     expect(keys).not.toContain("count:tier2:2026-09-20");
     expect(keys).not.toContain("X:BTC/USD:2026-09-20");
     expect(keys).toContain("earnings_as_of");
+  });
+});
+
+describe("any account size, account changes, margin, local metering (ADR-081)", () => {
+  it("local mode trades a $100k account from where it started; the cloud still fails closed", async () => {
+    const t = setup({ adoptAccountSize: true });
+    t.paper.cash = 100_000;
+    t.paper.lastEquity = 100_000;
+    breakout(t);
+    const r = await t.brain.pulse();
+    const a = t.brain.status().accounts.find((x) => x.account === "PAPER");
+    expect(a?.mode).toBe("NORMAL");
+    expect(a?.startUsd).toBe(100_000);
+    expect(r.entries).toBeGreaterThan(0);
+    // the cloud keeps the doctrine's check (existing test above); and its start is the doctrine's $54 when unseen
+    expect(setup().brain.startEquityUsd("PAPER")).toBe(54);
+  });
+
+  it("a different broker account behind PAPER starts fresh (demo → paper)", async () => {
+    const t = setup({ adoptAccountSize: true });
+    await t.brain.pulse();
+    t.advance(3_600_000);
+    await t.brain.pulse();
+    expect(t.brain.status().accounts.find((x) => x.account === "PAPER")?.startUsd).toBe(54);
+    // now the user connects their own $100k paper account
+    t.paper.cash = 100_000;
+    t.paper.lastEquity = 100_000;
+    const real = t.paper.account.bind(t.paper);
+    t.paper.account = async () => ({ ...(await real()), id: "alpaca-uuid-1" });
+    t.advance(60_000);
+    await t.brain.pulse();
+    const a = t.brain.status().accounts.find((x) => x.account === "PAPER");
+    expect(a?.startUsd).toBe(100_000);
+    expect(a?.hwmUsd).toBe(100_000);
+    const eq = t.brain.equityHistory(0).PAPER ?? [];
+    expect(eq.every(([, v]) => (v as number) > 1000)).toBe(true); // no $54 points left
+    await t.brain.flushJournal();
+    const reset = t.d1.db.prepare("SELECT payload_json FROM journal WHERE kind = 'RESET'").all() as {
+      payload_json: string;
+    }[];
+    expect(reset.at(-1)?.payload_json).toMatch(/broker account changed/);
+  });
+
+  it("a margin account is reduce-only unless its own configuration caps borrowing at 1x", async () => {
+    const t = setup({ adoptAccountSize: true });
+    const real = t.paper.account.bind(t.paper);
+    t.paper.account = async () => ({ ...(await real()), multiplier: "4" });
+    let capped = false;
+    (t.paper as unknown as { configuration: () => Promise<unknown> }).configuration = async () => ({
+      max_margin_multiplier: capped ? "1" : "4",
+    });
+    await t.brain.pulse();
+    expect(t.brain.status().accounts.find((x) => x.account === "PAPER")?.modeReason).toMatch(/margin/);
+    capped = true; // the user pressed "make it cash-only" (which also drops the cached answer)
+    t.sql.exec("DELETE FROM settings WHERE key = 'broker_cash_only:PAPER'");
+    t.advance(60_000);
+    await t.brain.pulse();
+    expect(t.brain.status().accounts.find((x) => x.account === "PAPER")?.mode).toBe("NORMAL");
+  });
+
+  it("local metering: nothing without Cloudflare AI, only neurons with it", async () => {
+    const none = setup({ budgetScope: "none" });
+    await none.brain.pulse();
+    const s0 = none.brain.status().budget;
+    expect(s0).toMatchObject({ scope: "none", mode: "NORMAL", fractions: {} });
+    expect(none.brain.budget.canSpendNeurons("neurons_tier2", 1e9, T0)).toBe(true);
+    const ai = setup({ budgetScope: "workers_ai" });
+    await ai.brain.pulse();
+    ai.brain.budget.add("neurons_tier1", 1500, T0);
+    const s1 = ai.brain.status().budget;
+    expect(s1.fractions).toEqual({}); // no Worker / DO / D1 quotas on the user's computer
+    expect(s1.neurons.neurons_tier1).toBeCloseTo(0.5, 5);
+    expect(ai.brain.budget.canSpendNeurons("neurons_tier1", 2000, T0)).toBe(false);
   });
 });

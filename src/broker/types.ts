@@ -135,7 +135,17 @@ export class BrokerError extends Error {
 }
 
 /** What the brain needs from a broker account. AlpacaClient implements it; tests use a simulator. */
+/** ADR-081: the account's trading configuration (Alpaca `/v2/account/configurations`); only what we read */
+export const AccountConfigSchema = z.object({
+  max_margin_multiplier: Dec.optional(),
+  no_shorting: z.boolean().optional(),
+});
+export type AccountConfig = z.infer<typeof AccountConfigSchema>;
+
 export interface BrokerApi {
+  /** ADR-081: read / change the account configuration (optional: the sandbox has none) */
+  configuration?(): Promise<AccountConfig>;
+  configure?(patch: { max_margin_multiplier?: "1"; no_shorting?: true }): Promise<AccountConfig>;
   account(): Promise<AlpacaAccount>;
   positions(): Promise<AlpacaPosition[]>;
   openOrders(): Promise<AlpacaOrder[]>;
