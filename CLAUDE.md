@@ -489,5 +489,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   access over Wi-Fi with QR pairing, ntfy QR, reset, tray health; ADR-077 release workflow for every desktop platform
   with generated changelogs, signed auto-update and licences, static demo cockpit; ADR-078 broker conformance suite
   (fixed the sandbox selling what it didn't hold) and the first Brain.ts split (`src/cortex/cards.ts`).
+- 2026-10-27: v0.1.0 released for every platform. ADR-079: MSIX (unsigned, `Add-AppxPackage -AllowUnsigned`), Apple
+  signing/notarization when its secrets exist, licence key live (`CORTEX_LICENSE_PUBKEY` variable), demo cockpit on
+  GitHub Pages.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

@@ -104,6 +104,14 @@ fn pill_text(port: u16, token: &str) -> (String, Option<String>) {
     }
 }
 
+/// Installed from an MSIX (ADR-079): Windows owns the files, so the in-app updater must not run (it would install a
+/// second copy beside the package). Updates come as the next MSIX instead.
+fn packaged() -> bool {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_lowercase().contains("\\windowsapps\\"))
+        .unwrap_or(false)
+}
+
 async fn tokio_sleep(d: Duration) {
     // no tokio dependency of our own: a blocking sleep on tauri's blocking pool
     let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(d)).await;
@@ -142,7 +150,13 @@ pub fn run() {
             let kill = MenuItem::with_id(app, "kill", "Kill switch: stop new entries", true, None::<&str>)?;
             let rearm = MenuItem::with_id(app, "rearm", "Re-arm", true, None::<&str>)?;
             let health = MenuItem::with_id(app, "health", "Health: checking…", false, None::<&str>)?;
-            let update = MenuItem::with_id(app, "update", "Up to date", false, None::<&str>)?;
+            let update = MenuItem::with_id(
+                app,
+                "update",
+                if packaged() { "Updates: install the next MSIX" } else { "Up to date" },
+                false,
+                None::<&str>,
+            )?;
             let quit = MenuItem::with_id(app, "quit", "Quit CORTEX-54", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
@@ -176,7 +190,7 @@ pub fn run() {
                         "rearm" => {
                             let _ = cortex_cmd(&p, &["rearm"]).output();
                         }
-                        "update" => {
+                        "update" if !packaged() => {
                             // signed update (minisign key in tauri.conf.json); the brain stops with the app and the
                             // new version starts it again
                             let app = app.clone();
@@ -201,6 +215,9 @@ pub fn run() {
             let up_handle = app.handle().clone();
             let up_item = update.clone();
             tauri::async_runtime::spawn(async move {
+                if packaged() {
+                    return;
+                }
                 loop {
                     if let Ok(up) = up_handle.updater() {
                         if let Ok(Some(u)) = up.check().await {

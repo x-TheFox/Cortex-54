@@ -46,8 +46,12 @@ runs it.** We host exactly one service, the community hub, and it never touches 
   (open positions keep their stops); nothing unsafe follows from a licence problem. Unset key = builds that never check.
 - **Signed auto-updates (built):** Tauri's updater reads `latest.json` from the latest GitHub release; bundles are
   signed with the minisign key in `TAURI_SIGNING_PRIVATE_KEY` (repository secret). The tray offers each update.
-- **Demo cockpit (built):** `pnpm web:demo` → static files on synthetic data, attached to every release.
-- **Not built: code signing / notarization:** Apple Developer ID and a Windows code-signing certificate (both cost
-  money); until then the release notes tell people how to open an unsigned app.
+- **Demo cockpit (built):** `pnpm web:demo` → static files on synthetic data, attached to every release and on Pages.
+- **MSIX (built, ADR-079):** every release has an unsigned MSIX for Windows 11 (`Add-AppxPackage -AllowUnsigned`);
+  for the Microsoft Store, set `MSIX_PUBLISHER` / `MSIX_NAME` from Partner Center and the Store signs it.
+- **Apple notarization (wired, ADR-079):** add the six `APPLE_*` secrets (Developer ID certificate + notarization
+  login) and releases come out signed and notarized. Needs an Apple Developer account.
+- **Not planned: a Windows code-signing certificate** (operator decision); SmartScreen asks once on the installers.
+- **Demo cockpit:** https://x-thefox.github.io/Cortex-54/ (GitHub Pages, every release).
 - **The repo going private:** when it does, GitHub Actions minutes stop being free; the operator's own deployment
   should switch to `RUNNER_MODE=queue` with a desktop runner (ADR-065), which needs no Actions at all.

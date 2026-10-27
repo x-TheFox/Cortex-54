@@ -50,8 +50,11 @@ jobs:
         with:
           node-version: 24
       - id: v
+        env:
+          # ADR-079: the notes say "notarized" only when the Apple signing secrets exist
+          APPLE_SIGNED: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_ID != '' }}
         run: |
-          out=$(node scripts/changelog.ts --bump "${{ inputs.bump || 'patch' }}" --out release-notes.md)
+          out=$(node scripts/changelog.ts --bump "${{ inputs.bump || 'patch' }}" --out release-notes.md $([ "$APPLE_SIGNED" = "true" ] && echo --notarized))
           echo "version=$(echo "$out" | jq -r .version)" >> "$GITHUB_OUTPUT"
           echo "tag=$(echo "$out" | jq -r .tag)" >> "$GITHUB_OUTPUT"
       - name: Draft the release
@@ -106,6 +109,24 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev file
+      - name: Apple signing and notarization (ADR-079; only when the secrets exist)
+        if: startsWith(matrix.os, 'macos')
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # tauri signs when APPLE_CERTIFICATE + APPLE_SIGNING_IDENTITY are set and notarizes with APPLE_ID; empty
+          # values must stay unset, or it would try to sign with nothing
+          n=0
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -n "${!v}" ]; then { echo "$v<<__C54__"; echo "${!v}"; echo "__C54__"; } >> "$GITHUB_ENV"; n=$((n+1)); fi
+          done
+          echo "$n of 6 Apple values set (6 = signed and notarized; 0 = unsigned)"
       - run: pnpm install --frozen-lockfile
       - run: pnpm cortexd:build
       - name: Bundled Node runtime
@@ -129,6 +150,12 @@ jobs:
       - name: Collect installers
         shell: bash
         run: node scripts/release-assets.ts ${{ matrix.target }} ${{ matrix.platform }} ${{ needs.plan.outputs.version }} out
+      - name: MSIX package (ADR-079)
+        if: startsWith(matrix.os, 'windows')
+        shell: bash
+        run: |
+          v=${{ needs.plan.outputs.version }}
+          node scripts/msix.ts "out/CORTEX-54_${v}_${{ matrix.platform }}.msi" "$v" "out/CORTEX-54_${v}_${{ matrix.platform }}.msix"
       - name: Upload to the draft release
         shell: bash
         env:
@@ -165,6 +192,34 @@ jobs:
           (cd demo-dist && zip -qr ../cortex54-demo-cockpit.zip .)
           gh release upload "${{ needs.plan.outputs.tag }}" cortex54-demo-cockpit.zip --clobber
 
+  pages:
+    # ADR-079: the demo cockpit on GitHub Pages (https://<owner>.github.io/<repo>/), updated with every release
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm config:build && pnpm web:demo
+      - run: rm -f demo-dist/_headers demo-dist/sw.js
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: demo-dist
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
   publish:
     needs: [plan, build, demo]
     if: ${{ !cancelled() && needs.plan.result == 'success' }}
@@ -194,7 +249,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          n=$(gh release view "${{ needs.plan.outputs.tag }}" --json assets --jq '[.assets[].name | select(test("\\.(dmg|msi|exe|AppImage|deb|rpm)$"))] | length')
+          n=$(gh release view "${{ needs.plan.outputs.tag }}" --json assets --jq '[.assets[].name | select(test("\\.(dmg|msi|msix|exe|AppImage|deb|rpm)$"))] | length')
           if [ "$n" -gt 0 ]; then
             gh release edit "${{ needs.plan.outputs.tag }}" --draft=false --latest
           else
