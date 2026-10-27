@@ -31,7 +31,7 @@ export function obfuscateBundle(file: string): void {
     stringArrayEncoding: ["base64"],
     stringArrayRotate: true,
     stringArrayShuffle: true,
-    stringArrayThreshold: 0.75,
+    stringArrayThreshold: 1,
     stringArrayIndexShift: true,
     splitStrings: false,
     numbersToExpressions: true,
