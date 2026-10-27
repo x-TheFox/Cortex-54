@@ -975,4 +975,8 @@ official Python SDK). `cortex support` / SETTINGS → HEALTH write a redacted su
 test-enforced) and show the doctor's checks in plain words (`local/health.ts`, shared). `cortex deploy` verifies the
 new brain answers /health with this build's constitution and runs `wrangler rollback -y` if it doesn't. SETTINGS shows
 a 7-day model scoreboard from `llm_calls`. Remaining re-verdicts are planned in docs/IDEAS_WORKLOG.md §F.
+**Addendum 2026-10-27 (live funnel review):** in 3 days PAPER placed no orders. 97 promoted headlines → 77 stopped at
+Tier 0 (stale or REDUCE_ONLY equity posture, stale quotes, bearish catalysts) → 23 reached Tier 2 → 0 passed. Crypto is
+in a drawdown (BTC under its EMA20, every pair 7–27% under its 20-day high), so the long-only breakout is correctly
+idle. One bug: `min_structural_score` 78 on a 5-level score (0/25/50/75/100) meant "Excellent only"; now 70.
 

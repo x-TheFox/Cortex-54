@@ -129,6 +129,7 @@ export const DoctrineSchema = z.object({
     tier3: z.object({
       max_sprints_per_day: z.number().int().nonnegative(),
       min_structural_score: z.number().min(0).max(100),
+      // (the quality score has 5 levels → 0/25/50/75/100; a bar between levels behaves like the next level up)
       /** Audit W2-07: multiplier on win_prob for contested rulings; 1.0 = measured and journaled but not applied. */
       disagreement_tax: z.number().gt(0).max(1).default(1),
     }),

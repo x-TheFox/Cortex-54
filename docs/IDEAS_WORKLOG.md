@@ -493,3 +493,6 @@ Newest last. Each entry says what landed, how it was tested, and what's left.
 - 2026-10-26 (late): the court waits for deep research (12-min fast fallback); every idea re-reviewed for the
   app-first objective (§F): the research desk now uses the user's pool, support file + HEALTH in the app, deploy
   verification with rollback, model scoreboard; the rest of the re-verdicts are planned in §F.
+- 2026-10-27: why PAPER hasn't traded (live journal): falling crypto keeps the breakout idle (correct); the court
+  funnel never passed Tier 2 in 3 days, partly a bug (quality bar 78 = "Excellent only" on a 5-level score → 70).
+
