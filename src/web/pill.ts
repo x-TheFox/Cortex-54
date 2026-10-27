@@ -21,6 +21,8 @@ export interface Pill {
   }[];
   regimes: { arena: string; posture: string; fresh: boolean }[];
   symbols: string[];
+  /** ADR-076: local mode's one-line health problem for the tray (null = all well) */
+  problem?: string | null;
 }
 
 export function pill(s: StatusView): Pill {
@@ -60,6 +62,7 @@ export function swiftbar(p: Pill, terminalUrl: string): string {
     head,
     "---",
     `Pulse ${p.pulse_age_s === null ? "never" : `${p.pulse_age_s}s ago`} · budget ${p.budget}`,
+    ...(p.problem ? [`⚠️ ${p.problem} | color=orange`] : []),
     ...p.accounts.map(
       (a) =>
         `${a.account}: ${a.equity === null ? "—" : `$${a.equity.toFixed(2)}`} · ${a.positions} pos · ${a.breaker} · dial ${a.dial} · ${a.mode}`,

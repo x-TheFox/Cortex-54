@@ -265,9 +265,10 @@ src/
   cortex/hot-schema.ts    DO SQLite schema (applied in constructor via blockConcurrencyWhile)
   contracts/              zod schemas: DecisionContract, constitution, doctrine (validated at boot)
   cortex/Brain.ts          ALL trading logic (pulse, reconcile, fills, stops, exits, entries, operator RPC)
+  cortex/cards.ts          the cards and terminal lines the brain posts (pure rendering, split out by ADR-078)
   cortex/store.ts          SqlLike: the narrow SQL surface Brain depends on (DO storage or node:sqlite)
   risk/                    PositionSizer, PreTradeValidator, CircuitBreakerLadder, fees, rungs (pure)
-  broker/                  Alpaca client + zod schemas + BrokerApi/MarketDataApi interfaces
+  broker/                  Alpaca client + zod schemas + BrokerApi/MarketDataApi interfaces + registry (ADR-078)
   budget/FreeTierBudget.ts free-tier meter + per-invocation subrequest guard
   journal/Journal.ts       hash chain + D1 outbox
   strategy/                indicators + CRYPTO_BREAKOUT_BASELINE_V1 (deterministic, RULE contracts)
@@ -287,7 +288,8 @@ research/                 Python (uv): cortex_research.run crypto|equity|world �
                           POSTs /ingest/batch (research.yml); governor/ (ADR-030); options/ shadow lab (ADR-031);
                           pytest in CI. ADR-026
 local/                    cortexd local mode + `cortex` CLI (ADR-064/065): runtime, sandbox broker, jobs, service,
-                          deploy, runner, memory packs, settings backend + live reload (settings.ts), agent-prompt.ts
+                          deploy, runner, memory packs, settings backend + live reload (settings.ts), agent-prompt.ts,
+                          keychain, encrypted backups, licences (keychain.ts, backup.ts, license.ts — ADR-076/077)
 desktop/                  Tauri v2 app (ADR-066): src-tauri/ shell; bundles dist/cortexd + an official Node runtime
 hub/                      community hub Worker + D1 migrations (ADR-068), hosted by the publisher
 src/universe/ src/portfolio/ src/hub/   dynamic universe + scout (058), exits/lateness/book (059–061), hub protocol (068)
@@ -323,6 +325,9 @@ gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATT
 pnpm cortex <setup|doctor|start|demo|link|llm|service|kill|rearm|deploy|runner|hub|memory> [--json]   # local mode (ADR-064)
 pnpm cortex llm add <key-or-url> [--models a,b]   # model pool (ADR-072): list | add | remove | models | prefs
 pnpm cortex support       # redacted support file (no secrets) for asking for help (ADR-074)
+pnpm cortex backup [--keys] | restore FILE | keychain on|off | license install FILE | reset --yes   # ADR-076/077
+pnpm web:demo             # static demo cockpit on synthetic data → demo-dist/ (ADR-077)
+gh workflow run release -f bump=minor   # desktop release for every platform (auto on merges to main; ADR-077)
 pnpm demo                 # keyless local demo on live crypto prices (simulated broker)
 pnpm cortexd:build        # dist/cortexd bundle (no TS source); pnpm desktop:runtime && pnpm desktop:build → the app
 pnpm canary               # model drift canary against every court model (weekly in canary.yml, ADR-070)
@@ -479,5 +484,10 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   TODAY summary. Hot schema v9. ADR-074: the court waits for the deep dossier (fast one after 12 min); the research
   desk uses the user's pool; support file + HEALTH in the app; `cortex deploy` verifies and rolls back; model
   scoreboard. Every idea re-reviewed for the app-first objective (IDEAS_WORKLOG §F).
+- 2026-10-27: final pass on the ideas worklog (§G): ADR-075 paid-model cost meter, daily spend caps, demote switch,
+  court capacity slider, AI USE gauge in local mode; ADR-076 keys in the OS keychain, encrypted backup/restore, phone
+  access over Wi-Fi with QR pairing, ntfy QR, reset, tray health; ADR-077 release workflow for every desktop platform
+  with generated changelogs, signed auto-update and licences, static demo cockpit; ADR-078 broker conformance suite
+  (fixed the sandbox selling what it didn't hold) and the first Brain.ts split (`src/cortex/cards.ts`).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

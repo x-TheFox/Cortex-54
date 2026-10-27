@@ -378,20 +378,23 @@ untechnical as possible without losing any advanced feature.
   stays 12 h; LIVE ratification needs a sign-in younger than 10 minutes).
 - [x] LIVE autonomy was Discord-only, which an app-first product can't require. Now also from the app, on a fresh
   sign-in (≤ 10 min), still with RATIFY and the cooling-off.
-- [ ] The "FREE TIER" budget dial means nothing in local mode (no Cloudflare quotas there). Relabel it as model usage
-  per provider, from the router's call counters.
-- [ ] Settings errors are translated to plain words (`plain()`), but `cortex doctor` output in the app isn't shown
-  yet. Add a HEALTH block to SETTINGS that runs the same checks.
+- [x] The "FREE TIER" budget dial means nothing in local mode (no Cloudflare quotas there). Now AI USE TODAY: model
+  calls against each provider's daily cap, from the router's counters (ADR-075).
+- [x] Settings errors are translated to plain words (`plain()`), but `cortex doctor` output in the app isn't shown
+  yet. → SETTINGS → HEALTH runs the same checks (ADR-074).
 
 ### New ideas toward "less technical, nothing lost"
-- [ ] **Model scoreboard** in Settings: per model, answers / schema failures / median latency / rate limits over 7
-  days (the journal already logs every hop), and a "demote" switch. Next.
-- [ ] **Paid-model cost meter**: tokens per paid endpoint per day × the user's price per million, with an optional
-  daily spend cap that drops the endpoint from the rotation when reached.
-- [ ] **QR code for phone alerts**: scan instead of typing the ntfy topic (a small QR encoder, no network call).
-- [ ] **Settings export / import** (keys optionally included, encrypted with a passphrase) to move to a new computer.
-- [ ] **"Reset this computer"** button: stop the service and wipe `~/.cortex54` after a typed confirmation.
-- [ ] **Health check from the tray**: the tray pill turns amber with the one-line reason when doctor finds a problem.
+- [x] **Model scoreboard** in Settings: per model, answers / schema failures / median latency / rate limits over 7
+  days (the journal already logs every hop), and a "demote" switch. Scoreboard ADR-074; cost column and DEMOTE /
+  RESTORE ADR-075.
+- [x] **Paid-model cost meter**: tokens per paid endpoint per day × the user's price per million, with an optional
+  daily spend cap that drops the endpoint from the rotation when reached (ADR-075; the count survives restarts).
+- [x] **QR code for phone alerts**: scan instead of typing the ntfy topic (encoded in the browser, ADR-076).
+- [x] **Settings export / import** (keys optionally included, encrypted with a passphrase) to move to a new computer.
+  Built together with MLP4-031 as one encrypted backup (ADR-076).
+- [x] **"Reset this computer"** button: stop the service and wipe `~/.cortex54` after a typed confirmation (ADR-076;
+  also removes the keychain item; `cortex reset --yes`).
+- [x] **Health check from the tray**: the tray shows ⚠ and the one-line reason when a check fails (ADR-076).
 - [-] **Auto-buy API credits / provider sign-up inside the app**: creating accounts and entering payment details for
   the user is exactly what the product must never do; the wizard links to each provider's own key page instead.
 - [-] **Hosting users' keys on our server for convenience**: breaks the "keys never leave your machine" promise
@@ -428,24 +431,32 @@ data trigger, not cost, Discord or the single-operator assumption.
 - [=] **PSS-008 sell the software**: it is the direction now (docs/DISTRIBUTION.md).
 
 ### Accepted, not built yet (the product needs them; each has a plan)
-- [ ] **PSS-029…036 licensing and signed auto-updates.** Obfuscation stays rejected as a moat. What a sold app needs:
+- [x] **PSS-029…036 licensing and signed auto-updates.** Built (ADR-077): signed licences checked offline (a licence
+  problem holds paper entries like the kill switch, never anything unsafe), Tauri updater with a minisign key, release
+  workflow for every platform. The operator still has to add the updater key as a repository secret and, to sell,
+  make a publisher licence key. Original plan: Obfuscation stays rejected as a moat. What a sold app needs:
   a signed update manifest (Ed25519, the key the hub code already uses), Tauri's updater pointed at it, and a licence
   check that degrades to demo mode, never to unsafe behaviour. Needs the operator's signing key and an update host.
-- [ ] **MLP3-012 key-signing proxy** → **OS keychain for secrets**: keys move from config.json (mode 600) to the
+- [x] **MLP3-012 key-signing proxy** → **OS keychain for secrets** (ADR-076, opt-in; verified on a scratch macOS
+  keychain): keys move from config.json (mode 600) to the
   macOS Keychain / Windows Credential Manager / libsecret, read by the daemon at start. Needs the desktop shell to
   hand them over; the headless image keeps the file.
-- [ ] **MLP4-031 encrypted backups** + §E settings export: one passphrase-encrypted file with config, scar packs and
+- [x] **MLP4-031 encrypted backups** + §E settings export (ADR-076): one passphrase-encrypted file with config, scar packs and
   the journal, restorable on a new computer.
-- [ ] **MLP4-027 multi-broker adapters**: was "with an operator need"; a sold product meets customers Alpaca doesn't
+- [~] **MLP4-027 multi-broker adapters**: the seam is built (registry + a conformance suite every adapter must pass,
+  ADR-078; it found and fixed a sandbox bug). No second venue yet: each candidate lacks a paper mode or needs an account
+  for the supervised paper session, and an unverified adapter would trade on a guess. Original plan: was "with an operator need"; a sold product meets customers Alpaca doesn't
   serve. `BrokerApi` is already the seam; first candidate is a second crypto venue with a paper/sandbox mode.
-- [ ] **MLP5-005 more hearings**: the 12/day court cap protects free-tier quotas. With paid endpoints in the pool, a
+- [x] **MLP5-005 more hearings** (ADR-075: SETTINGS slider 4–60/day with a cost estimate): the 12/day court cap protects free-tier quotas. With paid endpoints in the pool, a
   SETTINGS slider (with a cost estimate from the scoreboard's token counts) can raise it.
-- [ ] **MLP4-029 phone control**: ntfy is read-only and a local brain listens on 127.0.0.1. Options: the user's own
+- [x] **MLP4-029 phone control** (ADR-076: opt-in Wi-Fi access with one-time QR sign-in; settings and keys only from
+  the computer itself): ntfy is read-only and a local brain listens on 127.0.0.1. Options: the user's own
   cloud (already works on a phone, PWA), or an opt-in LAN mode with a QR login (needs the session cookie to work
   without HTTPS on a LAN, so it waits for a careful design).
-- [ ] **PSS-037…039 public demo cockpit**: a static build of the panel on the synthetic data `pnpm web:dev` already
+- [x] **PSS-037…039 public demo cockpit** (ADR-077: `pnpm web:demo`, attached to every release as a zip): a static build of the panel on the synthetic data `pnpm web:dev` already
   serves, for the website. The operator hosts it.
-- [ ] **PSS-006 split Brain.ts**: for a product team the 6,600-line file is now a delivery risk, not just taste.
+- [~] **PSS-006 split Brain.ts**: started (ADR-078): the cards and terminal lines moved to `src/cortex/cards.ts`;
+  the rest continues one module per change.: for a product team the 6,600-line file is now a delivery risk, not just taste.
   Schedule it in a quiet week, module by module, behind the existing simulated-pulse tests.
 
 ### Still deferred or rejected, reason restated
@@ -460,6 +471,17 @@ data trigger, not cost, Discord or the single-operator assumption.
   stays out until customers ask.
 
 ---
+
+## G. Final pass (2026-10-27)
+
+Every `[ ]` line above was either built in this pass or became `[~]` with its reason. What is left is outside code:
+- **Operator steps:** add the updater signing key as repository secrets (`TAURI_SIGNING_PRIVATE_KEY`,
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`; the key was made on the operator's machine in `~/.tauri/`), and, before selling,
+  make a licence key (`tsx scripts/license.ts keygen`) and set its public half as the `CORTEX_LICENSE_PUBKEY`
+  repository variable. Optional: Apple / Windows code signing (paid certificates), GitHub Pages for the demo cockpit.
+- **Second broker:** needs an account at a venue with a paper mode to run the supervised session (ADR-078).
+- **Brain.ts:** the split continues module by module (exits, entries, reconcile), one change at a time.
+- `[⏸]` lines keep their data triggers; `[-]` lines keep their reasons.
 
 ## Worklog
 
@@ -495,4 +517,7 @@ Newest last. Each entry says what landed, how it was tested, and what's left.
   verification with rollback, model scoreboard; the rest of the re-verdicts are planned in §F.
 - 2026-10-27: why PAPER hasn't traded (live journal): falling crypto keeps the breakout idle (correct); the court
   funnel never passed Tier 2 in 3 days, partly a bug (quality bar 78 = "Excellent only" on a 5-level score → 70).
-
+- 2026-10-27: final pass (§G). Built and tested: cost meter + spend caps + demote, court capacity, AI USE gauge
+  (ADR-075); keychain, encrypted backups, phone access with QR pairing, ntfy QR, reset, tray health (ADR-076); release
+  workflow for every platform with changelogs, signed auto-update, licences, demo cockpit (ADR-077); broker conformance
+  suite and the first Brain.ts split (ADR-078). The conformance suite caught the sandbox selling what it didn't hold.

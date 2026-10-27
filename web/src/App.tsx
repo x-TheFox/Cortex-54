@@ -45,7 +45,7 @@ function readPage(): PageId {
   return "ACCT";
 }
 
-function AccountColumn({ a, s }: { a: AccountView; s: StatusView }) {
+function AccountColumn({ a, s, local = false }: { a: AccountView; s: StatusView; local?: boolean }) {
   if (!a.configured || a.equityUsd === null) {
     const live = a.account === "LIVE";
     return (
@@ -94,16 +94,27 @@ function AccountColumn({ a, s }: { a: AccountView; s: StatusView }) {
       <div className="dials" data-guide={a.account === "PAPER" ? "dials" : undefined}>
         <Dial label="DRAWDOWN" value={dd} max={0.12} amber={0.03} red={0.1} fmt={(v) => pct(v)} />
         <Dial label="HEAT" value={h} max={0.15} amber={0.09} red={0.12} fmt={(v) => pct(v)} />
-        {a.account === "PAPER" && (
-          <Dial
-            label="FREE TIER"
-            value={s.budget.worst.fraction}
-            max={1}
-            amber={0.7}
-            red={0.9}
-            fmt={(v) => pct(v, 0)}
-          />
-        )}
+        {a.account === "PAPER" &&
+          (local ? (
+            // ADR-075: no Cloudflare quotas on your own computer; the limit that matters is the AI models' daily caps
+            <Dial
+              label="AI USE TODAY"
+              value={s.modelUse?.worst.fraction ?? 0}
+              max={1}
+              amber={0.7}
+              red={0.9}
+              fmt={(v) => pct(v, 0)}
+            />
+          ) : (
+            <Dial
+              label="FREE TIER"
+              value={s.budget.worst.fraction}
+              max={1}
+              amber={0.7}
+              red={0.9}
+              fmt={(v) => pct(v, 0)}
+            />
+          ))}
       </div>
       <div data-guide={a.account === "PAPER" ? "trend" : undefined}>
         <Trend
@@ -315,7 +326,7 @@ export function App() {
         <div className="glass ewd">
           <div className="ewd-acct">
             {s ? (
-              s.accounts.map((a) => <AccountColumn key={a.account} a={a} s={s} />)
+              s.accounts.map((a) => <AccountColumn key={a.account} a={a} s={s} local={local} />)
             ) : (
               <div className="acct">
                 <div className="skeleton" style={{ width: 120 }} />

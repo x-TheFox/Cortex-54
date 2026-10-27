@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { networkInterfaces } from "node:os";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { AlpacaClient, AlpacaMarketData } from "../src/broker/AlpacaClient.ts";
 import type { BrokerApi, MarketDataApi } from "../src/broker/types.ts";
@@ -9,7 +10,8 @@ import { CloudflareRestAi, ShimClairic, ShimClef } from "../src/clef/portable.ts
 import { Brain, type PulseReport } from "../src/cortex/Brain.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "../src/cortex/hot-schema.ts";
 import { getKV, setKV } from "../src/cortex/store.ts";
-import { buildPool, type PoolReport, poolRouter } from "../src/court/pool.ts";
+import type { LlmRouter } from "../src/court/llm.ts";
+import { buildPool, costUsd, type PoolReport, poolRouter } from "../src/court/pool.ts";
 import { buildProviders } from "../src/court/providers.ts";
 import {
   type ChannelKey,
@@ -33,8 +35,11 @@ import { InboxNotifier, readFeed } from "../src/notify/inbox.ts";
 import { ntfyUrl, PushNotifier } from "../src/notify/push.ts";
 import { handleWeb, loginLink, type WebBrain, type WebSettings } from "../src/web/api.ts";
 import { pill, pillAuthorized, swiftbar } from "../src/web/pill.ts";
+import { snapshotDb } from "./backup.ts";
 import type { LocalConfig } from "./config.ts";
+import { runtimeChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
+import { entriesBlocked, readLicense } from "./license.ts";
 import { loadLocalScar, mergeScar } from "./memory.ts";
 import { SimBroker } from "./simbroker.ts";
 import { fileD1, fileSql, type LocalD1 } from "./store.ts";
@@ -194,8 +199,23 @@ export class LocalCortex {
       buildProviders(k),
       cfg.llm,
     );
-    const d = built.d;
+    // ADR-075: the user's court capacity (more hearings per day for pools with paid models)
+    const cap = cfg.court.max_per_day;
+    const d = cap
+      ? {
+          ...built.d,
+          funnel: {
+            ...built.d.funnel,
+            tier3: { ...built.d.funnel.tier3, max_sprints_per_day: cap },
+            research: {
+              ...built.d.funnel.research,
+              max_per_day: Math.max(built.d.funnel.research.max_per_day, cap + 4),
+            },
+          },
+        }
+      : built.d;
     this.pool = built.report;
+    this.pricing = built.pricing;
     const { clef, clairic } = this.clefFor(cfg, built);
     this.console = new ConsoleNotifier(o.overrides?.quiet ?? false);
     const notifiers: Notifier[] = [this.console];
@@ -207,6 +227,7 @@ export class LocalCortex {
     // ADR-071: the app's feed gets every card, whatever else is configured
     notifier = new InboxNotifier(this.sql, notifier, now);
 
+    this.router = built.report.entries.length ? poolRouter(built, cfg.llm.prefs) : null;
     this.jobs = new LocalJobs({ researchDir: join(root, "research"), home, url: this.url(), cfg });
     this.brain = new Brain({
       sql: this.sql,
@@ -216,11 +237,14 @@ export class LocalCortex {
       market,
       notifier,
       d1: this.d1,
-      readKillFlag: async () => existsSync(join(home, "KILLED")),
+      // the local kill switch; on a licensed build, paper mode without a valid licence holds entries the same way
+      // (exits and stops keep working: ADR-077)
+      readKillFlag: async () =>
+        existsSync(join(home, "KILLED")) || (cfg.mode === "paper" && entriesBlocked(readLicense(home))),
       now,
       clef: o.overrides?.clef !== undefined ? o.overrides.clef : clef,
       clairic,
-      llm: built.report.entries.length ? poolRouter(built, cfg.llm.prefs) : null,
+      llm: this.router,
       calibration: CALIBRATION,
       scar: mergeScar(SCAR_TISSUE, loadLocalScar(home)), // + memory packs the operator applied (ADR-068)
       dispatcher: cfg.research.enabled ? this.jobs : null,
@@ -243,6 +267,62 @@ export class LocalCortex {
 
   /** see resolveClef */
   clefMode = "off";
+  private router: LlmRouter | null = null;
+  private pricing: Record<string, { in: number; out: number; cap?: number }> = {};
+
+  /** ADR-075 cost meter: today's tokens and USD for every priced endpoint. */
+  spend(): { provider: string; input: number; output: number; usd: number; cap: number | null }[] {
+    const g = this.router?.gate;
+    return Object.entries(this.pricing)
+      .filter(([p]) => !p.endsWith("~bear"))
+      .map(([p, price]) => {
+        const t = g?.tokensToday?.(p) ?? { input: 0, output: 0 };
+        const bear = g?.tokensToday?.(`${p}~bear`) ?? { input: 0, output: 0 };
+        const input = t.input + bear.input;
+        const output = t.output + bear.output;
+        return { provider: p, input, output, usd: costUsd(price, input, output), cap: price.cap ?? null };
+      });
+  }
+
+  /** ADR-076: consistent copies of the databases for a backup, taken while the brain runs. */
+  snapshot(): Record<string, Buffer> {
+    const out: Record<string, Buffer> = {
+      "hot.sqlite": snapshotDb(this.sql.db),
+      "journal.sqlite": snapshotDb(this.d1.db),
+    };
+    const scar = join(this.o.home, "scar-tissue.local.json");
+    if (existsSync(scar)) out["scar-tissue.local.json"] = readFileSync(scar);
+    return out;
+  }
+
+  /** ADR-076: this computer's address on the local network (for phone pairing), or null. */
+  lanUrl(): string | null {
+    for (const list of Object.values(networkInterfaces()))
+      for (const a of list ?? [])
+        if (
+          a.family === "IPv4" &&
+          !a.internal &&
+          /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)
+        )
+          return `http://${a.address}:${this.o.cfg.port}`;
+    return null;
+  }
+
+  async pairLink(): Promise<string | null> {
+    const base = this.lanUrl();
+    return base ? loginLink({ WEB_SESSION_SECRET: this.o.cfg.secrets.web_session }, base) : null;
+  }
+
+  /** ADR-076: the one-line problem the tray shows (null when all is well). */
+  problem(): string | null {
+    if (existsSync(join(this.o.home, "KILLED"))) return "Kill switch is on: no new entries";
+    const lic = readLicense(this.o.home);
+    if (this.o.cfg.mode === "paper" && entriesBlocked(lic) && lic.required && !lic.ok)
+      return `Licence: ${lic.reason} No new trades until it's fixed; open positions keep their stops.`;
+    if (this.pool?.notes.some((n) => n.level === "block")) return "The court needs AI models (Settings)";
+    const bad = runtimeChecks(this.health() as Parameters<typeof runtimeChecks>[0]).find((c) => !c.ok);
+    return bad ? `${bad.name}: ${bad.detail}` : null;
+  }
 
   /** what the settings page shows about the model pool */
   pool: PoolReport | null = null;
@@ -296,7 +376,8 @@ export class LocalCortex {
     await new Promise<void>((res, rej) => {
       this.server = createServer((req, resp) => void this.serve(req, resp));
       this.server.once("error", rej);
-      this.server.listen(this.o.cfg.port, this.o.cfg.bind, () => res());
+      // ADR-076: phone access listens on the local network too; otherwise only where config says (localhost)
+      this.server.listen(this.o.cfg.port, this.o.cfg.lan.enabled ? "0.0.0.0" : this.o.cfg.bind, () => res());
     });
     this.schedule(1);
   }
@@ -336,6 +417,7 @@ export class LocalCortex {
       policy_violations: this.brain.policyViolations(),
       slo: this.brain.slo(),
       jobs: { running: this.jobs.active(), recent: this.jobs.log.slice(-10) },
+      license: readLicense(this.o.home),
     };
   }
 
@@ -386,7 +468,7 @@ export class LocalCortex {
         ) as [string, string][],
         ...(body.length && req.method !== "GET" && req.method !== "HEAD" ? { body } : {}),
       });
-      const response = await this.route(request, url);
+      const response = await this.route(request, url, req.socket.remoteAddress ?? "");
       const headers: Record<string, string> = {};
       response.headers.forEach((v, k) => {
         headers[k] = v;
@@ -399,13 +481,20 @@ export class LocalCortex {
     }
   }
 
-  async route(request: Request, url: URL): Promise<Response> {
+  async route(request: Request, url: URL, remote = "127.0.0.1"): Promise<Response> {
     const cfg = this.o.cfg;
+    // ADR-076: a phone on the Wi-Fi can watch and use the controls, but settings and keys change only on this computer
+    const local = isLoopback(remote);
+    if (cfg.lan.enabled && !local && request.method === "POST" && url.pathname.startsWith("/api/settings/"))
+      return Response.json(
+        { ok: false, message: "Settings can only be changed on the computer CORTEX runs on." },
+        { status: 403 },
+      );
     if (request.method === "GET" && url.pathname === "/health") return Response.json(this.health());
     if (request.method === "GET" && url.pathname === "/pill") {
       if (!pillAuthorized(request.headers.get("authorization"), cfg.secrets.pill_token))
         return new Response("unauthorized", { status: 401 });
-      const p = pill(this.brain.status());
+      const p = { ...pill(this.brain.status()), problem: this.problem() };
       return url.searchParams.get("format") === "swiftbar"
         ? new Response(swiftbar(p, `${this.url()}/`))
         : Response.json(p);
@@ -447,6 +536,7 @@ export class LocalCortex {
           OPERATOR_DISCORD_ID: "local",
           DB: this.d1,
           SESSION_TTL_MS: 30 * 86_400_000, // your own computer: stay signed in (local mode is paper-only)
+          COOKIE_INSECURE: cfg.lan.enabled, // plain HTTP on the user's Wi-Fi (ADR-076)
         },
         this.webBrain(),
       );
@@ -474,6 +564,8 @@ export class LocalCortex {
     return "PAPER";
   }
 }
+
+export const isLoopback = (a: string) => /^(127\.|::1$|::ffff:127\.)/.test(a);
 
 export interface ClefChoice {
   clef: ClefApi | null;

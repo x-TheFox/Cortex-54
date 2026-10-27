@@ -31,3 +31,5 @@ desktop/src-tauri/binaries/
 
 # operator-supplied idea exports: private, never published
 docs/*dossier-export*.json
+demo-dist/
+desktop/src-tauri/tauri.release.conf.json

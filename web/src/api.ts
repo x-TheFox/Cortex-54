@@ -60,6 +60,11 @@ export interface StatusView {
   now: number;
   lastPulseAt: number | null;
   budget: { mode: string; worst: { resource: string; fraction: number }; fractions: Record<string, number> };
+  /** ADR-075: model calls today per provider (local mode's gauge) */
+  modelUse?: {
+    worst: { provider: string; fraction: number };
+    providers: { provider: string; calls: number; cap: number | null }[];
+  };
   journalHead: { seq: number; sha: string };
   outboxPending: number;
   equity: Partial<Record<AccountId, number[][]>>;
@@ -314,6 +319,10 @@ export interface EndpointView {
   models: string[];
   tier: Tier;
   daily_cap?: number;
+  /** ADR-075: USD per 1M tokens, and a daily spend cap */
+  price_in?: number;
+  price_out?: number;
+  daily_spend_cap?: number;
   enabled: boolean;
 }
 
@@ -321,6 +330,8 @@ export interface PoolPrefs {
   prefer: "free_first" | "paid_first" | "mixed";
   round_robin: boolean;
   allow_same_model: boolean;
+  /** ADR-075: `provider/model` the user demoted from the scoreboard */
+  demoted?: string[];
 }
 
 export interface PoolReport {
@@ -345,6 +356,22 @@ export interface SettingsView {
   presets?: Preset[];
   freeChains?: Record<string, string[]>;
   agentPrompt?: string;
+  /** ADR-075: today's tokens and cost per priced endpoint */
+  spend?: { provider: string; input: number; output: number; usd: number; cap: number | null }[];
+  court?: { max_per_day: number | null; default_per_day: number };
+  /** ADR-076 */
+  lan?: { enabled: boolean; port: number };
+  secretStore?: { mode: "file" | "keychain"; backend: string | null };
+  /** ADR-077 */
+  license?:
+    | { required: false }
+    | {
+        required: true;
+        ok: true;
+        license: { licensee: string; plan: string; expires_at: string | null };
+        daysLeft: number | null;
+      }
+    | { required: true; ok: false; reason: string };
 }
 
 export type ModelList =

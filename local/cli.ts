@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, watchFile, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unwatchFile,
+  watchFile,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -11,6 +19,7 @@ import { buildPool } from "../src/court/pool.ts";
 import { buildProviders } from "../src/court/providers.ts";
 import { CONSTITUTION_SHA256, DOCTRINE, SCAR_TISSUE } from "../src/generated/config.ts";
 import { agentIdOf, canonical, generateAgentKey, publicKeyOf } from "../src/hub/protocol.ts";
+import { backupFileName, homeFiles, makeBackup, openBackup, restoreInto, snapshotDb } from "./backup.ts";
 import {
   applyKeys,
   configPath,
@@ -26,6 +35,8 @@ import {
 import { deploy, verifyDeploy } from "./deploy.ts";
 import { type Check, configChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
+import { accountFor, secretBackend } from "./keychain.ts";
+import { installLicense, readLicense } from "./license.ts";
 import { applyPack, exportPack, loadLocalScar, mergeScar, stagePack } from "./memory.ts";
 import { claimOnce } from "./runner.ts";
 import { clefNotice, LocalCortex, resolveClef } from "./runtime.ts";
@@ -49,6 +60,9 @@ import { fileSql } from "./store.ts";
  *   cortex runner                                                    run the cloud brain's research jobs on this machine
  *   cortex hub keygen [--name N] | hub id | hub follow <agent> | hub leaderboard     community hub (ADR-068)
  *   cortex memory export [--title T] [--publish] | memory import <file|pack-id> | memory apply <id>
+ *   cortex backup [--keys] [--out FILE] | restore FILE                encrypted backup (passphrase from CORTEX_PASSPHRASE or a prompt)
+ *   cortex keychain on|off|status                                    keep keys in the system keychain instead of config.json
+ *   cortex reset --yes                                               stop the service and delete everything in the CORTEX home
  */
 
 // CORTEX_ROOT points at the app's bundled resources (desktop app / packaged builds); from source it's the repo
@@ -192,6 +206,30 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
     pool: () => c.pool,
     health: () => c.health(),
     clef: () => clefNotice(c.clefMode),
+    spend: () => c.spend(),
+    snapshot: () => c.snapshot(),
+    pairLink: () => c.pairLink(),
+    swap: async (write) => {
+      reloading = true;
+      try {
+        await c.stop();
+        write();
+        cfg = loadConfig(home) ?? cfg;
+        seen = JSON.stringify(cfg);
+        c = new LocalCortex({ home, root: ROOT, cfg, settings });
+        await c.start();
+      } finally {
+        reloading = false;
+      }
+    },
+    wipe: async () => {
+      reloading = true;
+      unwatchFile(configPath(home));
+      await c.stop().catch(() => undefined);
+      wipeHome(home);
+      console.log("[reset] CORTEX was reset on this computer.");
+      process.exit(0);
+    },
     // ADR-071: apply saved settings in-process (same port, same login session secret)
     reload: () => {
       if (reloading) return;
@@ -572,15 +610,142 @@ async function main(): Promise<void> {
         "cortex llm list | add <key-or-url> | remove <id> | models <id-or-url> | prefs [--prefer free_first|paid_first|mixed] [--round-robin on|off] [--same-model yes|no]",
       );
     }
+    case "backup": {
+      const cfg = loadConfig(home);
+      if (!cfg) throw new Error("no config: nothing to back up");
+      const pass = await passphrase("Passphrase for the backup (8+ characters)");
+      const files: Record<string, Buffer> = {};
+      for (const f of homeFiles(home)) {
+        if (f.endsWith(".sqlite")) {
+          const { DatabaseSync } = await import("node:sqlite");
+          const db = new DatabaseSync(join(home, f), { readOnly: true });
+          files[f] = snapshotDb(db);
+          db.close();
+        } else files[f] = readFileSync(join(home, f));
+      }
+      const file = opt("out") ?? join(process.cwd(), backupFileName());
+      writeFileSync(file, makeBackup({ cfg, includeKeys: flag("keys"), passphrase: pass, files }), {
+        mode: 0o600,
+      });
+      return out(
+        `Backup written: ${file}${flag("keys") ? " (includes your keys)" : " (no keys; add --keys to include them)"}`,
+        { ok: true, file, with_keys: flag("keys") },
+      );
+    }
+    case "restore": {
+      const src = args[1];
+      if (!src) throw new Error("cortex restore <backup-file>");
+      const b = openBackup(readFileSync(src, "utf8"), await passphrase("Passphrase"));
+      if (await running(home)) throw new Error("CORTEX is running: quit the app (or stop the service) first");
+      const next = restoreInto(home, b, loadConfig(home));
+      saveConfig(next, home);
+      return out(`Restored the backup from ${b.madeAt} into ${home} (${next.mode} mode).`, {
+        ok: true,
+        made_at: b.madeAt,
+        mode: next.mode,
+        with_keys: b.withKeys,
+      });
+    }
+    case "license": {
+      const sub = args[1] ?? "status";
+      if (sub === "install") {
+        const st = installLicense(home, readFileSync(args[2] ?? "", "utf8"));
+        return out(
+          st.required && st.ok
+            ? `Licence installed for ${st.license.licensee} (${st.license.plan}).`
+            : "This build doesn't check licences.",
+          { ok: true, license: st },
+        );
+      }
+      const st = readLicense(home);
+      return out(
+        !st.required
+          ? "This build doesn't check licences."
+          : st.ok
+            ? `Licensed to ${st.license.licensee} (${st.license.plan})${st.daysLeft === null ? "" : `, ${st.daysLeft} days left`}.`
+            : `No valid licence: ${st.reason}`,
+        st,
+      );
+    }
+    case "keychain": {
+      const cfg = loadConfig(home);
+      if (!cfg) throw new Error("no config");
+      const sub = args[1] ?? "status";
+      const b = secretBackend(home);
+      if (sub === "status")
+        return out(
+          `Keys are kept in: ${cfg.secret_store === "keychain" ? b.name : "config.json (mode 600)"}`,
+          {
+            secret_store: cfg.secret_store,
+            backend: b.available() ? b.name : null,
+          },
+        );
+      if (sub === "on") {
+        if (!b.available()) throw new Error("no system keychain found on this computer");
+        saveConfig({ ...cfg, secret_store: "keychain" }, home);
+        return out(`Keys moved to ${b.name}; config.json no longer holds them.`, { ok: true });
+      }
+      if (sub === "off") {
+        saveConfig({ ...cfg, secret_store: "file" }, home);
+        return out("Keys moved back to config.json (mode 600).", { ok: true });
+      }
+      throw new Error("cortex keychain on | off | status");
+    }
+    case "reset": {
+      if (!flag("yes"))
+        throw new Error("this deletes every setting, key and journal in the CORTEX home: add --yes");
+      if (await running(home))
+        throw new Error("CORTEX is running: quit the app first (or use Settings → Reset)");
+      const self = process.argv[1] ?? "";
+      const argv = self.endsWith(".mjs")
+        ? [process.execPath, self, "start"]
+        : [process.execPath, "--import", "tsx", join(ROOT, "local", "cli.ts"), "start"];
+      try {
+        uninstall(plan(process.platform, argv, { CORTEX_HOME: home }));
+      } catch {
+        /* no service installed */
+      }
+      wipeHome(home);
+      return out(`Reset: ${home} deleted.`, { ok: true });
+    }
     case "keys": {
       const cfg = loadConfig(home);
       return out(cfg ? keyNames(cfg).join("\n") : "no config", { keys: cfg ? keyNames(cfg) : [] });
     }
     default:
       console.log(
-        "cortex setup | doctor | start | demo | link | support | llm list|add|remove|models|prefs | service install|uninstall|print | kill | rearm | keys   (--json for machine output)",
+        "cortex setup | doctor | start | demo | link | support | llm list|add|remove|models|prefs | backup | restore | keychain | reset | service install|uninstall|print | kill | rearm | keys   (--json for machine output)",
       );
   }
+}
+
+/** Delete the CORTEX home and its keychain item (reset). Refuses anything that isn't a CORTEX home. */
+function wipeHome(home: string): void {
+  if (!existsSync(configPath(home)) && !existsSync(join(home, "hot.sqlite")))
+    throw new Error(`${home} doesn't look like a CORTEX home`);
+  try {
+    secretBackend(home).del(accountFor(home));
+  } catch {
+    /* no keychain item */
+  }
+  rmSync(home, { recursive: true, force: true });
+}
+
+async function running(home: string): Promise<boolean> {
+  const cfg = loadConfig(home);
+  if (!cfg) return false;
+  return fetch(`http://127.0.0.1:${cfg.port}/health`, { signal: AbortSignal.timeout(2_000) })
+    .then((r) => r.ok)
+    .catch(() => false);
+}
+
+async function passphrase(q: string): Promise<string> {
+  if (process.env.CORTEX_PASSPHRASE) return process.env.CORTEX_PASSPHRASE;
+  if (!process.stdin.isTTY) throw new Error("set CORTEX_PASSPHRASE (non-interactive)");
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const a = (await rl.question(`${q}: `)).trim();
+  rl.close();
+  return a;
 }
 
 main().catch((e) => {

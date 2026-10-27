@@ -236,7 +236,27 @@ export function rotateChain<T extends { provider: string; model: string }>(
 
 export class LlmRouter {
   /** Audit W2-06: optional per-provider quota gate (the brain plugs in its daily counters). */
-  gate: { allow(provider: string): boolean; used(provider: string): void } | null = null;
+  gate: {
+    allow(provider: string): boolean;
+    used(provider: string): void;
+    /** ADR-075: tokens a provider used (the brain keeps a per-day count, so the spend cap survives restarts) */
+    tokens?(provider: string, input: number, output: number): void;
+    tokensToday?(provider: string): { input: number; output: number };
+  } | null = null;
+  /** ADR-075 cost meter: USD per 1M tokens per provider, with an optional daily spend cap */
+  pricing: Record<string, { in: number; out: number; cap?: number }> = {};
+
+  /** USD a provider has spent today (0 when it has no price). */
+  spentToday(provider: string): number {
+    const p = this.pricing[provider];
+    const t = this.gate?.tokensToday?.(provider);
+    return p && t ? (t.input * p.in + t.output * p.out) / 1_000_000 : 0;
+  }
+
+  private overBudget(provider: string): boolean {
+    const cap = this.pricing[provider]?.cap;
+    return cap !== undefined && this.spentToday(provider) >= cap;
+  }
   /**
    * ADR-072 round robin: these chains (by identity: the pool's bull and bear chains) start one model further round
    * on every use, within each tier group, so free-tier quotas are shared across the whole pool. Other chains (the
@@ -297,7 +317,7 @@ export class LlmRouter {
         continue;
       }
       const p = this.providers[hop.provider];
-      if (!p || (this.gate && !this.gate.allow(hop.provider))) {
+      if (!p || (this.gate && !this.gate.allow(hop.provider)) || this.overBudget(hop.provider)) {
         log({ ...base, latencyMs: 0, outcome: "UNAVAILABLE" });
         continue;
       }
@@ -306,6 +326,12 @@ export class LlmRouter {
         this.gate?.used(hop.provider);
         try {
           const res = await p.complete(hop.model, req, timeoutMs ?? r.timeout_ms);
+          // a provider that doesn't report usage is estimated at ~4 characters per token (prompt only)
+          this.gate?.tokens?.(
+            hop.provider,
+            res.inputTokens ?? Math.ceil((req.system.length + req.user.length) / 4),
+            res.outputTokens ?? Math.ceil(res.text.length / 4),
+          );
           let value: T;
           try {
             value = parse(extractJson(res.text));

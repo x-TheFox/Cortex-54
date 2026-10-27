@@ -46,6 +46,7 @@ describe("interaction parsing", () => {
     const base = {
       now: 0,
       lastPulseAt: null,
+      modelUse: { worst: { provider: "none", fraction: 0 }, providers: [] },
       equity: {},
       budget: { mode: "NORMAL" as const, worst: { resource: "x", fraction: 0 }, fractions: {} },
       journalHead: { seq: 1, sha: "0".repeat(64) },
@@ -86,6 +87,7 @@ describe("interaction parsing", () => {
     const msg = hudMessage({
       now: 0,
       lastPulseAt: null,
+      modelUse: { worst: { provider: "none", fraction: 0 }, providers: [] },
       equity: {},
       budget: {
         mode: "NORMAL",

@@ -86,6 +86,10 @@ export function cookieValue(header: string | null, name: string): string | null 
   return null;
 }
 
-export function sessionCookie(token: string, maxAgeS: number): string {
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAgeS}`;
+/**
+ * `secure: false` only for local mode's opt-in phone access over plain HTTP on the user's own Wi-Fi (ADR-076):
+ * browsers drop Secure cookies on http://192.168.x.x. Localhost and the cloud keep Secure.
+ */
+export function sessionCookie(token: string, maxAgeS: number, secure = true): string {
+  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly;${secure ? " Secure;" : ""} SameSite=Strict; Max-Age=${maxAgeS}`;
 }

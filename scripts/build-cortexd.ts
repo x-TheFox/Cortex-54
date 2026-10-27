@@ -35,6 +35,10 @@ await build({
   },
   external: ["node:*"],
   logLevel: "warning",
+  // ADR-077: the publisher's licence key is baked in at build time (empty = a build that doesn't check licences)
+  define: {
+    "process.env.CORTEX_LICENSE_PUBKEY_BUILTIN": JSON.stringify(process.env.CORTEX_LICENSE_PUBKEY ?? ""),
+  },
 });
 const copy = (from: string, to = from, filter?: (p: string) => boolean) => {
   if (existsSync(from)) cpSync(from, join(out, to), { recursive: true, ...(filter ? { filter } : {}) });
@@ -50,5 +54,5 @@ if (process.argv.includes("--with-cloud-deploy")) {
   copy("workers/sentinel", "workers/sentinel");
 }
 copy("research", "research", (p) => !/(\.venv|\.vendor|__pycache__|\.pytest_cache|tests)(\/|$)/.test(p));
-writeFileSync(join(out, "VERSION"), `${new Date().toISOString()}\n`);
+writeFileSync(join(out, "VERSION"), `${process.env.CORTEX_VERSION ?? "dev"} ${new Date().toISOString()}\n`);
 console.log(`cortexd bundle → ${out}`);

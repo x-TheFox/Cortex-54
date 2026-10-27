@@ -11,7 +11,7 @@ runs it.** We host exactly one service, the community hub, and it never touches 
 | **Headless image** (Docker / the same bundle + `cortex start`) | For a home server, NAS or a small VPS that stays on. Same brain, same dashboard over the network (put TLS in front). | The customer, wherever they like (docs/SELF_HOSTING.md) |
 | **Setup prompt** (docs/SETUP_WITH_AN_AGENT.md) | Paste into any coding agent; it installs, asks for keys, runs `cortex doctor` until green, starts the service. | The customer's own agent |
 | **Community hub** | Signed track records, leaderboard, follow other agents, memory packs. | **Us** (one Worker + D1; no keys, no orders) |
-| **License + updates** | License key check in the app; signed update feed. | Us (not built yet; see below) |
+| **License + updates** | Signed licence file checked offline; signed update feed from GitHub releases (ADR-077). | Us (built; needs the publisher keys, see below) |
 
 ## Why not host it for them, or deploy into their cloud
 
@@ -32,17 +32,22 @@ runs it.** We host exactly one service, the community hub, and it never touches 
 ## What's in each install today
 
 - `cortex` CLI and the background service: built and tested (ADR-064).
-- Desktop app: built and launch-tested on macOS arm64 (ADR-066). Windows/Linux builds need their own CI runners
-  (`pnpm desktop:runtime <target>` fetches the matching official Node runtime).
+- Desktop app: built and launch-tested on macOS arm64 (ADR-066). Every merge to main builds macOS (arm64, x86_64),
+  Windows x86_64 and Linux (x86_64, arm64) installers and publishes a release with a generated changelog
+  (`.github/workflows/release.yml`, ADR-077).
 - Docker image: written; not run in a container yet.
 - Hub: built and tested in-process (ADR-068); not deployed (needs a D1 id and a domain).
 
-## Not built yet (the commercial layer)
+## The commercial layer (ADR-077)
 
-- **Licensing:** a key check against the storefront's license API (Gumroad/Lemon Squeezy), cached, with an offline
-  grace period. Free tier = demo + paper with the free model chains; paid = paid endpoints in the model pool, hub publishing and
-  following, deep research ring.
-- **Signed auto-updates:** Tauri's updater with our signing key; the headless image pulls tagged versions.
-- **Code signing / notarization:** Apple Developer ID and a Windows code-signing certificate (both cost money).
+- **Licensing (built):** an Ed25519-signed licence file, checked offline against the publisher key baked into the
+  build (`CORTEX_LICENSE_PUBKEY` repository variable; `tsx scripts/license.ts keygen | issue`). A storefront (Gumroad,
+  Lemon Squeezy) only has to email the file. Without a valid licence demo mode works and paper mode holds new entries
+  (open positions keep their stops); nothing unsafe follows from a licence problem. Unset key = builds that never check.
+- **Signed auto-updates (built):** Tauri's updater reads `latest.json` from the latest GitHub release; bundles are
+  signed with the minisign key in `TAURI_SIGNING_PRIVATE_KEY` (repository secret). The tray offers each update.
+- **Demo cockpit (built):** `pnpm web:demo` → static files on synthetic data, attached to every release.
+- **Not built: code signing / notarization:** Apple Developer ID and a Windows code-signing certificate (both cost
+  money); until then the release notes tell people how to open an unsigned app.
 - **The repo going private:** when it does, GitHub Actions minutes stop being free; the operator's own deployment
   should switch to `RUNNER_MODE=queue` with a desktop runner (ADR-065), which needs no Actions at all.

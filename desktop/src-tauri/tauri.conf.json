@@ -3,7 +3,9 @@
   "productName": "CORTEX-54",
   "version": "0.1.0",
   "identifier": "com.cortex54.app",
-  "build": { "frontendDist": "../ui" },
+  "build": {
+    "frontendDist": "../ui"
+  },
   "app": {
     "windows": [
       {
@@ -16,7 +18,9 @@
         "url": "index.html"
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
@@ -30,7 +34,18 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": { "../../dist/cortexd/": "cortexd/" },
+    "resources": {
+      "../../dist/cortexd/": "cortexd/"
+    },
     "externalBin": ["binaries/node"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIwRTZEQkYyQzBBMTNENUUKUldSZVBhSEE4dHZtc0pPTTZOeUhxaS9NQjlVOC9yRkErT0VLVzlJNzFMOUkrc3pEcVBscHpoL3cK",
+      "endpoints": ["https://github.com/x-TheFox/Cortex-54/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

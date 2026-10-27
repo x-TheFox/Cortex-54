@@ -25,6 +25,11 @@ export const EndpointSchema = z.object({
   tier: z.enum(["free", "paid", "local"]).default("paid"),
   /** optional calls/day cap (a free tier's request limit with margin) */
   daily_cap: z.number().int().positive().optional(),
+  /** ADR-075 cost meter: the user's price in USD per 1M input / output tokens (paid endpoints) */
+  price_in: z.number().min(0).max(1000).optional(),
+  price_out: z.number().min(0).max(1000).optional(),
+  /** ADR-075: drop this endpoint from the rotation for the rest of the UTC day once it has cost this much (USD) */
+  daily_spend_cap: z.number().positive().max(10_000).optional(),
   enabled: z.boolean().default(true),
 });
 export type Endpoint = z.infer<typeof EndpointSchema>;
@@ -36,13 +41,29 @@ export const PoolPrefsSchema = z.object({
   round_robin: z.boolean().default(true),
   /** the user accepted a same-model bear when the pool has only one model */
   allow_same_model: z.boolean().default(false),
+  /** ADR-075: models the user demoted from the scoreboard (`provider/model`); they leave the rotation */
+  demoted: z.array(z.string().min(3).max(260)).max(100).default([]),
 });
 export type PoolPrefs = z.infer<typeof PoolPrefsSchema>;
 
+const DEFAULT_PREFS: PoolPrefs = {
+  prefer: "free_first",
+  round_robin: true,
+  allow_same_model: false,
+  demoted: [],
+};
+
 export const PoolConfigSchema = z.object({
   endpoints: z.array(EndpointSchema).max(50).default([]),
-  prefs: PoolPrefsSchema.default({ prefer: "free_first", round_robin: true, allow_same_model: false }),
+  prefs: PoolPrefsSchema.default(DEFAULT_PREFS),
 });
+
+/** ADR-075: what a paid endpoint costs (USD per 1M tokens) and its optional daily spend cap, by provider name */
+export type Pricing = Record<string, { in: number; out: number; cap?: number }>;
+
+/** USD for a token count at a price. Pure. */
+export const costUsd = (p: { in: number; out: number }, input: number, output: number) =>
+  (input * p.in + output * p.out) / 1_000_000;
 export type PoolConfig = z.infer<typeof PoolConfigSchema>;
 
 /** The cloud worker gets the pool as one secret (LLM_POOL, JSON). A malformed value is ignored, never half-used. */
@@ -113,18 +134,31 @@ export function buildPool(
   builtin: Partial<Record<string, LlmProvider>>,
   cfg: PoolConfig,
   fetcher?: Fetcher,
-): { providers: Partial<Record<string, LlmProvider>>; d: Doctrine; report: PoolReport } {
+): {
+  providers: Partial<Record<string, LlmProvider>>;
+  d: Doctrine;
+  report: PoolReport;
+  pricing: Pricing;
+} {
   const r = d.llm_routing;
   const providers: Partial<Record<string, LlmProvider>> = { ...builtin };
   const raw: Omit<PoolEntry, "family">[] = [];
   const seen = new Set<string>();
+  const demoted = new Set(cfg.prefs.demoted ?? []);
+  let dropped = 0;
   const add = (e: Omit<PoolEntry, "family">) => {
     const k = `${e.provider}/${e.model}`;
+    if (demoted.has(k)) {
+      if (!seen.has(k)) dropped++;
+      seen.add(k);
+      return;
+    }
     if (!seen.has(k)) {
       seen.add(k);
       raw.push(e);
     }
   };
+  const pricing: Pricing = {};
   // built-in free hops in the doctrine's verified order (only providers with a key)
   for (const h of [...r.bull_chain, ...r.bear_chain, ...r.panel.chain])
     if (builtin[h.provider]) add({ provider: h.provider, model: h.model, tier: "free", source: h.provider });
@@ -134,6 +168,12 @@ export function buildPool(
     const p = `ep:${e.id}`;
     providers[p] = endpointProvider(e, fetcher);
     if (e.daily_cap) caps[p] = e.daily_cap;
+    if (e.price_in !== undefined || e.price_out !== undefined || e.daily_spend_cap !== undefined)
+      pricing[p] = {
+        in: e.price_in ?? 0,
+        out: e.price_out ?? 0,
+        ...(e.daily_spend_cap !== undefined ? { cap: e.daily_spend_cap } : {}),
+      };
     for (const m of e.models) add({ provider: p, model: m, tier: e.tier, source: e.name });
   }
   const prefer = cfg.prefs.prefer;
@@ -176,6 +216,17 @@ export function buildPool(
       text: `All your models are from one family (${lineages[0]}). The court will pair different models, but a bear from another family disagrees more usefully.`,
     });
   else notes.push({ level: "ok", text: `${entries.length} models from ${lineages.length} families.` });
+  if (dropped > 0)
+    notes.push({
+      level: "ok",
+      text: `${dropped} demoted ${dropped === 1 ? "model is" : "models are"} left out of the rotation (undo in the scoreboard).`,
+    });
+  for (const [p, x] of Object.entries(pricing))
+    if (x.cap !== undefined)
+      notes.push({
+        level: "ok",
+        text: `${cfg.endpoints.find((e) => `ep:${e.id}` === p)?.name ?? p} stops for the day after $${x.cap.toFixed(2)}.`,
+      });
 
   const families: Record<string, string> = { ...r.families };
   for (const e of entries) families[`${e.provider}/${e.model}`] = e.family;
@@ -206,16 +257,19 @@ export function buildPool(
             panel: { ...r.panel, chain },
           },
         };
+  for (const [p, x] of Object.entries({ ...pricing })) if (providers[`${p}~bear`]) pricing[`${p}~bear`] = x;
   return {
     providers,
     d: out,
     report: { entries, models: distinctModels.size, lineages, notes },
+    pricing,
   };
 }
 
 /** A router over the pool with round robin on (or off) per the user's preference. */
 export function poolRouter(built: ReturnType<typeof buildPool>, prefs: PoolPrefs): LlmRouter {
   const router = new LlmRouter(built.providers, built.d);
+  router.pricing = built.pricing ?? {};
   if (prefs.round_robin && built.report.entries.length > 1) {
     const tier = new Map(
       built.report.entries.map((e) => [`${e.provider.replace(/~bear$/, "")}/${e.model}`, e.tier]),

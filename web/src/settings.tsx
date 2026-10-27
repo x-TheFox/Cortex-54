@@ -12,6 +12,7 @@ import {
   useResource,
   waitForBrain,
 } from "./api.ts";
+import { Qr } from "./qr.tsx";
 
 /**
  * SETTINGS (ADR-071/072): everything the robot needs, in plain words, on one page. Each section saves on its own;
@@ -483,6 +484,7 @@ function EndpointRow({ e, s, save }: { e: EndpointView; s: SettingsView; save: S
           }}
         />
       </label>
+      {e.tier === "paid" && <PriceRow e={e} s={s} save={save} withThis={withThis} />}
       <div className="ep-models">
         {e.models.map((m) => (
           <span key={m} className="model-tag">
@@ -508,6 +510,58 @@ function EndpointRow({ e, s, save }: { e: EndpointView; s: SettingsView; save: S
       </div>
       <Note r={r} />
     </li>
+  );
+}
+
+const usd = (n: number) => (n < 0.01 && n > 0 ? "<$0.01" : `$${n.toFixed(2)}`);
+
+/** ADR-075: what a paid endpoint costs, today's spend and an optional daily cap. */
+function PriceRow({
+  e,
+  s,
+  save,
+  withThis,
+}: {
+  e: EndpointView;
+  s: SettingsView;
+  save: Save;
+  withThis: (next: EndpointView) => EndpointView[];
+}) {
+  const [r, setR] = useState<Result | null>(null);
+  const today = s.spend?.find((x) => x.provider === `ep:${e.id}`);
+  const field = (k: "price_in" | "price_out" | "daily_spend_cap", label: string, step: string) => (
+    <label className="set-field">
+      <span className="label dim">{label}</span>
+      <input
+        className="field plain"
+        type="number"
+        min={0}
+        step={step}
+        defaultValue={e[k] ?? ""}
+        onBlur={async (ev) => {
+          const raw = ev.target.value.trim();
+          const v = raw === "" ? null : Number(raw);
+          if ((v ?? undefined) === e[k]) return;
+          const next = { ...e, [k]: v } as unknown as EndpointView;
+          setR(await save({ llm: { endpoints: withThis(next) } }));
+        }}
+      />
+    </label>
+  );
+  return (
+    <div className="price-row">
+      <div className="set-grid">
+        {field("price_in", "$ PER 1M INPUT TOKENS", "0.01")}
+        {field("price_out", "$ PER 1M OUTPUT TOKENS", "0.01")}
+        {field("daily_spend_cap", "STOP FOR THE DAY AFTER ($)", "0.5")}
+      </div>
+      <p className="cost">
+        {e.price_in === undefined && e.price_out === undefined
+          ? "Add the prices from the provider's pricing page to see what the court costs per day."
+          : `Today: ${today ? `${usd(today.usd)} (${Math.round(today.input / 1000)}k in · ${Math.round(today.output / 1000)}k out)` : "$0.00"}${e.daily_spend_cap ? ` of ${usd(e.daily_spend_cap)}; after that the other models carry on until midnight UTC` : ""}.`}
+      </p>
+      <Note r={r} />
+    </div>
   );
 }
 
@@ -562,17 +616,56 @@ interface ScoreRow {
   timeouts: number;
   errors: number;
   avg_ok_ms: number | null;
+  input_tokens?: number;
+  output_tokens?: number;
 }
 
-/** ADR-072: how each model in the pool did over 7 days, from the brain's own call log. */
-function Scoreboard({ s }: { s: SettingsView }) {
+/** price per provider from the user's endpoints (ADR-075) */
+export function pricesOf(s: SettingsView): Record<string, { in: number; out: number }> {
+  return Object.fromEntries(
+    (s.llm?.endpoints ?? [])
+      .filter((e) => e.price_in !== undefined || e.price_out !== undefined)
+      .map((e) => [`ep:${e.id}`, { in: e.price_in ?? 0, out: e.price_out ?? 0 }]),
+  );
+}
+
+/** ADR-072/075: how each model in the pool did over 7 days, from the brain's own call log, with cost and demote. */
+function Scoreboard({ s, save }: { s: SettingsView; save: Save }) {
   const r = useResource<ScoreRow[]>("/api/models", 60_000);
+  const [note, setNote] = useState<Result | null>(null);
   const names = Object.fromEntries((s.llm?.endpoints ?? []).map((e) => [`ep:${e.id}`, e.name]));
+  const prices = pricesOf(s);
+  const prefs = s.llm?.prefs ?? { prefer: "free_first", round_robin: true, allow_same_model: false };
+  const demoted = prefs.demoted ?? [];
+  const toggle = async (id: string) =>
+    setNote(
+      await save({
+        llm: {
+          prefs: {
+            ...prefs,
+            demoted: demoted.includes(id) ? demoted.filter((x) => x !== id) : [...demoted, id],
+          },
+        },
+      }),
+    );
+  const demotedOnly = demoted.filter(
+    (id) => !(r.data ?? []).some((x) => `${x.provider.replace(/~bear$/, "")}/${x.model}` === id),
+  );
   if (!r.data || r.data.length === 0)
     return (
-      <p className="cost">
-        No court calls in the last 7 days yet. Each model's record appears here once it's used.
-      </p>
+      <>
+        <p className="cost">
+          No court calls in the last 7 days yet. Each model's record appears here once it's used.
+        </p>
+        {demotedOnly.map((id) => (
+          <p key={id} className="cost">
+            Demoted: {id}{" "}
+            <button type="button" className="chip" onClick={() => void toggle(id)}>
+              RESTORE
+            </button>
+          </p>
+        ))}
+      </>
     );
   return (
     <div className="scroll-x">
@@ -585,11 +678,20 @@ function Scoreboard({ s }: { s: SettingsView }) {
             <th className="num">Bad format</th>
             <th className="num">Busy / slow</th>
             <th className="num">Avg time</th>
+            <th className="num">Cost</th>
+            <th />
           </tr>
         </thead>
         <tbody>
           {r.data.map((x) => {
             const rate = x.calls ? x.ok / x.calls : 0;
+            const base = x.provider.replace(/~bear$/, "");
+            const id = `${base}/${x.model}`;
+            const price = prices[base];
+            const cost = price
+              ? ((x.input_tokens ?? 0) * price.in + (x.output_tokens ?? 0) * price.out) / 1_000_000
+              : null;
+            const isDemoted = demoted.includes(id);
             return (
               <tr key={`${x.provider}/${x.model}`}>
                 <td className="w" data-label="MODEL">
@@ -611,11 +713,37 @@ function Scoreboard({ s }: { s: SettingsView }) {
                 <td className="num" data-label="AVG TIME">
                   {x.avg_ok_ms === null ? "—" : `${(x.avg_ok_ms / 1000).toFixed(1)} s`}
                 </td>
+                <td className="num" data-label="COST (7 DAYS)">
+                  {cost === null ? (base.startsWith("ep:") ? "—" : "free") : usd(cost)}
+                </td>
+                <td data-label="">
+                  <button
+                    type="button"
+                    className="chip"
+                    title={
+                      isDemoted
+                        ? "Put this model back in the rotation"
+                        : "Leave this model out of the rotation (it stays saved)"
+                    }
+                    onClick={() => void toggle(id)}
+                  >
+                    {isDemoted ? "RESTORE" : "DEMOTE"}
+                  </button>
+                </td>
               </tr>
             );
           })}
         </tbody>
       </table>
+      {demotedOnly.map((id) => (
+        <p key={id} className="cost">
+          Demoted: {id}{" "}
+          <button type="button" className="chip" onClick={() => void toggle(id)}>
+            RESTORE
+          </button>
+        </p>
+      ))}
+      <Note r={note} />
     </div>
   );
 }
@@ -741,7 +869,7 @@ export function ModelsSection({ s, save, saving }: { s: SettingsView; save: Save
       )}
       <details className="advanced">
         <summary className="label dim">HOW THE MODELS ARE DOING (7 DAYS)</summary>
-        <Scoreboard s={s} />
+        <Scoreboard s={s} save={save} />
       </details>
       <details className="advanced">
         <summary className="label dim">HOW THE MODELS ARE USED</summary>
@@ -894,7 +1022,8 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
         {s.push?.url ? (
           <p className="cost">
             On. Install the free <Ext href="https://ntfy.sh">ntfy</Ext> app and subscribe to{" "}
-            <code className="sel">{s.push.url}</code>. Only alarms, trades and blocked entries are pushed.{" "}
+            <code className="sel">{s.push.url}</code> (or scan the code with the app). Only alarms, trades and
+            blocked entries are pushed.{" "}
             <button
               type="button"
               className="chip"
@@ -902,6 +1031,9 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
             >
               TURN OFF
             </button>
+            <span className="qr-box">
+              <Qr text={s.push.url} label="QR code for the ntfy topic" />
+            </span>
           </p>
         ) : (
           <p className="cost">
@@ -988,6 +1120,281 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
   );
 }
 
+// ------------------------------------------------------------------ court capacity (ADR-075)
+
+export function CourtSection({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
+  const def = s.court?.default_per_day ?? 12;
+  const [n, setN] = useState(s.court?.max_per_day ?? def);
+  const [r, setR] = useState<Result | null>(null);
+  const rows = useResource<ScoreRow[]>("/api/models", 120_000);
+  const prices = pricesOf(s);
+  // cost per model call over 7 days on priced endpoints → a rough cost per hearing (~9 calls)
+  const priced = (rows.data ?? []).filter((x) => prices[x.provider.replace(/~bear$/, "")]);
+  const calls = priced.reduce((a, x) => a + x.calls, 0);
+  const spent = priced.reduce((a, x) => {
+    const p = prices[x.provider.replace(/~bear$/, "")] as { in: number; out: number };
+    return a + ((x.input_tokens ?? 0) * p.in + (x.output_tokens ?? 0) * p.out) / 1_000_000;
+  }, 0);
+  const perHearing = calls ? (spent / calls) * 9 : null;
+  const paid = (s.llm?.endpoints ?? []).some((e) => e.tier === "paid" && e.enabled);
+  return (
+    <section className="set-sec">
+      <h4>How many trades the court hears</h4>
+      <p className="cost">
+        Every candidate trade gets a full hearing (about 9 AI calls). The default, {def} a day, keeps free
+        tiers from running out. With paid models you can let it hear more; it never makes trades bigger, only
+        looks at more of them.
+      </p>
+      <label className="set-field">
+        <span className="label dim">
+          HEARINGS PER DAY: {n}
+          {n === def ? " (default)" : ""}
+        </span>
+        <input
+          type="range"
+          min={4}
+          max={60}
+          step={1}
+          value={n}
+          onChange={(e) => setN(Number(e.target.value))}
+          aria-valuetext={`${n} hearings per day`}
+        />
+      </label>
+      <p className="cost">
+        {perHearing !== null
+          ? `On your paid models a hearing has cost about ${usd(perHearing)}, so ${n} a day is up to ~${usd(perHearing * n)} a day (free models cost nothing).`
+          : paid
+            ? "Add prices to your paid endpoints (AI models) to see a cost estimate here."
+            : `Only free models are set up: above ${def} a day they may run out before midnight UTC, and then hearings wait.`}
+      </p>
+      <div className="set-actions">
+        <button
+          type="button"
+          className="chip go"
+          disabled={saving || n === (s.court?.max_per_day ?? def)}
+          onClick={async () => setR(await save({ court: { max_per_day: n === def ? null : n } }))}
+        >
+          SAVE
+        </button>
+      </div>
+      <Note r={r} />
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ phone access (ADR-076)
+
+export function PhoneSection({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
+  const [r, setR] = useState<Result | null>(null);
+  const [link, setLink] = useState<string | null>(null);
+  const on = s.lan?.enabled ?? false;
+  return (
+    <section className="set-sec">
+      <h4>Use it from your phone</h4>
+      <p className="cost">
+        Turn this on to open the cockpit on a phone connected to the same Wi-Fi. It's plain HTTP inside your
+        own network, so only turn it on at home or on a network you trust. A phone can watch and use the
+        controls (pause, kill switch); settings and keys can only be changed on this computer.
+      </p>
+      <label className="toggle">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={saving}
+          onChange={async (e) => {
+            setLink(null);
+            setR(await save({ lan: { enabled: e.target.checked } }));
+          }}
+        />
+        Phone access on this Wi-Fi
+      </label>
+      {on && (
+        <div className="set-actions">
+          <button
+            type="button"
+            className="chip go"
+            onClick={async () => {
+              const p = await post<Result & { url?: string }>("/api/settings/pair", {});
+              setR(p);
+              setLink(p.url ?? null);
+            }}
+          >
+            PAIR A PHONE
+          </button>
+        </div>
+      )}
+      {link && (
+        <p className="cost">
+          <span className="qr-box">
+            <Qr text={link} label="QR code that signs a phone in once" />
+          </span>
+          Point the phone's camera at the code. It signs that phone in once and stays signed in for 30 days.
+        </p>
+      )}
+      <Note r={r} />
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ keys, backups, reset (ADR-076)
+
+function download(name: string, text: string, type = "application/octet-stream") {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
+  const [pass, setPass] = useState("");
+  const [withKeys, setWithKeys] = useState(false);
+  const [file, setFile] = useState<string | null>(null);
+  const [rpass, setRpass] = useState("");
+  const [confirmText, setConfirmText] = useState("");
+  const [r, setR] = useState<Result | null>(null);
+  const [busy, setBusy] = useState(false);
+  const store = s.secretStore;
+  const lic = s.license;
+  return (
+    <section className="set-sec">
+      <h4>Keys, backups and moving computers</h4>
+      {lic?.required && (
+        <div className="alert-opt">
+          <b>Licence</b>
+          <p className={`note-line ${lic.ok ? "green" : "amber"}`}>
+            {lic.ok
+              ? `Licensed to ${lic.license.licensee} (${lic.license.plan})${lic.daysLeft === null ? "" : ` · ${lic.daysLeft} days left`}.`
+              : `${lic.reason} Demo mode works without one; paper trading holds new entries (open positions keep their stops).`}
+          </p>
+          <input
+            className="field plain"
+            type="file"
+            accept=".json,application/json"
+            aria-label="Licence file"
+            onChange={async (e) => {
+              const text = await e.target.files?.[0]?.text();
+              if (text) setR(await post<Result>("/api/settings/license", { file: text }));
+            }}
+          />
+        </div>
+      )}
+      <div className="alert-opt">
+        <b>Where your keys are kept</b>
+        {store?.backend ? (
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={store.mode === "keychain"}
+              disabled={saving}
+              onChange={async (e) =>
+                setR(await save({ secret_store: e.target.checked ? "keychain" : "file" }))
+              }
+            />
+            In {store.backend} (recommended) instead of CORTEX's settings file
+          </label>
+        ) : (
+          <p className="cost">In CORTEX's settings file, readable only by your user account.</p>
+        )}
+      </div>
+      <div className="alert-opt">
+        <b>Back up</b>
+        <p className="cost">
+          One encrypted file with your settings, the robot's memory and its full journal. Use it to move to a
+          new computer. Keep the passphrase: nobody, including us, can open the file without it.
+        </p>
+        <div className="set-grid">
+          <Secret label="PASSPHRASE (8+ CHARACTERS)" value={pass} onChange={setPass} placeholder="type one" />
+        </div>
+        <label className="toggle">
+          <input type="checkbox" checked={withKeys} onChange={(e) => setWithKeys(e.target.checked)} />
+          Include my keys (then the passphrase protects them too)
+        </label>
+        <div className="set-actions">
+          <button
+            type="button"
+            className="chip go"
+            disabled={busy || pass.length < 8}
+            onClick={async () => {
+              setBusy(true);
+              const b = await post<Result & { file?: string; name?: string }>("/api/settings/backup", {
+                passphrase: pass,
+                includeKeys: withKeys,
+              });
+              setBusy(false);
+              setR(b);
+              if (b.ok && b.file) download(b.name ?? "cortex54.c54backup", b.file);
+            }}
+          >
+            {busy ? "PACKING…" : "SAVE A BACKUP"}
+          </button>
+        </div>
+      </div>
+      <div className="alert-opt">
+        <b>Restore</b>
+        <p className="cost">
+          Brings a backup from another computer here. This computer's current journal is replaced. Stop CORTEX
+          on the old computer first if it trades the same paper account.
+        </p>
+        <input
+          className="field plain"
+          type="file"
+          accept=".c54backup,application/json"
+          onChange={async (e) => setFile((await e.target.files?.[0]?.text()) ?? null)}
+        />
+        <div className="set-grid">
+          <Secret label="ITS PASSPHRASE" value={rpass} onChange={setRpass} placeholder="type it" />
+        </div>
+        <div className="set-actions">
+          <button
+            type="button"
+            className="chip"
+            disabled={busy || !file || rpass.length < 8}
+            onClick={async () => {
+              if (!confirm("Replace this computer's CORTEX data with the backup?")) return;
+              setBusy(true);
+              const res = await post<Result>("/api/settings/restore", { file, passphrase: rpass });
+              if (res.ok) await waitForBrain(30_000);
+              setBusy(false);
+              setR(res);
+            }}
+          >
+            {busy ? "RESTORING…" : "RESTORE"}
+          </button>
+        </div>
+      </div>
+      <div className="alert-opt danger-zone">
+        <b>Reset this computer</b>
+        <p className="cost">
+          Stops CORTEX here and deletes its settings, keys, memory and journal from this computer. Your broker
+          account and its positions are not touched. Save a backup first if you may want them back.
+        </p>
+        <label className="set-field">
+          <span className="label dim">TYPE RESET TO CONFIRM</span>
+          <input
+            className="field plain"
+            value={confirmText}
+            onChange={(e) => setConfirmText(e.target.value)}
+            autoComplete="off"
+          />
+        </label>
+        <div className="set-actions">
+          <button
+            type="button"
+            className="chip danger"
+            disabled={confirmText !== "RESET"}
+            onClick={async () => setR(await post<Result>("/api/settings/reset", { confirm: confirmText }))}
+          >
+            RESET THIS COMPUTER
+          </button>
+        </div>
+      </div>
+      <Note r={r} />
+    </section>
+  );
+}
+
 // ------------------------------------------------------------------ health + support (ADR-073)
 
 interface CheckRow {
@@ -1009,14 +1416,13 @@ export function HealthSection() {
       setBusy(false);
     }
   };
-  const download = async () => {
+  const saveSupport = async () => {
     const data = await post<Record<string, unknown>>("/api/settings/support", {});
-    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `cortex-support-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    download(
+      `cortex-support-${new Date().toISOString().slice(0, 10)}.json`,
+      JSON.stringify(data, null, 2),
+      "application/json",
+    );
   };
   return (
     <section className="set-sec">
@@ -1026,7 +1432,7 @@ export function HealthSection() {
         <button type="button" className="chip go" disabled={busy} onClick={() => void run()}>
           {busy ? "CHECKING…" : "RUN CHECKS"}
         </button>
-        <button type="button" className="chip" onClick={() => void download()}>
+        <button type="button" className="chip" onClick={() => void saveSupport()}>
           SAVE A SUPPORT FILE
         </button>
       </div>
@@ -1068,7 +1474,10 @@ export function SettingsPage({
       <TradingSection s={s} save={save} saving={saving} />
       <ModelsSection s={s} save={save} saving={saving} />
       <ClefSection s={s} save={save} saving={saving} />
+      <CourtSection s={s} save={save} saving={saving} />
       <AlertsSection s={s} save={save} saving={saving} />
+      <PhoneSection s={s} save={save} saving={saving} />
+      <DataSection s={s} save={save} saving={saving} />
       <HealthSection />
       <section className="set-sec">
         <h4>Setup</h4>

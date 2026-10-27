@@ -13,8 +13,18 @@ import { DOCTRINE } from "../src/generated/config.ts";
 import { ntfyUrl } from "../src/notify/push.ts";
 import type { WebSettings } from "../src/web/api.ts";
 import { AGENT_PROMPT } from "./agent-prompt.ts";
+import {
+  backupFileName,
+  makeBackup,
+  type OpenedBackup,
+  openBackup,
+  restoredConfig,
+  restoreInto,
+} from "./backup.ts";
 import { KEY_NAMES, type KeyName, type LocalConfig, LocalConfigSchema, saveConfig } from "./config.ts";
 import { configChecks, runtimeChecks } from "./health.ts";
+import { secretBackend } from "./keychain.ts";
+import { installLicense, readLicense } from "./license.ts";
 
 /**
  * Settings for local mode (ADR-071/072/073): the web app's Settings page and first-run onboarding, and the CLI's
@@ -68,11 +78,31 @@ export function mergeEndpoints(old: Endpoint[], incoming: unknown[]): Endpoint[]
               ? "paid"
               : (prev?.tier ?? "paid"),
         ...(typeof r.daily_cap === "number" && r.daily_cap > 0 ? { daily_cap: Math.floor(r.daily_cap) } : {}),
+        ...num(r, prev, "price_in"),
+        ...num(r, prev, "price_out"),
+        ...num(r, prev, "daily_spend_cap"),
         enabled: r.enabled !== false,
       }),
     );
   }
   return out;
+}
+
+/**
+ * A number field from the page: a number sets it, null clears it, a missing field keeps the saved value. A price of 0
+ * is valid (a free endpoint with a meter); a spend cap must be positive.
+ */
+function num(
+  r: Record<string, unknown>,
+  prev: Endpoint | undefined,
+  k: "price_in" | "price_out" | "daily_spend_cap",
+): Partial<Record<typeof k, number>> {
+  const v = r[k];
+  if (v === null) return {};
+  if (typeof v === "number" && Number.isFinite(v) && (k === "daily_spend_cap" ? v > 0 : v >= 0))
+    return { [k]: v };
+  if (v === undefined && prev?.[k] !== undefined) return { [k]: prev[k] as number };
+  return {};
 }
 
 export interface SettingsDeps {
@@ -85,6 +115,16 @@ export interface SettingsDeps {
   /** the running brain's /health (heartbeat, jobs, invariants) */
   health?: () => Record<string, unknown>;
   fetcher?: Fetch;
+  /** ADR-075: today's tokens and cost per priced provider */
+  spend?: () => { provider: string; input: number; output: number; usd: number; cap: number | null }[];
+  /** ADR-076: consistent copies of the brain's databases (and local files) for a backup */
+  snapshot?: () => Record<string, Buffer>;
+  /** ADR-076: stop the brain, run `write` (files + config), start it again */
+  swap?: (write: () => void) => Promise<void>;
+  /** ADR-076: a one-time login link on this computer's Wi-Fi address (null when LAN access is off) */
+  pairLink?: () => Promise<string | null>;
+  /** ADR-076: stop the service and wipe the CORTEX home */
+  wipe?: () => Promise<void>;
 }
 
 export class LocalSettings implements WebSettings {
@@ -124,6 +164,14 @@ export class LocalSettings implements WebSettings {
       },
       pool: this.d.pool(),
       clef: this.d.clef(),
+      spend: this.d.spend?.() ?? [],
+      court: {
+        max_per_day: c.court.max_per_day ?? null,
+        default_per_day: DOCTRINE.funnel.tier3.max_sprints_per_day,
+      },
+      lan: { enabled: c.lan.enabled, port: c.port },
+      secretStore: { mode: c.secret_store, backend: keychainName(this.d.home) },
+      license: readLicense(this.d.home),
       discord: {
         connected: Boolean(c.keys.DISCORD_BOT_TOKEN && c.keys.DISCORD_CHANNELS),
         channels: Object.keys(safeJson(c.keys.DISCORD_CHANNELS)),
@@ -298,6 +346,28 @@ export class LocalSettings implements WebSettings {
       )
         c = { ...c, clef: patch.clef };
       if (typeof patch.onboarded === "boolean") c = { ...c, onboarded: patch.onboarded };
+      if (patch.court && typeof patch.court === "object") {
+        const v = (patch.court as { max_per_day?: unknown }).max_per_day;
+        c = {
+          ...c,
+          court:
+            typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 60
+              ? { max_per_day: v }
+              : v === null
+                ? {}
+                : c.court,
+        };
+      }
+      if (patch.lan && typeof patch.lan === "object")
+        c = { ...c, lan: { enabled: (patch.lan as { enabled?: unknown }).enabled === true } };
+      if (patch.secret_store === "file" || patch.secret_store === "keychain") {
+        if (patch.secret_store === "keychain" && !secretBackend(this.d.home).available())
+          return {
+            ok: false,
+            message: "No system keychain was found on this computer; keys stay in the settings file.",
+          };
+        c = { ...c, secret_store: patch.secret_store };
+      }
       if (patch.keys && typeof patch.keys === "object") {
         const keys = { ...c.keys };
         for (const [k, v] of Object.entries(patch.keys as Record<string, unknown>)) {
@@ -328,9 +398,103 @@ export class LocalSettings implements WebSettings {
     } catch (e) {
       return { ok: false, message: plain(e) };
     }
-    saveConfig(c, this.d.home);
+    try {
+      saveConfig(c, this.d.home);
+    } catch (e) {
+      return { ok: false, message: plain(e) };
+    }
     setTimeout(() => this.d.reload(), 250);
     return { ok: true, message: "Saved. Applying now (a few seconds)." };
+  }
+
+  /** ADR-076: an encrypted backup file, returned to the browser as text (it saves it as a download). */
+  async backup(q: { passphrase: string; includeKeys: boolean }) {
+    try {
+      const file = makeBackup({
+        cfg: this.d.cfg(),
+        includeKeys: q.includeKeys,
+        passphrase: q.passphrase,
+        files: this.d.snapshot?.() ?? {},
+      });
+      return {
+        ok: true,
+        message: `Backup ready${q.includeKeys ? " (with your keys)" : " (without keys)"}. Keep the passphrase: nobody can open the file without it.`,
+        file,
+        name: backupFileName(),
+      };
+    } catch (e) {
+      return { ok: false, message: plain(e) };
+    }
+  }
+
+  /** ADR-076: restore a backup from another computer. The brain stops, the files are swapped, it starts again. */
+  async restore(q: { file: string; passphrase: string }) {
+    let b: OpenedBackup;
+    try {
+      b = openBackup(q.file, q.passphrase);
+    } catch (e) {
+      return { ok: false, message: plain(e) };
+    }
+    if (!this.d.swap)
+      return { ok: false, message: "Restore isn't available here; use `cortex restore` instead." };
+    const home = this.d.home;
+    const current = this.d.cfg();
+    const swap = this.d.swap;
+    const mode = restoredConfig(b, current).mode;
+    // answer first: the swap stops this very server (same as a settings save, which reloads after replying)
+    setTimeout(
+      () =>
+        void swap(() => {
+          saveConfig(restoreInto(home, b, current), home);
+        }).catch((e) => console.error(`[restore] ${String(e).slice(0, 200)}`)),
+      300,
+    );
+    return {
+      ok: true,
+      message: `Restoring the backup from ${b.madeAt.slice(0, 10)} (${mode} mode): CORTEX restarts on it in a few seconds.${b.withKeys ? "" : " It had no keys: add them in SETTINGS."} If the old computer still runs CORTEX on the same paper account, stop it there.`,
+    };
+  }
+
+  /** ADR-077: install a licence file (checked against this build's publisher key before it is saved). */
+  async license(q: { file: string }) {
+    try {
+      const st = installLicense(this.d.home, q.file);
+      setTimeout(() => this.d.reload(), 250);
+      return {
+        ok: true,
+        message:
+          st.required && st.ok
+            ? `Licence for ${st.license.licensee} (${st.license.plan}) installed${st.daysLeft === null ? "" : `, ${st.daysLeft} days left`}.`
+            : "This build doesn't need a licence.",
+      };
+    } catch (e) {
+      return { ok: false, message: plain(e) };
+    }
+  }
+
+  /** ADR-076: a one-time login link for a phone on this Wi-Fi. */
+  async pair() {
+    if (!this.d.cfg().lan.enabled) return { ok: false, message: "Turn on phone access first." };
+    const url = await this.d.pairLink?.();
+    return url
+      ? {
+          ok: true,
+          message: "Scan with your phone's camera within 10 minutes. The link works once.",
+          url,
+        }
+      : { ok: false, message: "This computer has no Wi-Fi/LAN address right now." };
+  }
+
+  /** ADR-076: "reset this computer" — only after the user types RESET. */
+  async reset(q: { confirm: string }) {
+    if (q.confirm !== "RESET") return { ok: false, message: "Type RESET to confirm." };
+    if (!this.d.wipe)
+      return { ok: false, message: "Reset isn't available here; delete the CORTEX folder by hand." };
+    setTimeout(() => void this.d.wipe?.(), 300);
+    return {
+      ok: true,
+      message: "Resetting: CORTEX stops and deletes its settings, keys and history on this computer.",
+    };
   }
 
   async discord(q: { token: string; guildId: string }): Promise<unknown> {
@@ -350,6 +514,19 @@ export class LocalSettings implements WebSettings {
       return { ok: false, message: plain(e) };
     }
   }
+}
+
+const keychainSeen = new Map<string, string | null>();
+/** which system keychain this computer has (looked up once per process) */
+function keychainName(home: string): string | null {
+  if (!keychainSeen.has(home))
+    try {
+      const b = secretBackend(home);
+      keychainSeen.set(home, b.available() ? b.name : null);
+    } catch {
+      keychainSeen.set(home, null);
+    }
+  return keychainSeen.get(home) ?? null;
 }
 
 function safeHost(u: string): string {

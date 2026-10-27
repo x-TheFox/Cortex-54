@@ -20,6 +20,8 @@ export interface WebEnv {
   WEB_SESSION_SECRET?: string | undefined;
   /** ADR-073: local mode keeps you signed in for 30 days on your own computer (cloud: 12 h) */
   SESSION_TTL_MS?: number | undefined;
+  /** ADR-076: local phone access over plain HTTP on the user's Wi-Fi (cookie without Secure) */
+  COOKIE_INSECURE?: boolean | undefined;
   OPERATOR_DISCORD_ID?: string | undefined;
   DB?:
     | { prepare(sql: string): { bind(...v: unknown[]): { all(): Promise<{ results?: unknown[] }> } } }
@@ -44,6 +46,19 @@ export interface WebSettings {
   support(): Promise<Record<string, unknown>>;
   /** try an Alpaca key, Cloudflare AI, or one model for real */
   test(q: Record<string, unknown>): Promise<{ ok: boolean; message: string }>;
+  /** ADR-076: an encrypted backup (settings, journal, hot state; keys only when asked) */
+  backup?(q: {
+    passphrase: string;
+    includeKeys: boolean;
+  }): Promise<{ ok: boolean; message: string; file?: string; name?: string }>;
+  /** ADR-076: restore a backup made on another computer (the brain restarts on it) */
+  restore?(q: { file: string; passphrase: string }): Promise<{ ok: boolean; message: string }>;
+  /** ADR-076: a one-time login link for a phone on this Wi-Fi (shown as a QR code) */
+  pair?(): Promise<{ ok: boolean; message: string; url?: string }>;
+  /** ADR-077: install a licence file */
+  license?(q: { file: string }): Promise<{ ok: boolean; message: string }>;
+  /** ADR-076: stop the service and delete everything CORTEX keeps on this computer */
+  reset?(q: { confirm: string }): Promise<{ ok: boolean; message: string }>;
 }
 
 export interface WebBrain extends OperatorBrain {
@@ -105,13 +120,13 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
       exp: Date.now() + ttl,
       n: crypto.randomUUID(),
     });
-    return json({ ok: true }, 200, { "set-cookie": sessionCookie(token, ttl / 1000) });
+    return json({ ok: true }, 200, { "set-cookie": sessionCookie(token, ttl / 1000, !env.COOKIE_INSECURE) });
   }
   if (request.method === "POST" && path === "/api/logout") {
     // Audit W1-26: revoke the session server-side too, so a copied cookie stops working for commands.
     const p = await session(request, env);
     if (p) await b.consumeOnce(`revoked:${p.n}`);
-    return json({ ok: true }, 200, { "set-cookie": sessionCookie("", 0) });
+    return json({ ok: true }, 200, { "set-cookie": sessionCookie("", 0, !env.COOKIE_INSECURE) });
   }
 
   const sess = await session(request, env);
@@ -176,7 +191,8 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
                     SUM(outcome = 'OK') AS ok, SUM(outcome = 'SCHEMA_FAIL') AS schema_fail,
                     SUM(outcome = 'RATE_LIMITED') AS rate_limited, SUM(outcome = 'TIMEOUT') AS timeouts,
                     SUM(outcome = 'ERROR') AS errors,
-                    CAST(AVG(CASE WHEN outcome = 'OK' THEN latency_ms END) AS INTEGER) AS avg_ok_ms
+                    CAST(AVG(CASE WHEN outcome = 'OK' THEN latency_ms END) AS INTEGER) AS avg_ok_ms,
+                    COALESCE(SUM(input_tokens), 0) AS input_tokens, COALESCE(SUM(output_tokens), 0) AS output_tokens
              FROM llm_calls WHERE ts > ? AND outcome NOT IN ('UNAVAILABLE', 'SKIPPED_FAMILY')
              GROUP BY provider, model ORDER BY calls DESC LIMIT 60`,
             Date.now() - 7 * 86_400_000,
@@ -236,6 +252,37 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
         return json(await b.settings.test(body));
       case "/api/settings/checks":
         return json(await b.settings.checks());
+      case "/api/settings/backup":
+        return json(
+          b.settings.backup
+            ? await b.settings.backup({
+                passphrase: str("passphrase"),
+                includeKeys: body.includeKeys === true,
+              })
+            : { ok: false, message: "Not available here." },
+        );
+      case "/api/settings/restore":
+        return json(
+          b.settings.restore
+            ? await b.settings.restore({ file: str("file"), passphrase: str("passphrase") })
+            : { ok: false, message: "Not available here." },
+        );
+      case "/api/settings/license":
+        return json(
+          b.settings.license
+            ? await b.settings.license({ file: str("file") })
+            : { ok: false, message: "Not available here." },
+        );
+      case "/api/settings/pair":
+        return json(
+          b.settings.pair ? await b.settings.pair() : { ok: false, message: "Not available here." },
+        );
+      case "/api/settings/reset":
+        return json(
+          b.settings.reset
+            ? await b.settings.reset({ confirm: str("confirm") })
+            : { ok: false, message: "Not available here." },
+        );
       case "/api/settings/support":
         return json(await b.settings.support(), 200, {
           "content-disposition": `attachment; filename="cortex-support-${new Date().toISOString().slice(0, 10)}.json"`,

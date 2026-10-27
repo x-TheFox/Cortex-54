@@ -101,10 +101,14 @@ export class SimBroker implements BrokerApi {
         pos.avg = (pos.qty * pos.avg + qty * price) / (pos.qty + qty);
         pos.qty += qty;
         b.cash -= qty * price;
+      } else if (pos.qty + 1e-12 < qty) {
+        // never sell what isn't held (a cash account can't go short); Alpaca refuses these too
+        o.status = "rejected";
+        o.updated_at = this.iso();
+        continue;
       } else {
-        const sell = Math.min(qty, pos.qty);
-        pos.qty -= sell;
-        b.cash += sell * price;
+        pos.qty -= qty;
+        b.cash += qty * price;
       }
       if (pos.qty <= 1e-12) delete b.positions[o.symbol];
       else b.positions[o.symbol] = pos;
@@ -188,6 +192,15 @@ export class SimBroker implements BrokerApi {
     const b = this.load();
     if (b.orders.some((o) => o.client_order_id === req.client_order_id))
       throw new BrokerError(422, "client_order_id must be unique", "/v2/orders");
+    if (req.side === "sell") {
+      // ADR-078 conformance: like Alpaca, refuse a sell beyond what is held minus what other open sells reserve
+      const held = b.positions[req.symbol]?.qty ?? 0;
+      const reserved = b.orders
+        .filter((o) => o.symbol === req.symbol && o.side === "sell" && OPEN_ORDER_STATUSES.has(o.status))
+        .reduce((a, o) => a + Number(o.qty) - Number(o.filled_qty), 0);
+      if (Number(req.qty) > held - reserved + 1e-12)
+        throw new BrokerError(403, '{"message":"insufficient qty available for order"}', "/v2/orders");
+    }
     const o: SimOrder = {
       id: `sim-${++b.seq}`,
       client_order_id: req.client_order_id,

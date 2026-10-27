@@ -980,3 +980,64 @@ Tier 0 (stale or REDUCE_ONLY equity posture, stale quotes, bearish catalysts) �
 in a drawdown (BTC under its EMA20, every pair 7–27% under its 20-day high), so the long-only breakout is correctly
 idle. One bug: `min_structural_score` 78 on a 5-level score (0/25/50/75/100) meant "Excellent only"; now 70.
 
+
+## ADR-075 — Paid-model cost meter, spend caps, demote, court capacity (2026-10-27)
+**Context:** IDEAS_WORKLOG §E/§F: users who add paid models need to see and bound what they cost, drop a model that
+does badly without deleting it, and let the court hear more trades when quotas are no longer the limit (MLP5-005).
+**Decision:** endpoints may carry `price_in` / `price_out` (USD per 1M tokens) and `daily_spend_cap`. The router counts
+tokens per provider per UTC day through the brain's gate (hot `settings` rows, so a restart doesn't reset the cap;
+providers that report no usage are estimated at ~4 characters per token) and skips a provider once its cost reaches
+the cap; the rest of the pool carries on. The scoreboard shows 7-day cost per model and a DEMOTE / RESTORE switch
+(`prefs.demoted`, `provider/model`); demoted models leave the rotation and the pool notes say so. Local config
+`court.max_per_day` (1–60, default the doctrine's 12) overrides `funnel.tier3.max_sprints_per_day` and lifts the
+research dispatch cap with it; SETTINGS estimates the daily cost from the scoreboard's tokens and prices. The local
+cockpit's third gauge is AI USE TODAY (calls against each provider's daily cap; `StatusView.modelUse`) instead of the
+Cloudflare FREE TIER gauge, which means nothing on the user's own computer. Hearings never make a trade bigger.
+
+## ADR-076 — Keys in the OS keychain, encrypted backups, phone access, reset, tray health (2026-10-27)
+**Context:** IDEAS_WORKLOG §E/§F (MLP3-012, MLP4-031, MLP4-029, settings export, "reset this computer", tray health).
+**Decision:** `secret_store: "keychain"` moves every typed key out of config.json into the OS store (macOS Keychain via
+`security -i`, value on stdin; libsecret via `secret-tool`; Windows DPAPI per user), written before the file loses
+them; generated local secrets (session, ingest, the tray's pill token) stay in the file. `cortex backup [--keys]` /
+SETTINGS → BACK UP write one passphrase-encrypted file (scrypt N=2^15 → AES-256-GCM) with the settings, consistent
+`VACUUM INTO` copies of the hot store and journal, and applied memory packs; keys only when asked. Restore keeps this
+computer's own secrets, port and network setting, swaps the files with the brain stopped, and starts a paper backup
+without its Alpaca keys in demo mode. Phone access (`lan.enabled`, off by default) listens on the local network over
+plain HTTP; a phone signs in once through a QR code (encoded in the browser) and may watch and use the controls, but
+settings and keys can only change from the computer itself (403 for non-loopback settings writes); the session cookie
+drops `Secure` only in this mode. Phone alerts show their ntfy topic as a QR code too. Reset needs the typed word
+RESET, then stops the brain, removes the service and the keychain item, and deletes the CORTEX home (the broker account
+is untouched). `/pill` carries the one-line problem from the runtime checks, the kill switch, the licence or a
+blocked pool; the desktop tray shows it as ⚠ next to the icon and as a menu line.
+
+## ADR-077 — Releases: every platform, changelog, signed auto-update, licences, demo cockpit (2026-10-27)
+**Context:** operator: an app build and auto release with generated changelogs for all supported platforms; §F
+PSS-029…036 (licensing, signed updates) and PSS-037…039 (public demo cockpit).
+**Decision:** `.github/workflows/release.yml` runs on every merge to main that touches the app (or by hand with a
+minor/major bump): `scripts/changelog.ts` picks the next version from the latest `vX.Y.Z` tag and writes notes grouped
+from the commit subjects; a draft release is filled by a matrix build (macOS arm64 and x86_64, Linux x86_64 and arm64,
+Windows x86_64: dmg, app bundle, msi, NSIS installer, AppImage, deb, rpm), the demo cockpit zip, and `latest.json`
+for the Tauri updater; it is published once at least one platform built. Updater bundles are signed with a minisign
+key whose public half is in `tauri.conf.json`; the private half is the `TAURI_SIGNING_PRIVATE_KEY` repository secret
+(without it the installers still ship, but installed apps don't see the release). The app checks at launch and every
+6 hours and offers the update in the tray; nothing installs without a click. Apps are not code-signed or notarized
+(an Apple developer account costs money, so that's the operator's call); the notes say how to open them.
+Licences (`local/license.ts`) are Ed25519-signed JSON checked offline against a publisher key baked in at build time
+(`CORTEX_LICENSE_PUBKEY` repository variable; unset = builds that never check, like this public repo's). Without a
+valid licence demo mode works and paper mode holds new entries exactly like the kill switch, so every open position
+keeps its stop and exits; nothing unsafe ever follows from a licence problem. `scripts/license.ts` makes the publisher
+key and issues licences. `pnpm web:demo` builds the panel as static files that answer the API in the browser from the
+same fixtures as `pnpm web:dev` (the production build leaves that code out).
+
+## ADR-078 — Broker conformance suite; Brain.ts split begins (2026-10-27)
+**Context:** §F: MLP4-027 multi-broker adapters (customers Alpaca doesn't serve) and PSS-006 (the 6,900-line Brain.ts
+is a delivery risk for a product team).
+**Decision:** `src/broker/registry.ts` lists the venues CORTEX trades through with their capabilities, and
+`test/broker-conformance.test.ts` is the contract every adapter must pass unchanged: idempotent client order ids,
+lookups by client id, refusing to sell more than is held, cancels, fills as activities. It found the local sandbox
+broker accepted a sell with nothing held and reported a sale larger than the position; it now refuses both, like
+Alpaca. A second venue joins only after its adapter passes the suite and a supervised paper session against the real
+venue; the candidates and what each lacks (no paper mode, or an account to run the session) are listed in the
+registry, because an unverified adapter in the order path would be trading on a guess (U6). Brain.ts: the cards and
+terminal lines (~700 lines of pure rendering) moved to `src/cortex/cards.ts` (re-exported, so importers didn't
+change); the next modules follow the same way, one per quiet change, behind the simulated-pulse tests.

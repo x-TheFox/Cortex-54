@@ -4,6 +4,8 @@
 //! - opens the cockpit (the same web terminal as the cloud) with a one-time login link;
 //! - keeps a tray icon whose tooltip shows equity, positions and pulse age, with a kill switch and re-arm;
 //! - closing the window hides it to the tray; trading carries on.
+//! - checks for a signed update at launch (ADR-077) and offers it in the tray; nothing installs without a click;
+//! - shows the brain's one-line health problem in the tray (ADR-076).
 //! The shell holds no keys and makes no trading decisions: everything goes through the brain's own CLI and API.
 
 use std::io::{Read, Write};
@@ -16,6 +18,7 @@ use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, RunEvent, WindowEvent};
+use tauri_plugin_updater::UpdaterExt;
 
 struct Daemon(Mutex<Option<Child>>);
 
@@ -83,18 +86,32 @@ fn cortex_json(p: &Paths, args: &[&str]) -> Option<serde_json::Value> {
     serde_json::from_slice(&out.stdout).ok()
 }
 
-fn pill_text(port: u16, token: &str) -> String {
-    let Some(body) = local_get(port, "/pill", Some(token)) else { return "CORTEX-54 · offline".into() };
+/// Tooltip text, plus the one-line problem (if any) the brain's health checks found.
+fn pill_text(port: u16, token: &str) -> (String, Option<String>) {
+    let Some(body) = local_get(port, "/pill", Some(token)) else {
+        return ("CORTEX-54 · offline".into(), Some("The brain isn't answering".into()));
+    };
     let v: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
     let eq = v["accounts"][0]["equity"].as_f64().map(|e| format!("${e:.2}")).unwrap_or_else(|| "—".into());
     let n = v["symbols"].as_array().map(|a| a.len()).unwrap_or(0);
     let age = v["pulse_age_s"].as_i64().map(|a| format!("{a}s")).unwrap_or_else(|| "never".into());
     let state = if v["ok"].as_bool() == Some(true) { "●" } else { "○ stale" };
-    format!("CORTEX-54 {state} · {eq} · {n} position(s) · pulse {age}")
+    let problem = v["problem"].as_str().map(String::from);
+    let line = format!("CORTEX-54 {state} · {eq} · {n} position(s) · pulse {age}");
+    match &problem {
+        Some(p) => (format!("{line}\n⚠ {p}"), problem),
+        None => (line, None),
+    }
+}
+
+async fn tokio_sleep(d: Duration) {
+    // no tokio dependency of our own: a blocking sleep on tauri's blocking pool
+    let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(d)).await;
 }
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Daemon(Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
@@ -124,8 +141,22 @@ pub fn run() {
             let open = MenuItem::with_id(app, "open", "Open cockpit", true, None::<&str>)?;
             let kill = MenuItem::with_id(app, "kill", "Kill switch: stop new entries", true, None::<&str>)?;
             let rearm = MenuItem::with_id(app, "rearm", "Re-arm", true, None::<&str>)?;
+            let health = MenuItem::with_id(app, "health", "Health: checking…", false, None::<&str>)?;
+            let update = MenuItem::with_id(app, "update", "Up to date", false, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit CORTEX-54", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &kill, &rearm, &PredefinedMenuItem::separator(app)?, &quit])?;
+            let menu = Menu::with_items(
+                app,
+                &[
+                    &open,
+                    &health,
+                    &PredefinedMenuItem::separator(app)?,
+                    &kill,
+                    &rearm,
+                    &PredefinedMenuItem::separator(app)?,
+                    &update,
+                    &quit,
+                ],
+            )?;
             let tray = TrayIconBuilder::with_id("pill")
                 .icon(app.default_window_icon().cloned().expect("app icon"))
                 .tooltip("CORTEX-54 · starting")
@@ -145,13 +176,44 @@ pub fn run() {
                         "rearm" => {
                             let _ = cortex_cmd(&p, &["rearm"]).output();
                         }
+                        "update" => {
+                            // signed update (minisign key in tauri.conf.json); the brain stops with the app and the
+                            // new version starts it again
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Ok(Some(u)) = match app.updater() {
+                                    Ok(up) => up.check().await,
+                                    Err(e) => Err(e),
+                                } {
+                                    if u.download_and_install(|_, _| {}, || {}).await.is_ok() {
+                                        app.restart();
+                                    }
+                                }
+                            });
+                        }
                         "quit" => app.exit(0),
                         _ => {}
                     }
                 })
                 .build(app)?;
 
+            // ADR-077: look for a signed update once at launch and every 6 hours; offer it in the tray
+            let up_handle = app.handle().clone();
+            let up_item = update.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    if let Ok(up) = up_handle.updater() {
+                        if let Ok(Some(u)) = up.check().await {
+                            let _ = up_item.set_text(format!("Install update {} and restart", u.version));
+                            let _ = up_item.set_enabled(true);
+                        }
+                    }
+                    tokio_sleep(Duration::from_secs(6 * 3600)).await;
+                }
+            });
+
             // wait for the brain, then log the window in with a one-time link; keep the tooltip fresh
+            let health_item = health.clone();
             std::thread::spawn(move || {
                 for _ in 0..90 {
                     if local_get(port, "/health", None).is_some() {
@@ -165,7 +227,14 @@ pub fn run() {
                     }
                 }
                 loop {
-                    let _ = tray.set_tooltip(Some(pill_text(port, &token)));
+                    let (tip, problem) = pill_text(port, &token);
+                    let _ = tray.set_tooltip(Some(tip));
+                    // ADR-076: a problem shows next to the tray icon (macOS menu bar) and in the menu, in plain words
+                    let _ = tray.set_title(problem.as_ref().map(|_| "⚠"));
+                    let _ = health_item.set_text(match &problem {
+                        Some(p) => format!("⚠ {p}"),
+                        None => "Health: all good".to_string(),
+                    });
                     std::thread::sleep(Duration::from_secs(30));
                 }
             });

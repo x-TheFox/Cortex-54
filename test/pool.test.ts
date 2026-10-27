@@ -28,6 +28,7 @@ const prefs = (p: Partial<PoolConfig["prefs"]> = {}) => ({
   prefer: "free_first" as const,
   round_robin: true,
   allow_same_model: false,
+  demoted: [] as string[],
   ...p,
 });
 

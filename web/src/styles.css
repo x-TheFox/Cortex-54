@@ -1848,3 +1848,47 @@ a {
   cursor: pointer;
   text-align: left;
 }
+
+/* ADR-075/076: cost meter, court capacity, phone QR, backups, reset */
+.chip.danger {
+  color: var(--white);
+  background: var(--red-glass);
+  border-color: var(--red);
+}
+.danger-zone {
+  border-left: 2px solid var(--red);
+  padding-left: 12px;
+}
+.price-row {
+  margin-top: 8px;
+}
+.qr-box {
+  display: inline-block;
+  margin: 10px 12px 4px 0;
+  padding: 6px;
+  background: #fff;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+.qr {
+  display: block;
+  width: 176px;
+  max-width: 60vw;
+  height: auto;
+}
+.set-sec input[type="range"] {
+  width: 100%;
+  max-width: 420px;
+  accent-color: var(--cyan);
+}
+.demo-banner {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: 6px 16px;
+  font: 700 11px / 1.4 var(--ui);
+  letter-spacing: 0.08em;
+  text-align: center;
+  color: var(--glass);
+  background: var(--amber);
+}

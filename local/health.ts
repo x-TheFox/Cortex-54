@@ -6,6 +6,7 @@ import { buildPool } from "../src/court/pool.ts";
 import { buildProviders } from "../src/court/providers.ts";
 import { DOCTRINE } from "../src/generated/config.ts";
 import type { LocalConfig } from "./config.ts";
+import { readLicense } from "./license.ts";
 import { clefNotice, resolveClef } from "./runtime.ts";
 
 /**
@@ -104,6 +105,17 @@ export async function configChecks(
     detail: killed ? "ON: the robot is flattened and stopped" : "off",
     fix: "Re-arm from the tray, or `cortex rearm`, when you mean it.",
   });
+  const lic = readLicense(home);
+  if (lic.required)
+    c.push({
+      name: "Licence",
+      ok: lic.ok || cfg.mode === "demo",
+      ...(lic.ok && lic.daysLeft !== null && lic.daysLeft < 14 ? { warn: true } : {}),
+      detail: lic.ok
+        ? `${lic.license.licensee} · ${lic.license.plan}${lic.daysLeft === null ? "" : ` · ${lic.daysLeft} days left`}`
+        : `${lic.reason}${cfg.mode === "paper" ? " Paper trading holds new entries (open positions keep their stops)." : " Demo mode works without one."}`,
+      fix: "Install your licence file in SETTINGS, or `cortex license install <file>`.",
+    });
   return c;
 }
 
