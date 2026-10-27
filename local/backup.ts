@@ -109,7 +109,7 @@ export function openBackup(text: string, passphrase: string): OpenedBackup {
   try {
     env = EnvelopeSchema.parse(JSON.parse(text));
   } catch {
-    throw new Error("This isn't a CORTEX-54 backup file.");
+    throw new Error("This isn't a Savant backup file.");
   }
   if (env.kdf.n > 2 ** 20 || env.kdf.r > 32 || env.kdf.p > 16)
     throw new Error("Backup settings out of range.");
@@ -133,7 +133,7 @@ export function openBackup(text: string, passphrase: string): OpenedBackup {
 }
 
 /**
- * Write a backup into a CORTEX home (the brain must be stopped). This computer keeps its own generated secrets, port
+ * Write a backup into a Savant home (the brain must be stopped). This computer keeps its own generated secrets, port
  * and network setting; keys come from the backup when it has them, else the ones already here stay.
  */
 export function restoreInto(home: string, b: OpenedBackup, current: LocalConfig | null): LocalConfig {

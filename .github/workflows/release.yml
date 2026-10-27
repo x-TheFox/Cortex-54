@@ -66,7 +66,7 @@ jobs:
             gh release delete "${{ steps.v.outputs.tag }}" --yes
           fi
           gh release create "${{ steps.v.outputs.tag }}" --draft --target "$GITHUB_SHA" \
-            --title "CORTEX-54 ${{ steps.v.outputs.version }}" --notes-file release-notes.md
+            --title "Savant ${{ steps.v.outputs.version }}" --notes-file release-notes.md
       - uses: actions/upload-artifact@v4
         with:
           name: notes
@@ -155,7 +155,7 @@ jobs:
         shell: bash
         run: |
           v=${{ needs.plan.outputs.version }}
-          node scripts/msix.ts "out/CORTEX-54_${v}_${{ matrix.platform }}.msi" "$v" "out/CORTEX-54_${v}_${{ matrix.platform }}.msix"
+          node scripts/msix.ts "out/Savant_${v}_${{ matrix.platform }}.msi" "$v" "out/Savant_${v}_${{ matrix.platform }}.msix"
       - name: Upload to the draft release
         shell: bash
         env:

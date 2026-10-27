@@ -1,6 +1,6 @@
 import { type HubDb, handleHub } from "./handler.ts";
 
-/** CORTEX community hub Worker (ADR-068): the one service the publisher hosts. */
+/** Savant community hub Worker (ADR-068): the one service the publisher hosts. */
 interface Env {
   DB: D1Database;
 }

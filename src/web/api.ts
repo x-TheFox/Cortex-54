@@ -30,7 +30,7 @@ export interface WebEnv {
 
 /**
  * Settings the app can change (ADR-071). Only local mode implements this: there the brain owns its config file. A
- * cloud brain's keys are Worker secrets, changed by `cortex deploy` from the desktop app, so the page says so.
+ * cloud brain's keys are Worker secrets, changed by `savant deploy` from the desktop app, so the page says so.
  */
 export interface WebSettings {
   view(): Promise<unknown>;
@@ -40,7 +40,7 @@ export interface WebSettings {
   discord(q: { token: string; guildId: string }): Promise<unknown>;
   /** models already running on this computer (Ollama, LM Studio) */
   detect(): Promise<unknown>;
-  /** HEALTH: plain-word checks (same as `cortex doctor`) */
+  /** HEALTH: plain-word checks (same as `savant doctor`) */
   checks(): Promise<unknown>;
   /** a redacted support file (no secrets) the user can send for help */
   support(): Promise<Record<string, unknown>>;
@@ -58,8 +58,8 @@ export interface WebSettings {
   /** ADR-081: cap the paper account's borrowing at 1x at the broker */
   cashOnly?(account: "PAPER" | "LIVE"): Promise<{ ok: boolean; message: string }>;
   /** ADR-077: install a licence file */
-  license?(q: { file: string }): Promise<{ ok: boolean; message: string }>;
-  /** ADR-076: stop the service and delete everything CORTEX keeps on this computer */
+  license?(q: { file?: string; key?: string; release?: boolean }): Promise<{ ok: boolean; message: string }>;
+  /** ADR-076: stop the service and delete everything Savant keeps on this computer */
   reset?(q: { confirm: string }): Promise<{ ok: boolean; message: string }>;
 }
 
@@ -156,7 +156,7 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
           : json({
               managed: "cloud",
               message:
-                "This brain runs in your cloud. Change its keys from the CORTEX app (Deploy), which pushes them as Worker secrets.",
+                "This brain runs in your cloud. Change its keys from the Savant app (Deploy), which pushes them as Worker secrets.",
             });
       case "/api/forecast": {
         const sym = (url.searchParams.get("symbol") ?? "BTC/USD").toUpperCase();

@@ -9,7 +9,7 @@ import { join } from "node:path";
  * generated local secrets (session, ingest, tray pill). Backends use the tools the OS ships, so no native module:
  *   macOS   – `security` (login Keychain, generic password), value passed on stdin, never in argv
  *   Linux   – `secret-tool` (libsecret / GNOME Keyring / KWallet), value on stdin
- *   Windows – DPAPI (CurrentUser) through PowerShell, a ciphertext file in the CORTEX home only this user can open
+ *   Windows – DPAPI (CurrentUser) through PowerShell, a ciphertext file in the Savant home only this user can open
  * The headless image keeps the file (no desktop session to unlock a keychain).
  */
 
@@ -23,7 +23,7 @@ export interface SecretBackend {
 
 const SERVICE = "cortex54";
 
-/** One keychain item per CORTEX home, so a demo home or a second profile never reads the main one's keys. */
+/** One keychain item per Savant home, so a demo home or a second profile never reads the main one's keys. */
 export const accountFor = (home: string) =>
   `keys-${createHash("sha256").update(home).digest("hex").slice(0, 12)}`;
 
@@ -55,7 +55,7 @@ export function macKeychain(keychain?: string): SecretBackend {
       // `security -i` reads the command from stdin, so the value never shows up in a process list; base64 keeps it
       // free of quotes and spaces for security's own command parser
       const b64 = Buffer.from(value, "utf8").toString("base64");
-      const line = `add-generic-password -U -s ${SERVICE} -a ${account} -l "CORTEX-54 keys" -w ${b64}${kc.length ? ` ${kc[0]}` : ""}\n`;
+      const line = `add-generic-password -U -s ${SERVICE} -a ${account} -l "Savant keys" -w ${b64}${kc.length ? ` ${kc[0]}` : ""}\n`;
       const r = run("security", ["-i"], line);
       if (r.status !== 0 || /error|fail/i.test(r.stderr ?? ""))
         throw new Error(`Keychain refused the keys: ${(r.stderr || r.stdout || "").trim().slice(0, 160)}`);
@@ -78,7 +78,7 @@ export function secretTool(): SecretBackend {
     set(account, value) {
       const r = run(
         "secret-tool",
-        ["store", "--label=CORTEX-54 keys", "service", SERVICE, "account", account],
+        ["store", "--label=Savant keys", "service", SERVICE, "account", account],
         value,
       );
       if (r.status !== 0)

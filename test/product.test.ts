@@ -374,10 +374,10 @@ describe("MSIX package (ADR-079)", async () => {
   it("uses a four-part version and Microsoft's unsigned-publisher OID unless a Store identity is given", () => {
     expect(msixVersion("0.1.12")).toBe("0.1.12.0");
     expect(() => msixVersion("x")).toThrow();
-    const m = manifest({ version: "1.2.3", exe: "CORTEX-54.exe" });
+    const m = manifest({ version: "1.2.3", exe: "Savant.exe" });
     expect(m).toContain('Version="1.2.3.0"');
     expect(m).toContain("OID.2.25.311729368913984317654407730594956997722=1");
-    expect(m).toContain('Executable="CORTEX-54.exe"');
+    expect(m).toContain('Executable="Savant.exe"');
     expect(m).toContain('rescap:Capability Name="runFullTrust"');
     const store = manifest({ version: "1.2.3", exe: "a&b.exe", publisher: "CN=ABC-123", name: "Pub.App" });
     expect(store).toContain('Publisher="CN=ABC-123"');

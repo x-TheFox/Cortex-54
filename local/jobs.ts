@@ -8,7 +8,7 @@ import type { LocalConfig } from "./config.ts";
  * Local job runner (ADR-064). The brain "dispatches" its batch workflows exactly as in the cloud (research, Kronos,
  * dossiers, Governor), but here each one is a local Python subprocess (`uv run …`) that posts its signed batch back
  * to this machine's /ingest/batch. No GitHub account, no Actions minutes, no cloud. Jobs that need a pinned upstream
- * checkout get it cloned once into the CORTEX home.
+ * checkout get it cloned once into the Savant home.
  */
 
 const UPSTREAM = {
@@ -56,7 +56,7 @@ export function jobFor(
     // ADR-072: the research desk uses the user's model pool too (not only the built-in free keys)
     ...(ctx.cfg.llm.endpoints.length ? { LLM_POOL: JSON.stringify(ctx.cfg.llm) } : {}),
     RUN_URL: "",
-    // the Python env lives in the CORTEX home, never inside the (read-only, signed) app bundle
+    // the Python env lives in the Savant home, never inside the (read-only, signed) app bundle
     UV_PROJECT_ENVIRONMENT: join(ctx.home, "venv"),
   };
   const uv = (extra: string[], groups: string[] = []) => [

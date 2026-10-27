@@ -261,7 +261,7 @@ function RatifyBox(props: {
         </ul>
       )}
       <p className="sub">
-        Stop {props.stop} lets CORTEX trade your <b>real money</b> on its own, inside the same risk limits.
+        Stop {props.stop} lets Savant trade your <b>real money</b> on its own, inside the same risk limits.
         Type RATIFY to confirm. You'll confirm once more, 10 minutes to 24 hours from now, on a fresh sign-in.
       </p>
       <input

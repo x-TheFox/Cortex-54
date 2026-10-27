@@ -97,7 +97,7 @@ function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving:
       <b>Live account (real money)</b>
       {!open && !connected ? (
         <p className="cost">
-          Optional. Connect your real Alpaca account when you're ready. It joins switched off: CORTEX trades
+          Optional. Connect your real Alpaca account when you're ready. It joins switched off: Savant trades
           it only after you turn it on yourself.{" "}
           <button type="button" className="chip" onClick={() => setOpen(true)}>
             SET UP LIVE
@@ -120,7 +120,7 @@ function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving:
             <p className="cost">
               In Alpaca, switch to your <b>live</b> account and generate API keys (Home → API keys). They
               start switched off here: nothing is ever bought with real money until you ratify it in the
-              cockpit. Use a cash account: CORTEX never borrows, shorts or uses margin.{" "}
+              cockpit. Use a cash account: Savant never borrows, shorts or uses margin.{" "}
               <Ext href="https://app.alpaca.markets/brokerage/dashboard/overview">Open Alpaca →</Ext>
             </p>
           )}
@@ -173,7 +173,7 @@ function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving:
                 onClick={async () => {
                   if (
                     confirm(
-                      "Disconnect the live account? CORTEX stops managing it; open positions stay at Alpaca.",
+                      "Disconnect the live account? Savant stops managing it; open positions stay at Alpaca.",
                     )
                   )
                     setR(await save({ keys: { ALPACA_LIVE_KEY_ID: null, ALPACA_LIVE_SECRET: null } }));
@@ -185,7 +185,7 @@ function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving:
           </div>
           {margin && (
             <div className="set-actions">
-              <span className="cost">This live account allows margin, so CORTEX holds it.</span>
+              <span className="cost">This live account allows margin, so Savant holds it.</span>
               <button
                 type="button"
                 className="chip go"
@@ -225,7 +225,7 @@ export function TradingSection({ s, save, saving }: { s: SettingsView; save: Sav
         <div className="alert-opt danger-zone">
           <b>This paper account allows borrowing (margin)</b>
           <p className="cost">
-            Alpaca's paper accounts start as margin accounts. CORTEX only trades with its own cash, so it
+            Alpaca's paper accounts start as margin accounts. Savant only trades with its own cash, so it
             holds new trades until borrowing is switched off. This changes one setting at Alpaca (borrowing
             capped at 1x, shorting off); your money and positions stay as they are.
           </p>
@@ -469,7 +469,7 @@ function AddSource({ s, save, done }: { s: SettingsView; save: Save; done: () =>
       )}
       {builtin ? (
         <p className="cost">
-          Recognized: a {preset?.name} key. It uses CORTEX's tested models for this provider:{" "}
+          Recognized: a {preset?.name} key. It uses Savant's tested models for this provider:{" "}
           {(s.freeChains?.[preset?.id ?? ""] ?? []).join(", ") || "its verified models"}.
         </p>
       ) : (
@@ -911,7 +911,7 @@ export function ModelsSection({ s, save, saving }: { s: SettingsView; save: Save
       <h4>AI models</h4>
       <p className="cost">
         The court argues every trade with at least two different models: one makes the case, another attacks
-        it. Add as many as you like, free or paid: CORTEX rotates through all of them (so free limits last
+        it. Add as many as you like, free or paid: Savant rotates through all of them (so free limits last
         longer) and falls back to the next when one fails. <b>Two or more models</b> from different companies
         work best.
       </p>
@@ -1202,7 +1202,7 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
         <b>Discord (optional)</b>
         {s.discord?.connected ? (
           <p className="cost">
-            Connected: {s.discord.channels.length} channels in a private CORTEX-54 category.{" "}
+            Connected: {s.discord.channels.length} channels in a private Savant category.{" "}
             <button
               type="button"
               className="chip"
@@ -1218,7 +1218,7 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
             <p className="cost">
               Create a bot at{" "}
               <Ext href="https://discord.com/developers/applications">discord.com/developers</Ext> (New
-              Application → Bot → Reset Token), paste the token, and press Connect. CORTEX creates its own
+              Application → Bot → Reset Token), paste the token, and press Connect. Savant creates its own
               private channels.
             </p>
             <div className="set-grid">
@@ -1385,6 +1385,95 @@ export function PhoneSection({ s, save, saving }: { s: SettingsView; save: Save;
   );
 }
 
+// ------------------------------------------------------------------ licence (ADR-086)
+
+/** The Whop licence key: paste it once; the app keeps the machine-bound licence fresh by itself. */
+export function LicenseSection({ s, reload }: { s: SettingsView; reload: () => void }) {
+  const [key, setKey] = useState("");
+  const [r, setR] = useState<Result | null>(null);
+  const [busy, setBusy] = useState(false);
+  const lic = s.license;
+  if (!lic?.required) return null; // builds without a publisher key (source checkouts) don't sell licences
+  const store = s.storeUrl ?? "https://whop.com/savant/";
+  const call = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    const res = await post<Result>("/api/settings/license", body);
+    setBusy(false);
+    setR(res);
+    if (res.ok) {
+      await waitForBrain();
+      reload();
+    }
+  };
+  return (
+    <section className="set-sec">
+      <h4>Licence</h4>
+      <p className={`note-line ${lic.ok ? "green" : "amber"}`} role="status">
+        {lic.ok
+          ? `Licensed${lic.license.plan === "trial" ? " (free trial)" : ` · ${lic.license.plan}`}${lic.daysLeft === null ? "" : ` · renews automatically (good offline for ${lic.daysLeft} more days)`}. Paper and live trading are on.`
+          : `${lic.reason} Demo mode works without a licence; paper and live trading hold new trades (open positions keep their stops).`}
+      </p>
+      {!lic.ok && (
+        <p className="cost">
+          Every plan starts with a 7-day free trial. <Ext href={store}>Start a trial or buy Savant →</Ext>{" "}
+          Your licence key is in your Whop orders, next to the download.
+        </p>
+      )}
+      <div className="set-grid">
+        <Secret
+          label="LICENCE KEY (FROM YOUR WHOP ORDER)"
+          hint={s.licenseKey?.hint}
+          value={key}
+          onChange={setKey}
+          placeholder="paste your key"
+        />
+      </div>
+      <div className="set-actions">
+        <button
+          type="button"
+          className="chip go"
+          disabled={busy || key.length < 8}
+          onClick={() => void call({ key })}
+        >
+          {busy ? "CHECKING…" : "ACTIVATE ON THIS COMPUTER"}
+        </button>
+        {s.licenseKey?.set && (
+          <button
+            type="button"
+            className="chip"
+            disabled={busy}
+            onClick={() => {
+              if (
+                confirm(
+                  "Release the licence from this computer? Paper and live trading hold until you activate it again.",
+                )
+              )
+                void call({ release: true });
+            }}
+          >
+            MOVE TO ANOTHER COMPUTER
+          </button>
+        )}
+        <Ext href="https://whop.com/@me/settings/orders">Manage your subscription →</Ext>
+      </div>
+      <details className="advanced">
+        <summary className="label dim">HAVE A LICENCE FILE INSTEAD?</summary>
+        <input
+          className="field plain"
+          type="file"
+          accept=".json,application/json"
+          aria-label="Licence file"
+          onChange={async (e) => {
+            const text = await e.target.files?.[0]?.text();
+            if (text) void call({ file: text });
+          }}
+        />
+      </details>
+      <Note r={r} />
+    </section>
+  );
+}
+
 // ------------------------------------------------------------------ keys, backups, reset (ADR-076)
 
 function download(name: string, text: string, type = "application/octet-stream") {
@@ -1405,30 +1494,9 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
   const [r, setR] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
   const store = s.secretStore;
-  const lic = s.license;
   return (
     <section className="set-sec">
       <h4>Keys, backups and moving computers</h4>
-      {lic?.required && (
-        <div className="alert-opt">
-          <b>Licence</b>
-          <p className={`note-line ${lic.ok ? "green" : "amber"}`}>
-            {lic.ok
-              ? `Licensed to ${lic.license.licensee} (${lic.license.plan})${lic.daysLeft === null ? "" : ` · ${lic.daysLeft} days left`}.`
-              : `${lic.reason} Demo mode works without one; paper trading holds new entries (open positions keep their stops).`}
-          </p>
-          <input
-            className="field plain"
-            type="file"
-            accept=".json,application/json"
-            aria-label="Licence file"
-            onChange={async (e) => {
-              const text = await e.target.files?.[0]?.text();
-              if (text) setR(await post<Result>("/api/settings/license", { file: text }));
-            }}
-          />
-        </div>
-      )}
       <div className="alert-opt">
         <b>Where your keys are kept</b>
         {store?.backend ? (
@@ -1441,10 +1509,10 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
                 setR(await save({ secret_store: e.target.checked ? "keychain" : "file" }))
               }
             />
-            In {store.backend} (recommended) instead of CORTEX's settings file
+            In {store.backend} (recommended) instead of Savant's settings file
           </label>
         ) : (
-          <p className="cost">In CORTEX's settings file, readable only by your user account.</p>
+          <p className="cost">In Savant's settings file, readable only by your user account.</p>
         )}
       </div>
       <div className="alert-opt">
@@ -1483,7 +1551,7 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
       <div className="alert-opt">
         <b>Restore</b>
         <p className="cost">
-          Brings a backup from another computer here. This computer's current journal is replaced. Stop CORTEX
+          Brings a backup from another computer here. This computer's current journal is replaced. Stop Savant
           on the old computer first if it trades the same paper account.
         </p>
         <input
@@ -1501,7 +1569,7 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
             className="chip"
             disabled={busy || !file || rpass.length < 8}
             onClick={async () => {
-              if (!confirm("Replace this computer's CORTEX data with the backup?")) return;
+              if (!confirm("Replace this computer's Savant data with the backup?")) return;
               setBusy(true);
               const res = await post<Result>("/api/settings/restore", { file, passphrase: rpass });
               if (res.ok) await waitForBrain(30_000);
@@ -1516,7 +1584,7 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
       <div className="alert-opt danger-zone">
         <b>Reset this computer</b>
         <p className="cost">
-          Stops CORTEX here and deletes its settings, keys, memory and journal from this computer. Your broker
+          Stops Savant here and deletes its settings, keys, memory and journal from this computer. Your broker
           account and its positions are not touched. Save a backup first if you may want them back.
         </p>
         <label className="set-field">
@@ -1576,7 +1644,7 @@ export function HealthSection() {
   return (
     <section className="set-sec">
       <h4>Health</h4>
-      <p className="cost">Checks everything the robot needs, in plain words. Same as `cortex doctor`.</p>
+      <p className="cost">Checks everything the robot needs, in plain words. Same as `savant doctor`.</p>
       <div className="set-actions">
         <button type="button" className="chip go" disabled={busy} onClick={() => void run()}>
           {busy ? "CHECKING…" : "RUN CHECKS"}
@@ -1620,6 +1688,7 @@ export function SettingsPage({
   return (
     <div className="settings">
       {saving && <p className="note-line cyan">Applying…</p>}
+      <LicenseSection s={s} reload={reload} />
       <TradingSection s={s} save={save} saving={saving} />
       <ModelsSection s={s} save={save} saving={saving} />
       <ClefSection s={s} save={save} saving={saving} />

@@ -242,14 +242,14 @@ export function App() {
         <div className="signin">
           <div className="display">
             <div className="glass">
-              <span className="label dim">CORTEX-54 · TERMINAL</span>
+              <span className="label dim">Savant · TERMINAL</span>
               <p className="alert caution">
                 <span className="alert-title">
                   {boot === "expired" ? "LOGIN LINK EXPIRED" : "NO SESSION"}
                 </span>
               </p>
-              <p className="alert-action">OPEN THE DASHBOARD FROM THE CORTEX APP (TRAY → OPEN)</p>
-              <p className="alert-action">OR RUN `cortex link` · OR /terminal IN DISCORD</p>
+              <p className="alert-action">OPEN THE DASHBOARD FROM THE Savant APP (TRAY → OPEN)</p>
+              <p className="alert-action">OR RUN `savant link` · OR /terminal IN DISCORD</p>
               <p className="alert-action">EACH LINK WORKS ONCE, FOR 10 MINUTES</p>
             </div>
           </div>
@@ -280,7 +280,7 @@ export function App() {
         </button>
         <div className="strip-title" data-guide="strip">
           <span className="brand">
-            CORTEX-54<small>OPERATOR TERMINAL</small>
+            Savant<small>OPERATOR TERMINAL</small>
           </span>
           <span className="readouts" aria-live="off">
             <span>

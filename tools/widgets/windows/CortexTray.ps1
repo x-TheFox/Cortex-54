@@ -1,5 +1,5 @@
 <#
-  CORTEX-54 tray pill for Windows (read-only). Shows a coloured dot in the notification area; hover for equity,
+  Savant tray pill for Windows (read-only). Shows a coloured dot in the notification area; hover for equity,
   positions, breakers and regime; right-click to open the web terminal or quit. No install, no admin rights.
 
   Setup: create %USERPROFILE%\.cortex54-pill with two lines (worker URL, read-only PILL_TOKEN), then run:

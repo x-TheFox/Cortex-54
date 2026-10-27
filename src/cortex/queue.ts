@@ -4,7 +4,7 @@ import { one, type SqlLike } from "./store.ts";
 /**
  * Job queue for desktop runners (ADR-065). In cloud mode without GitHub (private repo, or a customer with no GitHub
  * at all) the brain still "dispatches" its research, Kronos, dossier and Governor jobs, but into this queue; the
- * user's CORTEX desktop app (or `cortex runner`) claims them over an HMAC-signed endpoint, runs them on its own
+ * user's Savant desktop app (or `savant runner`) claims them over an HMAC-signed endpoint, runs them on its own
  * machine and posts the batches back to /ingest/batch. One unclaimed job per key (like GitHub's concurrency groups);
  * a claim that never reports back is released after `staleMs` so another runner can take it.
  */

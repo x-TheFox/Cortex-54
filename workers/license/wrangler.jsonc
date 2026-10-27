@@ -1,0 +1,16 @@
+{
+  // Savant licence server (ADR-086): checks Whop licence keys and signs machine-bound licence tokens.
+  // Secrets (never in git): WHOP_API_KEY (a Whop account API key), LICENSE_SIGNING_KEY (the publisher Ed25519 key,
+  // PKCS#8 PEM, from scripts/license.ts keygen). Deploy: pnpm deploy:license
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "savant-license",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "vars": {
+    // only memberships of the Savant product count (set after the Whop product exists)
+    "WHOP_PRODUCT_IDS": ""
+  },
+  "ratelimits": [{ "name": "RL", "namespace_id": "5401", "simple": { "limit": 20, "period": 60 } }]
+}

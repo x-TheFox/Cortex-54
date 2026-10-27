@@ -33,13 +33,13 @@ export interface Env {
   GROQ_API_KEY?: string;
   NVIDIA_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
-  /** ADR-072 model pool: the user's own endpoints + preferences as JSON (PoolConfigSchema). Set by `cortex deploy`. */
+  /** ADR-072 model pool: the user's own endpoints + preferences as JSON (PoolConfigSchema). Set by `savant deploy`. */
   LLM_POOL?: string;
   /** "owner/name" of this repo; the brain dispatches its batch workflows there (ADR-032). */
   GITHUB_REPO?: string;
   /** Fine-grained token, this repo only, Actions: read and write. Absent → GitHub's own crons only. */
   GH_DISPATCH_TOKEN?: string;
-  /** ADR-065: "queue" = research jobs wait for a linked CORTEX desktop runner instead of GitHub Actions. */
+  /** ADR-065: "queue" = research jobs wait for a linked Savant desktop runner instead of GitHub Actions. */
   RUNNER_MODE?: string;
   /** HMAC key for web-terminal login links and session cookies (ADR-034). */
   WEB_SESSION_SECRET?: string;

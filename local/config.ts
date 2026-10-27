@@ -7,7 +7,7 @@ import { PoolConfigSchema } from "../src/court/pool.ts";
 import { accountFor, secretBackend } from "./keychain.ts";
 
 /**
- * Local-mode configuration (ADR-064): one JSON file in the CORTEX home (default ~/.cortex54, override with
+ * Local-mode configuration (ADR-064): one JSON file in the Savant home (default ~/.cortex54, override with
  * CORTEX_HOME), readable only by the user. Holds the user's own keys; nothing in it ever leaves the machine except to
  * the provider each key belongs to.
  */
@@ -18,6 +18,8 @@ export const KEY_NAMES = [
   /** ADR-083: the user's live (real-money) Alpaca account; LIVE stays at Stop 0 until they ratify */
   "ALPACA_LIVE_KEY_ID",
   "ALPACA_LIVE_SECRET",
+  /** ADR-086: the licence key from the customer's Whop order (refreshes the machine-bound licence token daily) */
+  "SAVANT_LICENSE_KEY",
   "GEMINI_API_KEY",
   "GROQ_API_KEY",
   "NVIDIA_API_KEY",
@@ -82,13 +84,21 @@ export const LocalConfigSchema = z.object({
   lan: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   /** ADR-076: where keys are kept: this file (mode 600) or the system keychain (macOS Keychain, libsecret, DPAPI) */
   secret_store: z.enum(["file", "keychain"]).default("file"),
-  /** ADR-065: the user's own cloud brain (cortex deploy), which this machine serves as a research runner */
+  /** ADR-065: the user's own cloud brain (savant deploy), which this machine serves as a research runner */
   cloud: z.object({ url: z.string(), worker: z.string(), ingest_hmac: z.string().min(32) }).optional(),
 });
 export type LocalConfig = z.infer<typeof LocalConfigSchema>;
 
+/**
+ * The Savant home (ADR-085): SAVANT_HOME (or the older CORTEX_HOME), else ~/.savant. A computer that already has the
+ * pre-rebrand ~/.cortex54 keeps using it, so nobody's settings, keys or journal move.
+ */
 export function cortexHome(): string {
-  return process.env.CORTEX_HOME || join(homedir(), ".cortex54");
+  const env = process.env.SAVANT_HOME || process.env.CORTEX_HOME;
+  if (env) return env;
+  const legacy = join(homedir(), ".cortex54");
+  const home = join(homedir(), ".savant");
+  return !existsSync(home) && existsSync(legacy) ? legacy : home;
 }
 
 export const configPath = (home = cortexHome()) => join(home, "config.json");

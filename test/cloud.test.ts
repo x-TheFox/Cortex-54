@@ -70,7 +70,7 @@ describe("job queue for desktop runners (ADR-065)", () => {
   });
 });
 
-describe("cortex deploy (ADR-065)", () => {
+describe("savant deploy (ADR-065)", () => {
   const root = process.cwd();
   it("parses the repo's JSONC (URLs inside strings survive) and writes a customer config with no operator ids", () => {
     const tpl = readFileSync("wrangler.jsonc", "utf8");

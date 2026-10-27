@@ -6,7 +6,7 @@
  *   dist/cortexd/public/         the built web terminal
  *   dist/cortexd/migrations/     journal schema
  *   dist/cortexd/research/       the Python research package (run with uv)
- *   dist/cortexd/workers, wrangler.jsonc, config/   only what `cortex deploy` needs
+ *   dist/cortexd/workers, wrangler.jsonc, config/   only what `savant deploy` needs
  *
  * Run with: node dist/cortexd/cortexd.mjs <command>   (CORTEX_ROOT defaults to the bundle's own folder)
  */
@@ -38,6 +38,9 @@ await build({
   // ADR-077: the publisher's licence key is baked in at build time (empty = a build that doesn't check licences)
   define: {
     "process.env.CORTEX_LICENSE_PUBKEY_BUILTIN": JSON.stringify(process.env.CORTEX_LICENSE_PUBKEY ?? ""),
+    // ADR-086: where the app activates Whop licence keys, and the store it links to
+    "process.env.SAVANT_LICENSE_URL_BUILTIN": JSON.stringify(process.env.SAVANT_LICENSE_URL ?? ""),
+    "process.env.SAVANT_STORE_URL_BUILTIN": JSON.stringify(process.env.SAVANT_STORE_URL ?? ""),
   },
 });
 const copy = (from: string, to = from, filter?: (p: string) => boolean) => {
@@ -46,7 +49,7 @@ const copy = (from: string, to = from, filter?: (p: string) => boolean) => {
 copy("public");
 copy("migrations");
 copy("config");
-// Closed-source product build (ADR-066): no TypeScript source ships. `cortex deploy` (own-Cloudflare mode) needs the
+// Closed-source product build (ADR-066): no TypeScript source ships. `savant deploy` (own-Cloudflare mode) needs the
 // worker source, so it only works from a build made with --with-cloud-deploy (internal/advanced use).
 if (process.argv.includes("--with-cloud-deploy")) {
   copy("wrangler.jsonc");

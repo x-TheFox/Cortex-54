@@ -1044,7 +1044,7 @@ describe("court end-to-end (Phase 3)", () => {
       n: 6,
     });
     const card = t.notifier.sent.find(
-      (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ CORTEX COURT"),
+      (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ Savant COURT"),
     );
     const embeds = card?.msg.embeds ?? [];
     const titles = embeds.map((e) => e.title ?? "");
@@ -1230,7 +1230,7 @@ describe("court end-to-end (Phase 3)", () => {
     expect(r3.courtContracts).toBe(1);
     expect(users[0]).toContain("res_1");
     expect(users[0]).toContain("Spot bitcoin ETFs took in $1.1B");
-    const card = t.notifier.sent.find((m) => m.msg.embeds?.[0]?.title?.startsWith("⚖️ CORTEX COURT"));
+    const card = t.notifier.sent.find((m) => m.msg.embeds?.[0]?.title?.startsWith("⚖️ Savant COURT"));
     const brief = card?.msg.embeds?.[1];
     expect(brief?.title).toBe("📚 Research desk briefing — 1 findings · 🟢 1 · 🔴 0");
     expect(JSON.stringify(brief)).toContain("[example.com](https://example.com/etf)");

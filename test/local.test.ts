@@ -69,7 +69,7 @@ describe("local job runner (ADR-064)", () => {
       "--weekly",
     ]);
     expect(jobFor("research.yml", { job: "rm -rf" }, ctx)).toBeNull();
-    // the Python env goes in the CORTEX home, never inside the read-only app bundle (review finding)
+    // the Python env goes in the Savant home, never inside the read-only app bundle (review finding)
     expect(jobFor("research.yml", { job: "world" }, ctx)?.env.UV_PROJECT_ENVIRONMENT).toBe("/h/venv");
     expect(jobFor("other.yml", {}, ctx)).toBeNull();
   });
@@ -99,7 +99,7 @@ describe("local job runner (ADR-064)", () => {
 
 describe("background service plans (ADR-064)", () => {
   const argv = ["/usr/bin/node", "--import", "tsx", "/app/local/cli.ts", "start"];
-  it("launchd keeps it alive and logs to the CORTEX home", () => {
+  it("launchd keeps it alive and logs to the Savant home", () => {
     const p = plan("darwin", argv, { CORTEX_HOME: "/Users/x/.cortex54" }, "/Users/x");
     expect(p.file).toBe("/Users/x/Library/LaunchAgents/com.cortex54.daemon.plist");
     expect(p.content).toContain("<key>KeepAlive</key><true/>");
@@ -283,6 +283,6 @@ describe("agent setup prompt (ADR-073)", () => {
       "link",
       "kill",
     ])
-      expect(AGENT_PROMPT).toContain(`cortex ${sub}`);
+      expect(AGENT_PROMPT).toContain(`savant ${sub}`);
   });
 });

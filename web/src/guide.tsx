@@ -20,7 +20,7 @@ const STEPS: Step[] = [
   {
     title: "Welcome to the cockpit",
     body: [
-      "CORTEX-54 is a robot that buys and sells on its own, starting with $54. Right now it uses a practice account (“paper trading”): the money is pretend, the prices are real.",
+      "Savant is a robot that buys and sells on its own, starting with $54. Right now it uses a practice account (“paper trading”): the money is pretend, the prices are real.",
       "This screen is built like an airliner cockpit. When everything is fine, almost nothing lights up. Light means “look here”.",
       "You never have to approve its trades. Your job is to glance, understand, and usually leave it alone.",
     ],
@@ -47,7 +47,7 @@ const STEPS: Step[] = [
     title: "How much the account is worth",
     body: [
       "The big green number is the account's total value right now: cash plus anything it owns, valued at today's prices.",
-      "SINCE shows the profit or loss since the account started (what it held when CORTEX first connected to it). HWM (high-water mark) is the highest value it has ever reached.",
+      "SINCE shows the profit or loss since the account started (what it held when Savant first connected to it). HWM (high-water mark) is the highest value it has ever reached.",
     ],
     terms: [
       ["Equity", "The total value of the account."],

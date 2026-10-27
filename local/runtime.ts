@@ -45,11 +45,11 @@ import { SimBroker } from "./simbroker.ts";
 import { fileD1, fileSql, type LocalD1 } from "./store.ts";
 
 /**
- * cortexd: the whole CORTEX-54 brain on one machine (ADR-064). Same Brain, same doctrine and constitution, same
+ * cortexd: the whole Savant brain on one machine (ADR-064). Same Brain, same doctrine and constitution, same
  * journal schema; the Durable Object's alarm becomes a timer, D1 becomes a SQLite file, GitHub Actions become local
  * subprocesses, and the router becomes a small HTTP server bound to localhost. Two modes:
  *   demo  – a keyless simulated broker on live public crypto prices (nothing to sign up for);
- *   paper – the user's own Alpaca paper account (CORTEX needs it exclusively: don't share it with a cloud brain).
+ *   paper – the user's own Alpaca paper account (Savant needs it exclusively: don't share it with a cloud brain).
  * A live account can be connected too (ADR-083); it stays at Stop 0 until the user ratifies LIVE autonomy (U8).
  */
 
@@ -454,7 +454,7 @@ export class LocalCortex {
   health(): Record<string, unknown> {
     const last = getKV(this.sql, "last_pulse_at");
     return {
-      name: "CORTEX-54 local",
+      name: "Savant local",
       mode: this.o.cfg.mode,
       now: Date.now(),
       last_pulse_at: last === null ? null : Number(last),
@@ -534,7 +534,7 @@ export class LocalCortex {
     const local = isLoopback(remote);
     if (cfg.lan.enabled && !local && request.method === "POST" && url.pathname.startsWith("/api/settings/"))
       return Response.json(
-        { ok: false, message: "Settings can only be changed on the computer CORTEX runs on." },
+        { ok: false, message: "Settings can only be changed on the computer Savant runs on." },
         { status: 403 },
       );
     if (request.method === "GET" && url.pathname === "/health") return Response.json(this.health());

@@ -1,7 +1,7 @@
 """Equity earnings calendar for the brain's 72 h blackout (ADR-035).
 
 Primary: Nasdaq's public calendar (one keyless request per weekday, full coverage). Backup: FMP free tier
-(partial coverage). Events are merged and filtered to the symbols CORTEX can trade. If both sources fail the job
+(partial coverage). Events are merged and filtered to the symbols Savant can trade. If both sources fail the job
 sends nothing, and the brain's calendar ages out and blocks equity entries (fail closed).
 """
 

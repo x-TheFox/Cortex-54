@@ -10,7 +10,7 @@ import { readLicense } from "./license.ts";
 import { clefNotice, resolveClef } from "./runtime.ts";
 
 /**
- * Health checks in plain words (ADR-073): shared by `cortex doctor` and the app's SETTINGS → HEALTH block, so the
+ * Health checks in plain words (ADR-073): shared by `savant doctor` and the app's SETTINGS → HEALTH block, so the
  * terminal and the app always agree. `ok: false` needs fixing; `warn` works but below full strength.
  */
 export interface Check {
@@ -41,7 +41,7 @@ export async function configChecks(
         name: "Alpaca paper keys",
         ok: false,
         detail: "missing",
-        fix: "Settings → Trading account, or `cortex setup --set ALPACA_PAPER_KEY_ID=… --set ALPACA_PAPER_SECRET=…`.",
+        fix: "Settings → Trading account, or `savant setup --set ALPACA_PAPER_KEY_ID=… --set ALPACA_PAPER_SECRET=…`.",
       });
     else
       try {
@@ -71,7 +71,7 @@ export async function configChecks(
     ok: !built.report.notes.some((n) => n.level === "block"),
     ...(built.report.notes.some((n) => n.level === "warn") ? { warn: true } : {}),
     detail: built.report.notes.map((n) => n.text).join(" "),
-    fix: "Settings → AI models, or `cortex llm add <key>`. Free keys: Google AI Studio and Groq.",
+    fix: "Settings → AI models, or `savant llm add <key>`. Free keys: Google AI Studio and Groq.",
   });
   const clef = clefNotice(resolveClef(cfg, built).label);
   c.push({
@@ -103,7 +103,7 @@ export async function configChecks(
     name: "Kill switch",
     ok: !killed,
     detail: killed ? "ON: the robot is flattened and stopped" : "off",
-    fix: "Re-arm from the tray, or `cortex rearm`, when you mean it.",
+    fix: "Re-arm from the tray, or `savant rearm`, when you mean it.",
   });
   const lic = readLicense(home);
   if (lic.required)
@@ -114,7 +114,7 @@ export async function configChecks(
       detail: lic.ok
         ? `${lic.license.licensee} · ${lic.license.plan}${lic.daysLeft === null ? "" : ` · ${lic.daysLeft} days left`}`
         : `${lic.reason}${cfg.mode === "paper" ? " Paper trading holds new entries (open positions keep their stops)." : " Demo mode works without one."}`,
-      fix: "Install your licence file in SETTINGS, or `cortex license install <file>`.",
+      fix: "Install your licence file in SETTINGS, or `savant license install <file>`.",
     });
   return c;
 }

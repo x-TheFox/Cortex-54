@@ -6,7 +6,7 @@ import { hmacHex } from "../src/lib/hmac.ts";
  * Desktop research runner for a cloud brain (ADR-065). Polls the user's own cloud worker for queued jobs
  * (POST /runner/claim, HMAC-signed with the shared ingest secret) and runs each one locally through the same job
  * runner local mode uses; the job posts its batch straight back to the cloud. Run it from the desktop app or
- * `cortex runner`; when no machine is on, jobs wait (and stale data fails closed, as it always has).
+ * `savant runner`; when no machine is on, jobs wait (and stale data fails closed, as it always has).
  */
 export async function claimOnce(
   url: string,

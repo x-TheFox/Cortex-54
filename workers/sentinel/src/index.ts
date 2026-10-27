@@ -228,7 +228,7 @@ async function cron(env: SentinelEnv, now: number): Promise<void> {
   if (age <= staleAfter) return;
   const minute = new Date(now).getUTCMinutes();
   if ((age >= staleAfter && age < staleAfter + 1) || minute % 15 === 0) {
-    await alert(env, `🚨 SENTINEL: CORTEX heartbeat missing — ${detail}`);
+    await alert(env, `🚨 SENTINEL: Savant heartbeat missing — ${detail}`);
   }
 
   // 3. Brain dead too long with LIVE exposure → flatten LIVE (fail closed, U6).

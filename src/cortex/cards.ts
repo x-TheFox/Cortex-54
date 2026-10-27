@@ -109,7 +109,7 @@ export function equityChartUrl(
       labels: pts.map(() => ""),
       datasets: [
         {
-          label: "CORTEX",
+          label: "Savant",
           data: pts.map((p) => p[1]),
           fill: false,
           pointRadius: 0,
@@ -216,7 +216,7 @@ export function hudMessage(s: StatusView): DiscordMessage {
   return {
     components,
     content:
-      `🧠 **CORTEX-54** · pulse ${age} · budget **${s.budget.mode}** (${s.budget.worst.resource} ${(s.budget.worst.fraction * 100).toFixed(0)}%) · journal #${s.journalHead.seq}${s.outboxPending > 0 ? ` (${s.outboxPending} unflushed)` : ""}` +
+      `🧠 **Savant** · pulse ${age} · budget **${s.budget.mode}** (${s.budget.worst.resource} ${(s.budget.worst.fraction * 100).toFixed(0)}%) · journal #${s.journalHead.seq}${s.outboxPending > 0 ? ` (${s.outboxPending} unflushed)` : ""}` +
       (regimeLine ? `\n🌐 ${regimeLine}` : ""),
     embeds,
   };
@@ -569,7 +569,7 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
     });
   if (s.kronos) docket.push({ name: "🔮 Kronos (low confidence)", value: cut(s.kronos, 300) });
   embeds.push({
-    title: `⚖️ CORTEX COURT — ${s.symbol} (${s.arena})`,
+    title: `⚖️ Savant COURT — ${s.symbol} (${s.arena})`,
     description: `**Matter before the court**\n> ${cut(s.catalyst.headline, 300)}${s.catalyst.url ? `\n[source](${s.catalyst.url})` : ""}`,
     color: COLORS.cyan,
     fields: docket,

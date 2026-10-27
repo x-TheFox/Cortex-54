@@ -25,7 +25,7 @@ import requests
 
 BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 # identifies the agent to the sites it reads; installs can add a contact via CORTEX_USER_AGENT (never a repo URL)
-BOT_UA = os.environ.get("CORTEX_USER_AGENT") or "CORTEX-54 research agent"
+BOT_UA = os.environ.get("CORTEX_USER_AGENT") or "Savant research agent"
 TIMEOUT = 20
 MAX_PAGE_CHARS = 7000
 ALPACA_DATA = "https://data.alpaca.markets"

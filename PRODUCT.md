@@ -21,7 +21,7 @@ govern an autonomous system and must not touch controls casually, because any ma
 
 ## Product Purpose
 
-CORTEX-54 is an autonomous trading agent that trades a $54 paper account (later a $54 live account) entirely on
+Savant is an autonomous trading agent that trades a $54 paper account (later a $54 live account) entirely on
 free tiers. The web terminal is the operator's workstation for three jobs, all first-class:
 1. **Glance** — is it healthy? equity, P&L, breaker band, mode, heartbeat, budget, regime.
 2. **Watch it think** — the funnel (news/screeners → Clef triage → Clef 27B → bull-vs-bear court → contract),
@@ -55,7 +55,7 @@ Discord carries the same controls and the alarm stream.
 
 ## Brand Commitments
 
-Name: CORTEX-54. Existing Discord palette: emerald (#10B981) gains, crimson (#F43F5E) risk, cyan (#38BDF8) model
+Name: Savant. Existing Discord palette: emerald (#10B981) gains, crimson (#F43F5E) risk, cyan (#38BDF8) model
 telemetry, amber/orange for warning bands. Operator voice: terse, factual, no hype.
 
 ## Evidence on Hand

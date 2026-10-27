@@ -3,7 +3,7 @@ import { rowHash } from "../journal/Journal.ts";
 import { sha256Hex } from "../lib/sha256.ts";
 
 /**
- * CORTEX community hub protocol (ADR-068). The hub is the one service the publisher runs; it never sees broker keys
+ * Savant community hub protocol (ADR-068). The hub is the one service the publisher runs; it never sees broker keys
  * and never trades. Agents identify by an Ed25519 key they generate themselves (agent id = first 16 hex of
  * sha256(public key)). Everything an agent sends is signed; every journal row it publishes carries its own hash and
  * its predecessor's, so the hub (and anyone reading the feed) can recompute the hash chain link by link. A

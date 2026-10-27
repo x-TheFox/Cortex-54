@@ -97,7 +97,7 @@ export async function handleHub(req: Request, db: HubDb, now: number): Promise<R
       ? json({ agent: a, record: (await records(db, m[1]))[0] ?? null })
       : json({ error: "no such agent" }, 404);
   }
-  if (p === "" || p === "/v1") return json({ name: "CORTEX hub", version: 1 });
+  if (p === "" || p === "/v1") return json({ name: "Savant hub", version: 1 });
   return json({ error: "not found" }, 404);
 }
 

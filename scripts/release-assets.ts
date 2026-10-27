@@ -42,7 +42,7 @@ for (const f of files) {
   const base = f.split(/[\\/]/).pop() ?? "";
   if (/\.(dmg|msi|deb|rpm|AppImage)$/.test(base) || /-setup\.exe$/.test(base)) {
     const ext = base.match(/(-setup\.exe|\.[A-Za-z]+)$/)?.[1] ?? "";
-    put(f, `CORTEX-54_${version}_${platform}${ext}`);
+    put(f, `Savant_${version}_${platform}${ext}`);
   }
 }
 
@@ -63,8 +63,8 @@ if (updaterSrc && sig) {
       ? ".AppImage"
       : "-setup.exe";
   const name = platform.startsWith("darwin")
-    ? put(updaterSrc, `CORTEX-54_${version}_${platform}${ext}`)
-    : `CORTEX-54_${version}_${platform}${ext}`;
+    ? put(updaterSrc, `Savant_${version}_${platform}${ext}`)
+    : `Savant_${version}_${platform}${ext}`;
   writeFileSync(
     join(outDir, `updater-${platform}.json`),
     JSON.stringify({ platform, name, signature: sig, arch }),

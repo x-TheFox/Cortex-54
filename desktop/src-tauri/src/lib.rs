@@ -1,4 +1,4 @@
-//! CORTEX-54 desktop app (ADR-066). A thin native shell around the local brain:
+//! Savant desktop app (ADR-066). A thin native shell around the local brain:
 //! - starts `cortexd` (the bundled Node runtime + cortexd.mjs) unless one is already running (e.g. the background
 //!   service), and stops the one it started when the app quits;
 //! - opens the cockpit (the same web terminal as the cloud) with a one-time login link;
@@ -24,12 +24,19 @@ use tauri_plugin_updater::UpdaterExt;
 
 struct Daemon(Mutex<Option<Child>>);
 
+/// The Savant home: SAVANT_HOME (or the older CORTEX_HOME), else ~/.savant; an existing pre-rebrand ~/.cortex54
+/// keeps being used (same rule as the brain's `cortexHome()`).
 fn cortex_home() -> PathBuf {
-    if let Ok(h) = std::env::var("CORTEX_HOME") {
-        return PathBuf::from(h);
+    for v in ["SAVANT_HOME", "CORTEX_HOME"] {
+        if let Ok(h) = std::env::var(v) {
+            if !h.is_empty() {
+                return PathBuf::from(h);
+            }
+        }
     }
-    let base = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".into());
-    PathBuf::from(base).join(".cortex54")
+    let base = PathBuf::from(std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".into()));
+    let (home, legacy) = (base.join(".savant"), base.join(".cortex54"));
+    if !home.exists() && legacy.exists() { legacy } else { home }
 }
 
 fn read_config() -> (u16, String) {
@@ -91,7 +98,7 @@ fn cortex_json(p: &Paths, args: &[&str]) -> Option<serde_json::Value> {
 /// Tooltip text, plus the one-line problem (if any) the brain's health checks found.
 fn pill_text(port: u16, token: &str) -> (String, Option<String>) {
     let Some(body) = local_get(port, "/pill", Some(token)) else {
-        return ("CORTEX-54 · offline".into(), Some("The brain isn't answering".into()));
+        return ("Savant · offline".into(), Some("The brain isn't answering".into()));
     };
     let v: serde_json::Value = serde_json::from_str(&body).unwrap_or(serde_json::Value::Null);
     let eq = v["accounts"][0]["equity"].as_f64().map(|e| format!("${e:.2}")).unwrap_or_else(|| "—".into());
@@ -99,7 +106,7 @@ fn pill_text(port: u16, token: &str) -> (String, Option<String>) {
     let age = v["pulse_age_s"].as_i64().map(|a| format!("{a}s")).unwrap_or_else(|| "never".into());
     let state = if v["ok"].as_bool() == Some(true) { "●" } else { "○ stale" };
     let problem = v["problem"].as_str().map(String::from);
-    let line = format!("CORTEX-54 {state} · {eq} · {n} position(s) · pulse {age}");
+    let line = format!("Savant {state} · {eq} · {n} position(s) · pulse {age}");
     match &problem {
         Some(p) => (format!("{line}\n⚠ {p}"), problem),
         None => (line, None),
@@ -195,7 +202,7 @@ pub fn run() {
                 false,
                 None::<&str>,
             )?;
-            let quit = MenuItem::with_id(app, "quit", "Quit CORTEX-54", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Savant", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
                 &[
@@ -211,7 +218,7 @@ pub fn run() {
             )?;
             let tray = TrayIconBuilder::with_id("pill")
                 .icon(app.default_window_icon().cloned().expect("app icon"))
-                .tooltip("CORTEX-54 · starting")
+                .tooltip("Savant · starting")
                 .menu(&menu)
                 .on_menu_event(move |app, e| {
                     let p = paths(app);
@@ -302,7 +309,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building CORTEX-54")
+        .expect("error while building Savant")
         .run(|app, event| {
             if let RunEvent::Exit = event {
                 if let Some(mut c) = app.state::<Daemon>().0.lock().unwrap().take() {

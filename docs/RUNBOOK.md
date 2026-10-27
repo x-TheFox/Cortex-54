@@ -20,7 +20,7 @@
    - Create a server with channels: `command-center`, `pulse-and-briefs`, `bull-vs-bear-court`,
      `live-executions`, `world-intel-stream`, `governor-and-evolution`, `alarms-and-watchdog`,
      `agent-terminal`.
-   - Create app **CORTEX** (bot, `applications.commands`) → interactions URL
+   - Create app **Savant** (bot, `applications.commands`) → interactions URL
      `https://cortex.<subdomain>.workers.dev/discord/interactions`.
    - Create app **SENTINEL** → interactions URL `https://cortex-sentinel.<subdomain>.workers.dev/discord/interactions`.
    - Create a webhook in `alarms-and-watchdog` (sentinel alerts) and `governor-and-evolution` (Actions).

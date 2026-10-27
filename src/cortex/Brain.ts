@@ -412,7 +412,7 @@ export interface StatusView {
     brokerEquityUsd: number | null;
     modeledCostUsd: number;
     hwmUsd: number | null;
-    /** ADR-081: what this account started from (its equity when CORTEX first saw it, or since the last fresh start) */
+    /** ADR-081: what this account started from (its equity when Savant first saw it, or since the last fresh start) */
     startUsd: number;
     rung: RungName;
     autonomyStop: number;
@@ -1106,7 +1106,7 @@ export class Brain {
 
     // Fills and fees, oldest first.
     let lastTs = cursor;
-    // First sync of an account: history before CORTEX existed isn't ours. Start the cursor now instead of
+    // First sync of an account: history before Savant existed isn't ours. Start the cursor now instead of
     // replaying (and alerting on) every past fill.
     const backlog = cursor === null ? activities : [];
     if (cursor === null) {
@@ -1222,7 +1222,7 @@ export class Brain {
       issues.push(`orphan position ${symbol} at broker`);
       await this.alertOnce(
         `orphan-pos:${account}:${symbol}`,
-        `🧩 ${account}: broker holds ${bp.qty} ${symbol} that CORTEX didn't open. Entries blocked until it's gone (close it in Alpaca or /flatten); CORTEX resumes by itself.`,
+        `🧩 ${account}: broker holds ${bp.qty} ${symbol} that Savant didn't open. Entries blocked until it's gone (close it in Alpaca or /flatten); Savant resumes by itself.`,
       );
     }
 
@@ -1384,7 +1384,7 @@ export class Brain {
       this.journal.append(account, "UNKNOWN_FILL", act.order_id ?? null, act, now);
       void this.alertOnce(
         `unknown-fill:${act.id}`,
-        `🧩 ${account}: fill for an order CORTEX didn't place (${act.symbol} ${act.side} ${act.qty}).`,
+        `🧩 ${account}: fill for an order Savant didn't place (${act.symbol} ${act.side} ${act.qty}).`,
       );
       return;
     }

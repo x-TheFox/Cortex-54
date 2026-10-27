@@ -1,4 +1,4 @@
-# How customers get and run CORTEX-54
+# How customers get and run Savant
 
 Decision record for the commercial version (operator, 2026-10-26). The short version: **we ship software, the customer
 runs it.** We host exactly one service, the community hub, and it never touches anyone's broker keys or money.
@@ -7,9 +7,9 @@ runs it.** We host exactly one service, the community hub, and it never touches 
 
 | Piece | What it is | Who runs it |
 |---|---|---|
-| **CORTEX-54 desktop app** (macOS, Windows, Linux) | The whole brain, the cockpit and a tray pill in one installer. Starts in a keyless demo on live crypto prices; paper mode with the customer's own free Alpaca paper account. Research, Kronos and the Governor run on the same machine. | The customer, on their computer |
-| **Headless image** (Docker / the same bundle + `cortex start`) | For a home server, NAS or a small VPS that stays on. Same brain, same dashboard over the network (put TLS in front). | The customer, wherever they like (docs/SELF_HOSTING.md) |
-| **Setup prompt** (docs/SETUP_WITH_AN_AGENT.md) | Paste into any coding agent; it installs, asks for keys, runs `cortex doctor` until green, starts the service. | The customer's own agent |
+| **Savant desktop app** (macOS, Windows, Linux) | The whole brain, the cockpit and a tray pill in one installer. Starts in a keyless demo on live crypto prices; paper mode with the customer's own free Alpaca paper account. Research, Kronos and the Governor run on the same machine. | The customer, on their computer |
+| **Headless image** (Docker / the same bundle + `savant start`) | For a home server, NAS or a small VPS that stays on. Same brain, same dashboard over the network (put TLS in front). | The customer, wherever they like (docs/SELF_HOSTING.md) |
+| **Setup prompt** (docs/SETUP_WITH_AN_AGENT.md) | Paste into any coding agent; it installs, asks for keys, runs `savant doctor` until green, starts the service. | The customer's own agent |
 | **Community hub** | Signed track records, leaderboard, follow other agents, memory packs. | **Us** (one Worker + D1; no keys, no orders) |
 | **License + updates** | Signed licence file checked offline; signed update feed from GitHub releases (ADR-077). | Us (built; needs the publisher keys, see below) |
 
@@ -18,7 +18,7 @@ runs it.** We host exactly one service, the community hub, and it never touches 
 - **Hosting every customer's brain** (SaaS) means holding their broker keys and running their trading: liability,
   security burden, and in many places regulated activity. It also costs us money per customer.
 - **GitHub Actions per customer** needs our source in their repo (or ours running their jobs): neither works closed.
-- **Deploying into their Cloudflare account** (`cortex deploy`) uploads the worker bundle to an account they own, so
+- **Deploying into their Cloudflare account** (`savant deploy`) uploads the worker bundle to an account they own, so
   they can download it. It stays as an *advanced, documented* option for technical buyers, not the default path.
 - **On their machine** the code is also on their machine. Minified bundles plus a license check raise the bar; the
   real moat is the hub, the community, the steady stream of updates and the research quality, not secrecy.
@@ -27,7 +27,7 @@ runs it.** We host exactly one service, the community hub, and it never touches 
 
 1. Leave the desktop app running (it hides to the tray; the brain keeps pulsing), or
 2. run the headless image on anything that's always on (a $5 VPS, a Raspberry Pi 5, a NAS), or
-3. advanced: `cortex deploy` to their own Cloudflare account; their desktop becomes the research runner.
+3. advanced: `savant deploy` to their own Cloudflare account; their desktop becomes the research runner.
 
 ## What's in each install today
 
@@ -52,8 +52,8 @@ runs it.** We host exactly one service, the community hub, and it never touches 
 - **Apple notarization (wired, ADR-079):** add the six `APPLE_*` secrets (Developer ID certificate + notarization
   login) and releases come out signed and notarized. Needs an Apple Developer account.
 - **Not planned: a Windows code-signing certificate** (operator decision); SmartScreen asks once on the installers.
-- **Landing page + demo cockpit (ADR-084):** https://x-thefox.github.io/Cortex-54/ (the product page) with the demo
-  cockpit at https://x-thefox.github.io/Cortex-54/demo/ (GitHub Pages, every release). The page has no prices: pricing
+- **Landing page + demo cockpit (ADR-084):** https://x-thefox.github.io/Savant/ (the product page) with the demo
+  cockpit at https://x-thefox.github.io/Savant/demo/ (GitHub Pages, every release). The page has no prices: pricing
   is still an operator decision.
 - **The repo going private:** when it does, GitHub Actions minutes stop being free; the operator's own deployment
   should switch to `RUNNER_MODE=queue` with a desktop runner (ADR-065), which needs no Actions at all.

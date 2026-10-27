@@ -98,7 +98,7 @@ export const HOT_SCHEMA: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS resting (contract_id TEXT NOT NULL, account TEXT NOT NULL, symbol TEXT NOT NULL,
      until_at INTEGER NOT NULL, created_at INTEGER NOT NULL, checks INTEGER NOT NULL DEFAULT 0, why TEXT NOT NULL,
      PRIMARY KEY (contract_id, account))`,
-  // v8: job queue for desktop runners (ADR-065): research jobs a linked CORTEX app claims instead of GitHub Actions
+  // v8: job queue for desktop runners (ADR-065): research jobs a linked Savant app claims instead of GitHub Actions
   `CREATE TABLE IF NOT EXISTS job_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, workflow TEXT NOT NULL, key TEXT NOT NULL,
      inputs_json TEXT NOT NULL, created_at INTEGER NOT NULL, claimed_at INTEGER, claimed_by TEXT)`,
   // v8: journal rows waiting to be published to the community hub (ADR-068)

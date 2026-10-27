@@ -36,7 +36,7 @@ import { deploy, verifyDeploy } from "./deploy.ts";
 import { type Check, configChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
 import { accountFor, secretBackend } from "./keychain.ts";
-import { installLicense, readLicense } from "./license.ts";
+import { activateKey, installLicense, readLicense, refreshLicense, releaseKey } from "./license.ts";
 import { applyPack, exportPack, loadLocalScar, mergeScar, stagePack } from "./memory.ts";
 import { claimOnce } from "./runner.ts";
 import { clefNotice, LocalCortex, resolveClef } from "./runtime.ts";
@@ -45,24 +45,24 @@ import { LocalSettings, mergeEndpoints } from "./settings.ts";
 import { fileSql } from "./store.ts";
 
 /**
- * `cortex` — the CORTEX-54 command line (ADR-064). Every command has a plain-text and a `--json` form so a human or
+ * `cortex` — the Savant command line (ADR-064). Every command has a plain-text and a `--json` form so a human or
  * an AI agent can drive setup end to end (docs/SETUP_WITH_AN_AGENT.md).
  *
- *   cortex setup [--mode demo|paper] [--set KEY=VALUE ...] [--yes]   create or update ~/.cortex54/config.json
- *   cortex doctor [--json]                                           check everything, say exactly what to fix
- *   cortex start                                                     run the brain + web terminal (foreground)
- *   cortex demo [--minutes N]                                        keyless demo in a throwaway home
- *   cortex link                                                      one-time login link for the web terminal
- *   cortex service install|uninstall|print                           run at login, restart on crash
- *   cortex kill [reason] | cortex rearm                              local kill switch (blocks all entries)
- *   cortex keys                                                      list which key names are set (never values)
- *   cortex deploy [--name cortex]                                    deploy brain + sentinel to YOUR Cloudflare account
- *   cortex runner                                                    run the cloud brain's research jobs on this machine
- *   cortex hub keygen [--name N] | hub id | hub follow <agent> | hub leaderboard     community hub (ADR-068)
- *   cortex memory export [--title T] [--publish] | memory import <file|pack-id> | memory apply <id>
- *   cortex backup [--keys] [--out FILE] | restore FILE                encrypted backup (passphrase from CORTEX_PASSPHRASE or a prompt)
- *   cortex keychain on|off|status                                    keep keys in the system keychain instead of config.json
- *   cortex reset --yes                                               stop the service and delete everything in the CORTEX home
+ *   savant setup [--mode demo|paper] [--set KEY=VALUE ...] [--yes]   create or update ~/.cortex54/config.json
+ *   savant doctor [--json]                                           check everything, say exactly what to fix
+ *   savant start                                                     run the brain + web terminal (foreground)
+ *   savant demo [--minutes N]                                        keyless demo in a throwaway home
+ *   savant link                                                      one-time login link for the web terminal
+ *   savant service install|uninstall|print                           run at login, restart on crash
+ *   savant kill [reason] | savant rearm                              local kill switch (blocks all entries)
+ *   savant keys                                                      list which key names are set (never values)
+ *   savant deploy [--name cortex]                                    deploy brain + sentinel to YOUR Cloudflare account
+ *   savant runner                                                    run the cloud brain's research jobs on this machine
+ *   savant hub keygen [--name N] | hub id | hub follow <agent> | hub leaderboard     community hub (ADR-068)
+ *   savant memory export [--title T] [--publish] | memory import <file|pack-id> | memory apply <id>
+ *   savant backup [--keys] [--out FILE] | restore FILE                encrypted backup (passphrase from CORTEX_PASSPHRASE or a prompt)
+ *   savant keychain on|off|status                                    keep keys in the system keychain instead of config.json
+ *   savant reset --yes                                               stop the service and delete everything in the Savant home
  */
 
 // CORTEX_ROOT points at the app's bundled resources (desktop app / packaged builds); from source it's the repo
@@ -103,7 +103,7 @@ async function doctor(home: string): Promise<Check[]> {
         name: "config",
         ok: false,
         detail: String(e).slice(0, 200),
-        fix: "Run `cortex setup` to rewrite it.",
+        fix: "Run `savant setup` to rewrite it.",
       });
       return undefined;
     }
@@ -113,7 +113,7 @@ async function doctor(home: string): Promise<Check[]> {
       name: "config",
       ok: false,
       detail: `no config in ${home}`,
-      fix: "Run `cortex setup --mode demo --yes` (no keys needed) or `cortex setup` for paper trading.",
+      fix: "Run `savant setup --mode demo --yes` (no keys needed) or `savant setup` for paper trading.",
     });
   c.push({
     name: "web app",
@@ -123,18 +123,21 @@ async function doctor(home: string): Promise<Check[]> {
   });
   if (cfg) {
     const free = await portFree(cfg.port, cfg.bind);
-    // a busy port is fine when it's this CORTEX answering there
+    // a busy port is fine when it's this Savant answering there
     const ours =
       !free &&
       (await fetch(`http://${cfg.bind === "0.0.0.0" ? "127.0.0.1" : cfg.bind}:${cfg.port}/health`, {
         signal: AbortSignal.timeout(3_000),
       })
-        .then(async (r) => String(((await r.json()) as { name?: string }).name ?? "").startsWith("CORTEX-54"))
+        .then(
+          async (r) =>
+            String(((await r.json()) as { name?: string }).name ?? "").match(/^(Savant|CORTEX-54)/) !== null,
+        ) // an older app on this port counts too
         .catch(() => false));
     c.push({
       name: "port",
       ok: free || ours,
-      detail: ours ? `${cfg.bind}:${cfg.port} (CORTEX is running there)` : `${cfg.bind}:${cfg.port}`,
+      detail: ours ? `${cfg.bind}:${cfg.port} (Savant is running there)` : `${cfg.bind}:${cfg.port}`,
       fix: "Another program uses this port; change `port` in config.json.",
     });
     c.push(...(await configChecks(cfg, home)));
@@ -156,7 +159,7 @@ async function setup(home: string): Promise<void> {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const ask = async (q: string, d = "") => (await rl.question(`${q}${d ? ` [${d}]` : ""}: `)).trim() || d;
     console.log(
-      "CORTEX-54 setup — press Enter to keep a value. Keys stay on this machine (config.json, mode 600).\n",
+      "Savant setup — press Enter to keep a value. Keys stay on this machine (config.json, mode 600).\n",
     );
     const m = await ask(
       "Mode: demo (no keys, simulated broker) or paper (your Alpaca paper account)",
@@ -186,7 +189,7 @@ async function setup(home: string): Promise<void> {
   }
   const p = saveConfig(cfg, home);
   out(
-    `Saved ${p}\nMode: ${cfg.mode} · keys: ${keyNames(cfg).join(", ") || "none"}\nNext: cortex doctor, then cortex start`,
+    `Saved ${p}\nMode: ${cfg.mode} · keys: ${keyNames(cfg).join(", ") || "none"}\nNext: savant doctor, then savant start`,
     {
       ok: true,
       path: p,
@@ -240,7 +243,7 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
       unwatchFile(configPath(home));
       await c.stop().catch(() => undefined);
       wipeHome(home);
-      console.log("[reset] CORTEX was reset on this computer.");
+      console.log("[reset] Savant was reset on this computer.");
       process.exit(0);
     },
     // ADR-071: apply saved settings in-process (same port, same login session secret)
@@ -265,7 +268,7 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
   });
   c = new LocalCortex({ home, root: ROOT, cfg, settings });
   await c.start();
-  // ADR-073: changes made outside the app (an agent running `cortex llm add`, `cortex setup --set …`) apply live
+  // ADR-073: changes made outside the app (an agent running `savant llm add`, `savant setup --set …`) apply live
   let seen = JSON.stringify(cfg);
   watchFile(configPath(home), { interval: 1500 }, () => {
     try {
@@ -277,9 +280,18 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
       /* half-written file: the next tick reads it whole */
     }
   });
+  // ADR-086: keep a Whop licence fresh (daily; a lapsed purchase reaches the app within a day while online)
+  const refresh = () =>
+    void refreshLicense(home, cfg.keys.SAVANT_LICENSE_KEY)
+      .then((r) => {
+        if (r === "renewed" || r === "revoked") console.log(`[licence] ${r}`);
+      })
+      .catch(() => undefined);
+  refresh();
+  setInterval(refresh, 3 * 3_600_000).unref();
   const link = await c.loginLink();
   out(
-    `CORTEX-54 ${cfg.mode} mode running at ${c.url()}\nWeb app (single-use login, 10 min): ${link}\nStop with Ctrl+C.`,
+    `Savant ${cfg.mode} mode running at ${c.url()}\nWeb app (single-use login, 10 min): ${link}\nStop with Ctrl+C.`,
     {
       ok: true,
       url: c.url(),
@@ -329,7 +341,7 @@ async function main(): Promise<void> {
     }
     case "start": {
       const cfg = loadConfig(home);
-      if (!cfg) throw new Error("no config: run `cortex setup` first (or `cortex demo`)");
+      if (!cfg) throw new Error("no config: run `savant setup` first (or `savant demo`)");
       return start(home, cfg);
     }
     case "demo": {
@@ -372,7 +384,7 @@ async function main(): Promise<void> {
     }
     case "kill": {
       writeFileSync(join(home, "KILLED"), `${new Date().toISOString()} ${args.slice(1).join(" ")}\n`);
-      return out("Kill switch set: no new entries until `cortex rearm`. Positions keep their stops.", {
+      return out("Kill switch set: no new entries until `savant rearm`. Positions keep their stops.", {
         ok: true,
         killed: true,
       });
@@ -382,7 +394,7 @@ async function main(): Promise<void> {
       return out("Kill switch cleared.", { ok: true, killed: false });
     case "deploy": {
       const cfg = loadConfig(home);
-      if (!cfg) throw new Error("no config: run `cortex setup` first");
+      if (!cfg) throw new Error("no config: run `savant setup` first");
       const name = opt("name") ?? cfg.cloud?.worker ?? "cortex";
       const r = deploy({
         root: ROOT,
@@ -407,13 +419,13 @@ async function main(): Promise<void> {
         : { healthy: false, rolledBack: false, detail: "no URL in the deploy output" };
       if (!v.healthy) process.exitCode = 1;
       return out(
-        `${v.healthy ? "Deployed" : "Deploy FAILED its health check"} ${name}: ${r.url}\n${v.detail}\nSentinel: ${r.sentinelUrl}\nResearch jobs wait for this machine: run \`cortex runner\` (or \`cortex service install\`).`,
+        `${v.healthy ? "Deployed" : "Deploy FAILED its health check"} ${name}: ${r.url}\n${v.detail}\nSentinel: ${r.sentinelUrl}\nResearch jobs wait for this machine: run \`savant runner\` (or \`savant service install\`).`,
         { ok: v.healthy, ...r, verify: v, cloud: { url: r.cloud.url, worker: r.cloud.worker } },
       );
     }
     case "runner": {
       const cfg = loadConfig(home);
-      if (!cfg?.cloud?.url) throw new Error("no cloud brain linked: run `cortex deploy` first");
+      if (!cfg?.cloud?.url) throw new Error("no cloud brain linked: run `savant deploy` first");
       const cloud = cfg.cloud;
       const jobs = new LocalJobs({
         researchDir: join(ROOT, "research"),
@@ -451,7 +463,7 @@ async function main(): Promise<void> {
           { ok: true, agent_id: k.agentId },
         );
       }
-      if (!cfg.keys.HUB_AGENT_KEY) throw new Error("no agent key: run `cortex hub keygen` first");
+      if (!cfg.keys.HUB_AGENT_KEY) throw new Error("no agent key: run `savant hub keygen` first");
       const id = agentIdOf(await publicKeyOf(cfg.keys.HUB_AGENT_KEY));
       if (sub === "id") return out(id, { agent_id: id });
       if (sub === "follow") {
@@ -467,20 +479,20 @@ async function main(): Promise<void> {
         const lb = await (await fetch(`${url.replace(/\/$/, "")}/v1/leaderboard`)).json();
         return out(JSON.stringify(lb, null, 2), lb);
       }
-      throw new Error("cortex hub keygen | id | follow <agent> | leaderboard");
+      throw new Error("savant hub keygen | id | follow <agent> | leaderboard");
     }
     case "memory": {
       const cfg = loadConfig(home);
       if (!cfg) throw new Error("no config");
       const sub = args[1];
       if (sub === "export") {
-        if (!cfg.keys.HUB_AGENT_KEY) throw new Error("no agent key: run `cortex hub keygen` first");
+        if (!cfg.keys.HUB_AGENT_KEY) throw new Error("no agent key: run `savant hub keygen` first");
         const sql = fileSql(join(home, "hot.sqlite"));
         const pack = await exportPack(
           sql,
           mergeScar(SCAR_TISSUE, loadLocalScar(home)),
           cfg.keys.HUB_AGENT_KEY,
-          opt("title") ?? "CORTEX memory",
+          opt("title") ?? "Savant memory",
           opt("description") ?? "",
           Date.now(),
         );
@@ -511,7 +523,7 @@ async function main(): Promise<void> {
         } else raw = JSON.parse((await import("node:fs")).readFileSync(src, "utf8"));
         const st = await stagePack(home, raw);
         return out(
-          `Staged pack ${st.id} from agent ${st.author}: ${st.rules} scar rule(s), ${st.beliefs} belief(s).\nNothing changed yet. Review ${join(home, "proposals", `${st.id}.json`)}, then: cortex memory apply ${st.id}`,
+          `Staged pack ${st.id} from agent ${st.author}: ${st.rules} scar rule(s), ${st.beliefs} belief(s).\nNothing changed yet. Review ${join(home, "proposals", `${st.id}.json`)}, then: savant memory apply ${st.id}`,
           { ok: true, ...st },
         );
       }
@@ -523,12 +535,12 @@ async function main(): Promise<void> {
           { ok: true, ...r },
         );
       }
-      throw new Error("cortex memory export | import <file|pack-id> | apply <id>");
+      throw new Error("savant memory export | import <file|pack-id> | apply <id>");
     }
     case "support": {
       // ADR-073: a redacted diagnostics file to send for help (no keys, no secrets)
       const cfg = loadConfig(home);
-      if (!cfg) throw new Error("no config: run `cortex setup` first");
+      if (!cfg) throw new Error("no config: run `savant setup` first");
       const built = buildPool(DOCTRINE, buildProviders(cfg.keys), cfg.llm);
       const s = new LocalSettings({
         home,
@@ -544,7 +556,7 @@ async function main(): Promise<void> {
     case "llm": {
       // ADR-072: the model pool from the command line (what an agent uses to set things up)
       let cfg = loadConfig(home);
-      if (!cfg) throw new Error("no config: run `cortex setup --mode demo --yes` first");
+      if (!cfg) throw new Error("no config: run `savant setup --mode demo --yes` first");
       const sub = args[1] ?? "list";
       const report = () =>
         buildPool(DOCTRINE, buildProviders(cfg?.keys ?? {}), cfg?.llm ?? newConfig().llm).report;
@@ -565,7 +577,7 @@ async function main(): Promise<void> {
         const input = args[2];
         if (!input)
           throw new Error(
-            "cortex llm add <key-or-url> [--url U] [--format openai|anthropic] [--models a,b] [--tier free|paid|local] [--name N]",
+            "savant llm add <key-or-url> [--url U] [--format openai|anthropic] [--models a,b] [--tier free|paid|local] [--name N]",
           );
         const ask = async (q: string, d = "") => {
           if (!process.stdin.isTTY) throw new Error(`${q}: pass it as a flag (non-interactive)`);
@@ -594,7 +606,7 @@ async function main(): Promise<void> {
         const id = args[2];
         const endpoints = cfg.llm.endpoints.filter((e) => e.id !== id);
         if (endpoints.length === cfg.llm.endpoints.length)
-          throw new Error(`no endpoint ${id} (cortex llm list --json shows ids)`);
+          throw new Error(`no endpoint ${id} (savant llm list --json shows ids)`);
         saveConfig({ ...cfg, llm: { ...cfg.llm, endpoints } }, home);
         return out(`Removed ${id}.`, { ok: true });
       }
@@ -620,7 +632,7 @@ async function main(): Promise<void> {
         );
       }
       throw new Error(
-        "cortex llm list | add <key-or-url> | remove <id> | models <id-or-url> | prefs [--prefer free_first|paid_first|mixed] [--round-robin on|off] [--same-model yes|no]",
+        "savant llm list | add <key-or-url> | remove <id> | models <id-or-url> | prefs [--prefer free_first|paid_first|mixed] [--round-robin on|off] [--same-model yes|no]",
       );
     }
     case "backup": {
@@ -647,9 +659,9 @@ async function main(): Promise<void> {
     }
     case "restore": {
       const src = args[1];
-      if (!src) throw new Error("cortex restore <backup-file>");
+      if (!src) throw new Error("savant restore <backup-file>");
       const b = openBackup(readFileSync(src, "utf8"), await passphrase("Passphrase"));
-      if (await running(home)) throw new Error("CORTEX is running: quit the app (or stop the service) first");
+      if (await running(home)) throw new Error("Savant is running: quit the app (or stop the service) first");
       const next = restoreInto(home, b, loadConfig(home));
       saveConfig(next, home);
       return out(`Restored the backup from ${b.madeAt} into ${home} (${next.mode} mode).`, {
@@ -661,6 +673,26 @@ async function main(): Promise<void> {
     }
     case "license": {
       const sub = args[1] ?? "status";
+      if (sub === "activate") {
+        // ADR-086: the licence key from the Whop order
+        const key = args[2];
+        if (!key) throw new Error("savant license activate <licence-key>");
+        const r = await activateKey(home, key, { app: "cli" });
+        if (r.ok) {
+          const cfg = loadConfig(home);
+          if (cfg) saveConfig(applyKeys(cfg, [`SAVANT_LICENSE_KEY=${key.trim()}`]), home);
+        }
+        if (!r.ok) process.exitCode = 1;
+        return out(r.message, r);
+      }
+      if (sub === "release") {
+        const cfg = loadConfig(home);
+        const key = cfg?.keys.SAVANT_LICENSE_KEY;
+        if (!key) throw new Error("no licence key saved on this computer");
+        const r = await releaseKey(home, key);
+        if (r.ok && cfg) saveConfig(applyKeys(cfg, ["SAVANT_LICENSE_KEY="]), home);
+        return out(r.message, r);
+      }
       if (sub === "install") {
         const st = installLicense(home, readFileSync(args[2] ?? "", "utf8"));
         return out(
@@ -702,13 +734,13 @@ async function main(): Promise<void> {
         saveConfig({ ...cfg, secret_store: "file" }, home);
         return out("Keys moved back to config.json (mode 600).", { ok: true });
       }
-      throw new Error("cortex keychain on | off | status");
+      throw new Error("savant keychain on | off | status");
     }
     case "reset": {
       if (!flag("yes"))
-        throw new Error("this deletes every setting, key and journal in the CORTEX home: add --yes");
+        throw new Error("this deletes every setting, key and journal in the Savant home: add --yes");
       if (await running(home))
-        throw new Error("CORTEX is running: quit the app first (or use Settings → Reset)");
+        throw new Error("Savant is running: quit the app first (or use Settings → Reset)");
       const self = process.argv[1] ?? "";
       const argv = self.endsWith(".mjs")
         ? [process.execPath, self, "start"]
@@ -727,15 +759,15 @@ async function main(): Promise<void> {
     }
     default:
       console.log(
-        "cortex setup | doctor | start | demo | link | support | llm list|add|remove|models|prefs | backup | restore | keychain | reset | service install|uninstall|print | kill | rearm | keys   (--json for machine output)",
+        "savant setup | doctor | start | demo | link | support | llm list|add|remove|models|prefs | backup | restore | keychain | reset | service install|uninstall|print | kill | rearm | keys   (--json for machine output)",
       );
   }
 }
 
-/** Delete the CORTEX home and its keychain item (reset). Refuses anything that isn't a CORTEX home. */
+/** Delete the Savant home and its keychain item (reset). Refuses anything that isn't a Savant home. */
 function wipeHome(home: string): void {
   if (!existsSync(configPath(home)) && !existsSync(join(home, "hot.sqlite")))
-    throw new Error(`${home} doesn't look like a CORTEX home`);
+    throw new Error(`${home} doesn't look like a Savant home`);
   try {
     secretBackend(home).del(accountFor(home));
   } catch {
@@ -792,7 +824,7 @@ async function modelsPrompt(
   return cfg;
 }
 
-/** One key or URL → a built-in key or a new endpoint (shared by setup and `cortex llm add`). */
+/** One key or URL → a built-in key or a new endpoint (shared by setup and `savant llm add`). */
 async function addFromInput(
   cfg: LocalConfig,
   input: string,

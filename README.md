@@ -1,4 +1,4 @@
-# CORTEX-54
+# Savant
 
 An autonomous trading agent that runs at **$0/month** on free tiers (Cloudflare Workers Free, GitHub Actions,
 free LLM APIs). It trades a $54 Alpaca paper account and a $54 real account in lockstep and is controlled
