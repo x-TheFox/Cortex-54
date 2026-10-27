@@ -17,7 +17,9 @@ use std::time::Duration;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, RunEvent, WindowEvent};
+use tauri::webview::NewWindowResponse;
+use tauri::{Manager, RunEvent, Url, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
 
 struct Daemon(Mutex<Option<Child>>);
@@ -112,6 +114,23 @@ fn packaged() -> bool {
         .unwrap_or(false)
 }
 
+/// The cockpit itself: the app's bundled page and the local brain. Everything else is an outside link.
+fn is_local(u: &Url) -> bool {
+    match u.scheme() {
+        "tauri" | "about" | "data" | "blob" | "asset" => true,
+        "http" | "https" => matches!(u.host_str(), Some("127.0.0.1" | "localhost" | "tauri.localhost")),
+        _ => false,
+    }
+}
+
+/// Outside links (key pages, docs, Alpaca, ntfy) open in the user's own browser, never inside the app window,
+/// which can't open new windows anyway (ADR-082). Only web and mail links; anything else is ignored.
+fn open_outside(app: &tauri::AppHandle, u: &Url) {
+    if matches!(u.scheme(), "http" | "https" | "mailto") {
+        let _ = app.opener().open_url(u.as_str(), None::<&str>);
+    }
+}
+
 async fn tokio_sleep(d: Duration) {
     // no tokio dependency of our own: a blocking sleep on tauri's blocking pool
     let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(d)).await;
@@ -120,9 +139,28 @@ async fn tokio_sleep(d: Duration) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_opener::init())
         .manage(Daemon(Mutex::new(None)))
         .setup(|app| {
             let handle = app.handle().clone();
+            // the main window, built here (not from config) so links can leave for the system browser
+            if let Some(cfg) = app.config().app.windows.iter().find(|w| w.label == "main").cloned() {
+                let (nav, popup) = (handle.clone(), handle.clone());
+                WebviewWindowBuilder::from_config(&handle, &cfg)?
+                    .on_navigation(move |u| {
+                        if is_local(u) {
+                            true
+                        } else {
+                            open_outside(&nav, u);
+                            false
+                        }
+                    })
+                    .on_new_window(move |u, _| {
+                        open_outside(&popup, &u);
+                        NewWindowResponse::Deny
+                    })
+                    .build()?;
+            }
             let p = paths(&handle);
             if !cortex_home().join("config.json").exists() {
                 // first run: a keyless demo, so the app shows something real before any signup
@@ -272,4 +310,22 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_local;
+    use tauri::Url;
+
+    #[test]
+    fn outside_links_leave_the_app() {
+        let u = |s: &str| Url::parse(s).unwrap();
+        assert!(is_local(&u("http://127.0.0.1:8754/#login=x")));
+        assert!(is_local(&u("http://localhost:8754/")));
+        assert!(is_local(&u("tauri://localhost/index.html")));
+        assert!(!is_local(&u("https://aistudio.google.com/apikey")));
+        assert!(!is_local(&u("https://app.alpaca.markets/signup")));
+        assert!(!is_local(&u("http://127.0.0.1.evil.example/")));
+        assert!(!is_local(&u("file:///etc/passwd")));
+    }
 }

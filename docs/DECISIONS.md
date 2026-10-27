@@ -1087,3 +1087,11 @@ cash-only", which sets `max_margin_multiplier: "1"` and `no_shorting: true` at A
 the user presses it. The free-tier meter has a scope: the cloud meters every Workers Free quota; local mode meters only
 the user's own Cloudflare AI allowance when Clef runs there, and nothing when an LLM stands in; the STS page, the
 status memo and the guide say which.
+
+## ADR-082 — Outside links open in the system browser (2026-10-27)
+**Context:** in the desktop app, the setup guide's links (key pages, Alpaca, ntfy, Cloudflare) did nothing: they open
+a new tab, and the app's window can't open windows.
+**Decision:** the shell builds the main window itself with navigation and new-window handlers: the cockpit (the
+bundled page and the local brain on 127.0.0.1 / localhost) stays in the app; every other http(s) or mailto link opens
+in the user's default browser (tauri-plugin-opener, called from Rust, so the page gets no new permissions); anything
+else is ignored. A unit test pins which URLs count as local (`127.0.0.1.evil.example` doesn't).
