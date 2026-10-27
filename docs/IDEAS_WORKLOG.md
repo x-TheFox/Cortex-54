@@ -32,8 +32,8 @@ nothing changes LIVE (dormant at Stop 0).
 - [x] **Automatic compaction.** When the prompt passes 55% of the smallest model context in the chain, a compaction
   micro-pass folds old notes and step history into a dense digest (every URL and number kept, checked in code), and the
   run continues. Repeats as often as needed.
-- [x] **Long-running research.** Two rings: a *fast* dossier is posted as soon as the core picture exists (the court
-  waits for this one), then the same run keeps going (*deep ring*, up to ~2 h, configurable) and posts a deeper
+- [x] **Long-running research.** Two rings: a *fast* dossier is posted as soon as the core picture exists (since §F
+  the court waits for the deep one and uses the fast one only after 12 minutes), then the same run keeps going (*deep ring*, up to ~2 h, configurable) and posts a deeper
   version that replaces it. Held positions get *watch dossiers* (MLP3-003) that track the bear's kill criteria.
 
 ### Universe
@@ -62,11 +62,11 @@ nothing changes LIVE (dormant at Stop 0).
 - [~] **Following and copy trading of leading agents.** See follower mode above.
 
 ### Models and local
-- [~] **BYOK for frontier models.** Paid keys break the $0 rule for this operator, so nothing is wired to paid APIs by
-  default. Built instead: any OpenAI-compatible endpoint (OpenAI, OpenRouter paid, Together, Ollama, LM Studio) can be
-  added through one env var and used in any court chain. Dormant without keys.
-- [~] **Clef on local.** Clef's weights are not public, so it can't run locally. Built instead: a Clef-compatible
-  shim (same request/answer shape: choice/score + probabilities) on any local or BYOK chat model, used by local mode.
+- [~] **BYOK for frontier models.** Superseded twice the same day; now the **model pool** (§E, ADR-072): any number
+  of OpenAI- or Anthropic-compatible endpoints, free or paid, with model discovery, in round robin with fallbacks.
+- [~] **Clef on local.** Clef's weights are not public, so it can't run locally. Operator decision (§E): Clef and
+  Clairic need the user's Cloudflare AI key; without it the user's own LLM answers the same structured formats, and
+  setup says performance is marginally lower.
 - [x] **Fully local mode with background runner.** `pnpm local` runs the same Brain in Node: file-backed SQLite,
   a local journal, Alpaca paper (own account only) or a keyless simulated broker, free LLM chains, and Clef through the
   Cloudflare REST API or the shim. `pnpm local:install` writes a launchd (macOS), systemd (Linux) or Task Scheduler
@@ -331,6 +331,134 @@ because the operator asked: the Kronos challenger (as SHADOW, §A) and the per-a
 - [x] Options lab realism: per-contract fees and natural fills were already there; added an assignment-risk exit (short leg ITM with ≤ 3 days left). Quoted prices are already on ticks. Original note: per-contract fees, tick size, short-leg DTE blackout: small; done in this round if time
   allows.
 
+## E. App-first round (operator, 2026-10-26 evening)
+
+The direction now: the desktop app and its panel are the product; Discord is an optional add-on; setup must be as
+untechnical as possible without losing any advanced feature.
+
+### Operator asks
+- [x] **Clef and Clairic need a Cloudflare AI key** (no local Clef). Without it, a **structured stand-in** on the
+  user's own LLM answers the exact Clef / Clairic response shapes (JSON schema built from the questions / fields), and
+  the user is told performance is marginally lower (wizard, Settings, `cortex doctor`). ADR-072.
+- [~] **BYOK = two endpoints, bull + bear, models must differ, a same-model checkbox** → replaced the same evening
+  by the operator's next ask, which generalizes it:
+- [x] **Unlimited endpoints, round robin across every model on every endpoint, fallback chains, free + paid
+  combined.** One pool: built-in free providers (verified models, daily caps) + the user's endpoints (OpenAI- or
+  Anthropic-compatible, free/paid/local, optional calls/day cap). Preferences: free first / paid first / mixed, round
+  robin on/off. Bull and bear always come from different families (lineages when there are several, models when
+  there's one lineage). ADR-072.
+- [x] **Model discovery** from the endpoint (OpenAI `GET /models`, with a `/v1` retry; Anthropic Models API through
+  the SDK); when it fails, the user types the model name.
+- [x] **Warn when only one model exists across all endpoints**; the court refuses to run until the user adds one or
+  ticks "let one model argue both sides" (the warning stays). Recommended: two or more.
+- [x] **Discord is no longer the dashboard.** The app gets everything Discord had: FEED (every card, kept by the brain
+  in its own inbox), ASK (why / court / roast / book review / watchlist), SETTINGS. Replies that pointed at Discord
+  channels now point at the feed. ADR-071.
+- [x] **Discord auto-setup by the user**: paste a bot token, press Connect; CORTEX creates its private category and
+  channels (invite link when the bot isn't in a server yet, a picker when it's in several). ADR-071.
+- [x] **First-launch onboarding**: a welcome screen with two paths, a five-step wizard (account, AI models, Cloudflare
+  AI, alerts, done) or a prompt to paste into any agent that runs commands (it asks for each key one at a time and
+  configures everything with the `cortex` CLI; the app applies its changes live). ADR-073.
+
+### Pain points found by walking the app as a new user (all fixed unless marked)
+- [x] The sign-in screen said "run /terminal in Discord". Now: open from the app, `cortex link`, or Discord.
+- [x] Keys could only be set as environment-variable names in a terminal. Now: wizard + Settings, key recognition
+  (paste a key; Gemini / Groq / NIM / OpenRouter / Anthropic / OpenAI are recognized from its shape).
+- [x] Saving settings needed a restart. Now: in-process reload in a few seconds, and edits made outside the app (an
+  agent running `cortex llm add`) apply live through a config-file watcher.
+- [x] Users don't know model names. Discovery lists them; local servers (Ollama, LM Studio) are found by one button.
+- [x] Free tiers run out mid-hearing. Round robin spreads the load; a rate-limited or timed-out model sits out for
+  5 minutes; per-endpoint daily caps.
+- [x] A local brain showed a dormant LIVE column and LIVE controls; local mode is paper-only, so they're hidden.
+- [x] The feed's ALL view was mostly the raw agent log; ALL now leaves it out (it keeps its own chip).
+- [x] A pasted URL was masked like a key; ASK answers showed raw markdown; "1 models".
+- [x] The cockpit asks people to read gauges. Added TODAY: one plain sentence (money, holdings, latest action,
+  whether anything needs you) on top of ACCOUNTS.
+- [x] Local sign-ins expired every 12 h. Local mode now keeps you signed in for 30 days on your own computer (cloud
+  stays 12 h; LIVE ratification needs a sign-in younger than 10 minutes).
+- [x] LIVE autonomy was Discord-only, which an app-first product can't require. Now also from the app, on a fresh
+  sign-in (≤ 10 min), still with RATIFY and the cooling-off.
+- [ ] The "FREE TIER" budget dial means nothing in local mode (no Cloudflare quotas there). Relabel it as model usage
+  per provider, from the router's call counters.
+- [ ] Settings errors are translated to plain words (`plain()`), but `cortex doctor` output in the app isn't shown
+  yet. Add a HEALTH block to SETTINGS that runs the same checks.
+
+### New ideas toward "less technical, nothing lost"
+- [ ] **Model scoreboard** in Settings: per model, answers / schema failures / median latency / rate limits over 7
+  days (the journal already logs every hop), and a "demote" switch. Next.
+- [ ] **Paid-model cost meter**: tokens per paid endpoint per day × the user's price per million, with an optional
+  daily spend cap that drops the endpoint from the rotation when reached.
+- [ ] **QR code for phone alerts**: scan instead of typing the ntfy topic (a small QR encoder, no network call).
+- [ ] **Settings export / import** (keys optionally included, encrypted with a passphrase) to move to a new computer.
+- [ ] **"Reset this computer"** button: stop the service and wipe `~/.cortex54` after a typed confirmation.
+- [ ] **Health check from the tray**: the tray pill turns amber with the one-line reason when doctor finds a problem.
+- [-] **Auto-buy API credits / provider sign-up inside the app**: creating accounts and entering payment details for
+  the user is exactly what the product must never do; the wizard links to each provider's own key page instead.
+- [-] **Hosting users' keys on our server for convenience**: breaks the "keys never leave your machine" promise
+  (docs/DISTRIBUTION.md); the agent path covers the "do it for me" need without it.
+
+## F. Every idea again, with the new objective (2026-10-26, late)
+
+The objective changed twice today: from one operator on free tiers to a product people buy and run themselves,
+and then to "the app is the product; as untechnical as possible without losing anything". These are the verdicts
+that change because of it. Lines not listed here keep their verdict: their reason was the edge, the constitution or a
+data trigger, not cost, Discord or the single-operator assumption.
+
+### Built in this pass
+- [x] **Court waits for the deep research** (operator, same day). The early fast ring no longer releases the court:
+  the court holds a case for the deep dossier and falls back to the fast one only when the deep run isn't done
+  12 minutes after dispatch (`funnel.research.deep_wait_minutes`; deep runs take ~6–15 min, and past 12 the catalyst
+  goes stale). No dossier at all still releases at 25 min. A late fast ring never overwrites a complete dossier.
+- [x] **The research desk uses the user's model pool** (found by this review). It used only the built-in free keys,
+  so a user with only their own endpoints had a court but no research. It now reads `LLM_POOL` (the user's order,
+  Anthropic-compatible endpoints through the official SDK) and falls back the same way.
+- [x] **MLP6-008 operator friction telemetry** → **support file** instead of telemetry: `cortex support` and
+  SETTINGS → HEALTH → "Save a support file" (versions, settings, checks, pool notes; key names, never values;
+  test-enforced). The user sees it and decides to send it.
+- [x] **HEALTH in the app**: the same checks as `cortex doctor` (shared `local/health.ts`) plus heartbeat, research
+  jobs and invariants, in plain words with the fix for each.
+- [x] **MLP0-015 canary deploy rollback** (was rejected: the operator's CI can't deploy). Customers' clouds deploy
+  with `cortex deploy`, which now waits for the new brain to answer /health with this build's constitution and rolls
+  the Worker back (`wrangler rollback -y`) if it doesn't.
+- [x] **MLP4-021 auto-benchmark router** → built as round robin with a 5-minute cooldown for busy models (§E) plus a
+  **model scoreboard** (SETTINGS → AI models: answered %, bad format, busy/slow, average time over 7 days, from the
+  brain's own `llm_calls`). Automatic reordering waits for 4 weeks of scoreboard data.
+- [x] **PSS-007 secret wall**, **PSS-012 local daemon + BYOK**, **PSS-040 Co-Pilot hero**: done by §E (wizard, agent
+  prompt, pool, ASK → ROAST).
+- [=] **PSS-008 sell the software**: it is the direction now (docs/DISTRIBUTION.md).
+
+### Accepted, not built yet (the product needs them; each has a plan)
+- [ ] **PSS-029…036 licensing and signed auto-updates.** Obfuscation stays rejected as a moat. What a sold app needs:
+  a signed update manifest (Ed25519, the key the hub code already uses), Tauri's updater pointed at it, and a licence
+  check that degrades to demo mode, never to unsafe behaviour. Needs the operator's signing key and an update host.
+- [ ] **MLP3-012 key-signing proxy** → **OS keychain for secrets**: keys move from config.json (mode 600) to the
+  macOS Keychain / Windows Credential Manager / libsecret, read by the daemon at start. Needs the desktop shell to
+  hand them over; the headless image keeps the file.
+- [ ] **MLP4-031 encrypted backups** + §E settings export: one passphrase-encrypted file with config, scar packs and
+  the journal, restorable on a new computer.
+- [ ] **MLP4-027 multi-broker adapters**: was "with an operator need"; a sold product meets customers Alpaca doesn't
+  serve. `BrokerApi` is already the seam; first candidate is a second crypto venue with a paper/sandbox mode.
+- [ ] **MLP5-005 more hearings**: the 12/day court cap protects free-tier quotas. With paid endpoints in the pool, a
+  SETTINGS slider (with a cost estimate from the scoreboard's token counts) can raise it.
+- [ ] **MLP4-029 phone control**: ntfy is read-only and a local brain listens on 127.0.0.1. Options: the user's own
+  cloud (already works on a phone, PWA), or an opt-in LAN mode with a QR login (needs the session cookie to work
+  without HTTPS on a LAN, so it waits for a careful design).
+- [ ] **PSS-037…039 public demo cockpit**: a static build of the panel on the synthetic data `pnpm web:dev` already
+  serves, for the website. The operator hosts it.
+- [ ] **PSS-006 split Brain.ts**: for a product team the 6,600-line file is now a delivery risk, not just taste.
+  Schedule it in a quiet week, module by module, behind the existing simulated-pulse tests.
+
+### Still deferred or rejected, reason restated
+- [⏸] **MLP1-002 mosaic swarm**: free models shared rate limits; paid pools remove that. Revisit when the
+  scoreboard shows spare capacity on users' pools.
+- [⏸] **MLP4-024/025/026 tournaments, shared jurors, bounties** and **MLP0-025 governance kernel**: need hub users /
+  an operator business decision.
+- [-] **MLP4-015 social sentiment, MLP4-016 call audio, MLP5-006 alt-data**: cost was one reason; the deciding one
+  is still edge at multi-day $10 tickets.
+- [-] **MLP0-014 / MLP4-017 / MLP4-018 code-writing agents**: unchanged; unattended code changes to a money system.
+- [=] **Widgets / Android**: the desktop tray pill is the widget; the PWA + ntfy is the phone app. Native mobile
+  stays out until customers ask.
+
 ---
 
 ## Worklog
@@ -356,3 +484,12 @@ Newest last. Each entry says what landed, how it was tested, and what's left.
   (068), Chronos-2 companion (069), drift canary + chaos test (070). The canary found the free court chains fragile
   today (Gemini 503, Qwen JSON/TPM, Nemotron cut off) and the fixes shipped; the chaos test found alert spam.
 - 2026-10-26: web-terminal bug found by local mode: every command answered "signed out" (isRevoked null/undefined).
+- 2026-10-26 (evening): **operator: the app is the product.** Clef/Clairic need Cloudflare AI or use the structured
+  stand-in (with the "marginally lower" notice); BYOK became the model pool (unlimited endpoints, discovery, round
+  robin, cooldowns, caps, one-model warning); the app got FEED / ASK / SETTINGS / TODAY and first-launch onboarding
+  (wizard or agent prompt); Discord connects from a bot token. Walked end to end in the browser against a local brain
+  and a fake OpenAI-compatible server (discovery, add, test, one-model block → accept → warn, Cloudflare notice, phone
+  alerts on, finish, feed, ask, court dispatch). ADRs 071–073. Pain points and new ideas in §E.
+- 2026-10-26 (late): the court waits for deep research (12-min fast fallback); every idea re-reviewed for the
+  app-first objective (§F): the research desk now uses the user's pool, support file + HEALTH in the app, deploy
+  verification with rollback, model scoreboard; the rest of the re-verdicts are planned in §F.

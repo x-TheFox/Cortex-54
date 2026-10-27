@@ -53,6 +53,8 @@ export function jobFor(
         .filter((n) => k[n])
         .map((n) => [n, k[n] as string]),
     ),
+    // ADR-072: the research desk uses the user's model pool too (not only the built-in free keys)
+    ...(ctx.cfg.llm.endpoints.length ? { LLM_POOL: JSON.stringify(ctx.cfg.llm) } : {}),
     RUN_URL: "",
     // the Python env lives in the CORTEX home, never inside the (read-only, signed) app bundle
     UV_PROJECT_ENVIRONMENT: join(ctx.home, "venv"),

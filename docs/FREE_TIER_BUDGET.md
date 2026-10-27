@@ -135,6 +135,8 @@ duration and rows written, all still under a third of the free allowance.
 | Sanity vetoes (067) | Coinbase ticker ≤ 1/min per symbol, Nasdaq halts ≤ 1 / 5 min, only on entry attempts | subrequests per pulse |
 | Earnings calendar, whole market (058) | ≤ 5,000 rows deleted + written twice per weekday (≈ 10–20K row writes) | DO rows written 100K |
 | Universe / position_watch / resting / hub_outbox tables | a few hundred row writes | DO rows written |
+| App feed inbox (071): one row per card the brain posts, pruned to 3,000 rows / 30 days | ~100–300 row writes/day | DO rows written |
+| Model pool round robin (072): spreads the same court calls across more providers; no extra calls | 0 | — |
 | Hub sync (068, off by default) | 1 POST + 1 GET per followed agent every 30 min | subrequests; Worker requests on the hub |
 | Book review (061) | weekly: 2 bars calls | — |
 | ntfy pushes (062, off by default) | 1 subrequest per alarm/fill/ruling | subrequests per pulse |

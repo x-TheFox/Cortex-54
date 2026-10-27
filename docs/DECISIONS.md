@@ -872,6 +872,8 @@ terminal is installable as an app (manifest + pass-through service worker; CSP a
 or any OpenAI-compatible endpoint lead the court chains when the user brings a key (`llm_routing.byok`); without keys
 the free chains run as before. Clef runs outside the Worker through the Workers AI REST API, or through a shim that
 answers Clef's question format with any chat model (answers pass the same conformance check).
+**Revised the same day:** BYOK became the model pool (ADR-072); Clef/Clairic run only on the user's Cloudflare AI, with
+a structured stand-in when it is missing (ADR-072).
 
 ## ADR-064 — cortexd local mode (2026-10-26)
 **Decision:** the same Brain runs in Node: SQLite files for hot state and the journal (same migrations), a keyless
@@ -921,3 +923,56 @@ provider retries once without JSON mode on Groq's validation 400, and the chains
 exists when only Groq gpt-oss and NIM answer. A seeded chaos test (random 5xx, lost order responses, failing cancels
 across hundreds of pulses) checks the money invariants; it led to broker-sync alerts firing only after 3 failed pulses
 in a row (69 alerts in 6 simulated days before).
+
+## ADR-071 — The app is the dashboard; Discord is optional (2026-10-26)
+**Context:** commercial product: the desktop app and its panel are what people use. Discord was the dashboard
+(alerts, court transcripts, commands), which a non-technical buyer shouldn't need.
+**Decision:** every card the brain posts also lands in a hot-store inbox (`InboxNotifier`, hot schema v9, bounded to
+3,000 rows / 30 days) that the app's FEED renders; the live HUD is not kept (the cockpit is its live version). ASK
+carries why / court / roast / book review / watchlist. Replies that named Discord channels now name the feed. Discord
+connects from a bot token alone (`src/discord/setup.ts`: category, channels, invite link when needed; the operator's
+script uses the same code plus the sentinel webhook and slash commands). LIVE autonomy and LIVE unlocks are allowed
+from the app on a session signed in within the last 10 minutes (RATIFY and the cooling-off unchanged); before, they
+were Discord-only.
+**Cost:** one hot-store row per card (~100–300/day), far inside the DO's 100k rows written/day.
+
+## ADR-072 — The model pool, and Clef/Clairic only on Cloudflare AI (2026-10-26)
+**Context:** operator: users bring any number of endpoints, free or paid, round robin across all models with
+fallbacks; warn when only one model exists. Separately: no local Clef; Clef and Clairic need a Cloudflare AI key, and
+without it an LLM answers in their exact structure.
+**Decision:** `src/court/pool.ts`. The pool is the built-in free providers (their doctrine-verified models, families
+and daily caps) plus the user's endpoints (`LLM_POOL` secret in the cloud, `llm` in the local config). Order: free
+first / paid first / mixed; round robin rotates the bull and bear chains within each tier group on every hearing
+(other chains, like the rebuttal pinned to the bull's own model, run as given); the bear starts one step further
+round. Families: lineages when the pool has several (the strongest independence), each model its own family when it
+has one lineage; the same model on two endpoints counts once. One model total blocks the court until the user adds a
+second or accepts the same model on both sides (then a `~bear` alias with its own family; the warning stays). A model
+that is rate-limited or times out sits out for 5 minutes. OpenAI-compatible endpoints adapt to servers that reject a
+parameter (JSON mode, temperature, `max_tokens` → `max_completion_tokens`); Anthropic-compatible endpoints get the
+server-side refusal fallback only on api.anthropic.com with a supported model (it would 400 elsewhere). Model
+discovery: OpenAI `GET /models` (retrying with `/v1`), Anthropic Models API via the SDK. Clef/Clairic in local mode:
+Cloudflare Workers AI (REST) when its key is set; otherwise `ShimClef`/`ShimClairic` on the pool's best model, with a
+JSON schema built from the questions/fields and the same validators; every surface says performance is marginally
+lower. The two-endpoint BYOK built earlier that day is gone (never released).
+
+## ADR-073 — First-launch onboarding, live settings (2026-10-26)
+**Decision:** a local brain that hasn't been onboarded opens a welcome screen with two paths: a five-step wizard
+(account, AI models, Cloudflare AI, alerts, done; each step is the same component as SETTINGS) or a prompt to paste
+into any agent that runs commands (`local/agent-prompt.ts`, identical to docs/SETUP_WITH_AN_AGENT.md, test-enforced).
+Settings save to config.json and reload the brain in-process (same port, same session secret); the CLI also watches
+config.json, so an agent's `cortex llm add` / `cortex setup --set …` apply live. New CLI: `cortex llm list|add|remove|
+models|prefs`, `cortex setup --onboarded`. Keys never go back to the browser (only "…last4"). Local sessions last 30
+days (cloud 12 h). The cockpit gains TODAY, one plain sentence on top of ACCOUNTS.
+
+## ADR-074 — The court waits for deep research; the product's support and safety net (2026-10-26)
+**Context:** operator: the court should hear the deep dossier and use the fast one only when the deep run is slow.
+A re-review of every idea for the app-first objective found the research desk ignored the user's model pool, and
+that a sold product needs a way to ask for help and to recover from a bad cloud deploy.
+**Decision:** dossiers carry `complete`; the early fast ring is `complete: false` and only shortens the court's wait
+to `funnel.research.deep_wait_minutes` (12) after dispatch; a complete dossier releases at once; a late partial never
+replaces a complete one. The research desk reads `LLM_POOL` (the user's order; Anthropic-compatible endpoints via the
+official Python SDK). `cortex support` / SETTINGS → HEALTH write a redacted support file (key names, never values;
+test-enforced) and show the doctor's checks in plain words (`local/health.ts`, shared). `cortex deploy` verifies the
+new brain answers /health with this build's constitution and runs `wrangler rollback -y` if it doesn't. SETTINGS shows
+a 7-day model scoreboard from `llm_calls`. Remaining re-verdicts are planned in docs/IDEAS_WORKLOG.md §F.
+

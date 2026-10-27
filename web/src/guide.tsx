@@ -94,7 +94,7 @@ const STEPS: Step[] = [
     target: "ecp",
     title: "The six system pages",
     body: [
-      "These keys switch the lower screen between seven pages. Keys 1 to 7 on your keyboard do the same. The lit bar shows which page is open.",
+      "These keys switch the lower screen between pages: FEED shows everything the robot says, ASK lets you question it, SET holds every setting. Keys 1 to 9 and 0 on your keyboard do the same. The lit bar shows which page is open.",
     ],
   },
   {

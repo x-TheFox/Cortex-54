@@ -23,14 +23,20 @@ const triple = process.argv[2] ?? host;
 const t = TRIPLES[triple];
 if (!t) throw new Error(`unsupported target ${triple}`);
 
-const index = (await (await fetch("https://nodejs.org/dist/index.json")).json()) as { version: string; lts: string | false }[];
+const index = (await (await fetch("https://nodejs.org/dist/index.json")).json()) as {
+  version: string;
+  lts: string | false;
+}[];
 const version = index.find((r) => r.lts && r.version.startsWith(`v${LTS_MAJOR}.`))?.version;
 if (!version) throw new Error(`no Node ${LTS_MAJOR} LTS release found`);
 const name = `node-${version}-${t.dist}`;
 const file = `${name}.${t.ext}`;
 const base = `https://nodejs.org/dist/${version}`;
 const sums = await (await fetch(`${base}/SHASUMS256.txt`)).text();
-const want = sums.split("\n").find((l) => l.endsWith(`  ${file}`))?.split(" ")[0];
+const want = sums
+  .split("\n")
+  .find((l) => l.endsWith(`  ${file}`))
+  ?.split(" ")[0];
 if (!want) throw new Error(`${file} not in SHASUMS256.txt`);
 const buf = Buffer.from(await (await fetch(`${base}/${file}`)).arrayBuffer());
 const got = createHash("sha256").update(buf).digest("hex");

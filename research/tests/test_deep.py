@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 
@@ -347,3 +348,69 @@ def test_write_up_accepts_a_bare_dossier_reply():
               FakeTools(now=NOW), Limits(max_steps=2))
     final = run.go(NOW)
     assert final == bare and run.stop_reason == "budget → written from notebook"
+
+
+def test_dossier_job_marks_the_early_fast_ring_partial_and_the_final_dossier_complete(monkeypatch):
+    """Operator 2026-10-26: the court waits for the deep dossier; only a complete dossier releases it."""
+    from cortex_research.deep import job
+
+    def fake_research(task, now, now_ms, limits=None, on_fast=None, now_ms_fn=None):
+        base = {"symbol": task.symbol, "as_of": now_ms, "findings": [{"claim": "x"}], "summary": "s",
+                "agent": {"stop_reason": "done"}}
+        if on_fast:
+            on_fast({**base, "stage": "fast"})
+        return {**base, "stage": "deep"}
+
+    posted = []
+    monkeypatch.setattr(job, "research", fake_research)
+    monkeypatch.setattr(job, "resolve_arena", lambda *a, **k: "CRYPTO")
+    final = job.dossier_job(Path("x"), "BTC/USD", "ctx", 1_000, None, post=lambda b: posted.append(b) or True)
+    assert posted[0]["items"][0]["payload"]["complete"] is False
+    assert final["items"][0]["payload"]["complete"] is True
+
+
+def test_research_desk_uses_the_users_model_pool(monkeypatch):
+    """ADR-072: a user with only their own endpoints still has a research desk; order follows their preference."""
+    import json as _json
+
+    from cortex_research.deep import llm as L
+
+    pool = {"endpoints": [
+        {"id": "box", "name": "Box", "format": "openai", "url": "http://127.0.0.1:8799/v1", "key": "", "models": ["qwen3"],
+         "tier": "local", "enabled": True},
+        {"id": "claude", "name": "Claude", "format": "anthropic", "url": "https://api.anthropic.com", "key": "sk-ant-x",
+         "models": ["claude-opus-5-5"], "tier": "paid", "enabled": True},
+        {"id": "off", "name": "Off", "format": "openai", "url": "https://x.example/v1", "models": ["m"], "enabled": False},
+    ], "prefs": {"prefer": "paid_first"}}
+    for k in ("GEMINI_API_KEY", "GROQ_API_KEY", "NVIDIA_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("LLM_POOL", _json.dumps(pool))
+    hops = L.default_chain()
+    assert hops[0].provider == "ep:claude" and hops[-1].provider == "ep:box"
+    assert [h.provider for h in L.Chain().available()] == ["ep:claude", "ep:box"]  # no free keys, no disabled endpoint
+    assert L.pool_hops("not json") == ((), (), "free_first")
+
+    sent = []
+
+    class R:
+        def __init__(self, code, body):
+            self.status_code, self._b = code, body
+
+        def json(self):
+            return self._b
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise requests.HTTPError(response=self)
+
+    def post(url, headers=None, json=None, timeout=None):
+        sent.append((url, dict(json)))
+        if "response_format" in json:
+            return R(400, {})  # a server that rejects JSON mode
+        return R(200, {"choices": [{"message": {"content": '{"ok": true}'}}], "usage": {"total_tokens": 7}})
+
+    box = L.Chain(hops=(hops[-1],), post=post)
+    obj, name = box.ask("sys", "user")
+    assert obj == {"ok": True} and name == "ep:box/qwen3"
+    assert sent[0][0] == "http://127.0.0.1:8799/v1/chat/completions"
+    assert "max_completion_tokens" in sent[1][1] and "response_format" not in sent[1][1]

@@ -1,20 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type AccountView, command, consumeLoginHash, type StatusView, useNow, useResource } from "./api.ts";
+import {
+  type AccountView,
+  command,
+  consumeLoginHash,
+  type SettingsView,
+  type StatusView,
+  useNow,
+  useResource,
+} from "./api.ts";
+import { AskPage } from "./ask.tsx";
 import { drawdown, ecam } from "./ecam.ts";
+import { FeedPage } from "./feed.tsx";
 import { FcstPage } from "./forecast.tsx";
 import { GUIDE_SEEN_KEY, Guide } from "./guide.tsx";
 import { ago, Dial, heat, pct, Trend, usd, utc } from "./instruments.tsx";
+import { Onboarding } from "./onboarding.tsx";
 import { AccountPanel, CourtPanel } from "./overhead.tsx";
 import { AcctPage, FunnelPage, GovPage, MemPage, OptPage, StsPage } from "./pages.tsx";
+import { SettingsPage } from "./settings.tsx";
+import { Today } from "./today.tsx";
 
+// ADR-071: the app is the main dashboard; FEED and ASK carry everything Discord used to, SET configures it all.
 const PAGES = [
   { id: "ACCT", title: "ACCOUNTS" },
+  { id: "FEED", title: "FEED · EVERYTHING THE ROBOT SAYS" },
+  { id: "ASK", title: "ASK THE ROBOT" },
   { id: "FUNNEL", title: "FUNNEL · COURT AND REJECTIONS" },
   { id: "MEM", title: "MEMORY" },
   { id: "OPT", title: "OPTIONS SHADOW LAB" },
   { id: "GOV", title: "GOVERNOR" },
   { id: "STS", title: "STATUS" },
   { id: "FCST", title: "FORECAST · KRONOS VS THE ROBOT" },
+  { id: "SET", title: "SETTINGS" },
 ] as const;
 type PageId = (typeof PAGES)[number]["id"];
 
@@ -106,6 +123,14 @@ export function App() {
     void consumeLoginHash().then(setBoot);
   }, []);
   const st = useResource<StatusView>(boot === "pending" ? null : "/api/state", 15_000);
+  const settings = useResource<SettingsView>(boot === "pending" ? null : "/api/settings", 0);
+  const [onb, setOnb] = useState<boolean | null>(null);
+  // ADR-073: first launch (local mode, not onboarded yet) opens the welcome screen once per load
+  useEffect(() => {
+    if (onb !== null) return;
+    if (settings.data) setOnb(settings.data.managed === "local" && settings.data.onboarded === false);
+    else if (settings.error) setOnb(false);
+  }, [settings.data, settings.error, onb]);
   const now = useNow(1000);
   const [page, setPageState] = useState<PageId>(readPage);
   const [ackCaut, setAckCaut] = useState<string>("");
@@ -132,7 +157,7 @@ export function App() {
         setGuide(true);
         return;
       }
-      const i = Number(e.key) - 1;
+      const i = e.key === "0" ? 9 : Number(e.key) - 1;
       const p = PAGES[i];
       if (p) setPage(p.id);
     };
@@ -162,7 +187,15 @@ export function App() {
     [st],
   );
 
-  const s = st.data;
+  // local mode is paper-only: no LIVE column, no LIVE controls (a dormant LIVE account there only confuses)
+  const local = settings.data?.managed === "local";
+  const s = useMemo(
+    () =>
+      st.data && local
+        ? { ...st.data, accounts: st.data.accounts.filter((a) => a.account !== "LIVE") }
+        : st.data,
+    [st.data, local],
+  );
   const e = useMemo(() => (s ? ecam(s, now) : null), [s, now]);
   const warnKey = e ? e.warnings.map((w) => w.id).join(",") : "";
   const cautKey = e ? e.cautions.map((c) => c.id).join(",") : "";
@@ -180,7 +213,7 @@ export function App() {
 
   // First visit: offer the guide once (it can be reopened any time with GUIDE or "?").
   useEffect(() => {
-    if (!s) return;
+    if (!s || onb !== false) return; // after onboarding (or on a cloud brain), not on top of it
     try {
       if (!localStorage.getItem(GUIDE_SEEN_KEY)) {
         localStorage.setItem(GUIDE_SEEN_KEY, "1");
@@ -189,7 +222,7 @@ export function App() {
     } catch {
       /* storage unavailable: the GUIDE key still works */
     }
-  }, [s]);
+  }, [s, onb]);
 
   if (st.signedOut || boot === "expired") {
     return (
@@ -203,8 +236,9 @@ export function App() {
                   {boot === "expired" ? "LOGIN LINK EXPIRED" : "NO SESSION"}
                 </span>
               </p>
-              <p className="alert-action">RUN /terminal IN DISCORD</p>
-              <p className="alert-action">OPEN THE LINK IT SENDS (SINGLE USE, 10 MIN)</p>
+              <p className="alert-action">OPEN THE DASHBOARD FROM THE CORTEX APP (TRAY → OPEN)</p>
+              <p className="alert-action">OR RUN `cortex link` · OR /terminal IN DISCORD</p>
+              <p className="alert-action">EACH LINK WORKS ONCE, FOR 10 MINUTES</p>
             </div>
           </div>
         </div>
@@ -342,7 +376,10 @@ export function App() {
               <div className="skeleton" style={{ width: "45%" }} />
             </div>
           ) : page === "ACCT" ? (
-            <AcctPage s={s} now={now} />
+            <>
+              <Today s={s} e={e} now={now} goFeed={() => setPage("FEED")} />
+              <AcctPage s={s} now={now} />
+            </>
           ) : page === "FUNNEL" ? (
             <FunnelPage />
           ) : page === "MEM" ? (
@@ -353,6 +390,12 @@ export function App() {
             <GovPage now={now} />
           ) : page === "FCST" ? (
             <FcstPage now={now} />
+          ) : page === "FEED" ? (
+            <FeedPage now={now} />
+          ) : page === "ASK" ? (
+            <AskPage goFeed={() => setPage("FEED")} />
+          ) : page === "SET" ? (
+            <SettingsPage s={settings.data} reload={settings.reload} restartOnboarding={() => setOnb(true)} />
           ) : (
             <StsPage s={s} now={now} />
           )}
@@ -370,13 +413,13 @@ export function App() {
           >
             <span>
               {p.id}
-              <span className="hot">{i + 1}</span>
+              <span className="hot">{(i + 1) % 10}</span>
             </span>
             <span className="lamp" />
           </button>
         ))}
         <span className="spacer" />
-        <span className="note">Keys 1–7 · ? for the guide</span>
+        <span className="note">Keys 1–9, 0 · ? for the guide</span>
         <button type="button" className="key guide-key" onClick={() => setGuide(true)} aria-haspopup="dialog">
           <span>GUIDE</span>
           <span className="lamp" />
@@ -390,6 +433,10 @@ export function App() {
           ))}
           <CourtPanel run={run} busy={busy} />
         </section>
+      )}
+
+      {onb && settings.data && (
+        <Onboarding s={settings.data} reload={settings.reload} close={() => setOnb(false)} />
       )}
 
       <Guide open={guide} onClose={() => setGuide(false)} setPage={setPage} />

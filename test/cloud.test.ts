@@ -164,3 +164,44 @@ describe("cortex deploy (ADR-065)", () => {
     expect(brainSecrets(cfg, "i".repeat(40))).not.toHaveProperty("CLOUDFLARE_ACCOUNT_ID");
   });
 });
+
+describe("deploy verification (MLP0-015 for customers' clouds)", () => {
+  it("passes when the new constitution answers; rolls back when it never does", async () => {
+    const { verifyDeploy } = await import("../local/deploy.ts");
+    const { newConfig } = await import("../local/config.ts");
+    const cfg = { ...newConfig("demo"), keys: { CLOUDFLARE_ACCOUNT_ID: "a", CLOUDFLARE_API_TOKEN: "t" } };
+    const ran: string[][] = [];
+    const run = (_c: string, a: string[]) => {
+      ran.push(a);
+      return { status: 0, stdout: "", stderr: "" };
+    };
+    let sha = "old";
+    const fetcher = async () => Response.json({ constitution_sha256: sha });
+    const sleep = async () => {
+      sha = "new";
+    };
+    const ok = await verifyDeploy({
+      url: "https://x.workers.dev",
+      name: "acme",
+      cfg,
+      expectConstitution: "new",
+      run,
+      fetcher,
+      sleep,
+    });
+    expect(ok).toEqual({ healthy: true, rolledBack: false, detail: "the new brain is answering" });
+    expect(ran).toEqual([]);
+    const bad = await verifyDeploy({
+      url: "https://x.workers.dev",
+      name: "acme",
+      cfg,
+      expectConstitution: "never",
+      run,
+      fetcher: async () => new Response("boom", { status: 500 }),
+      sleep: async () => undefined,
+      tries: 2,
+    });
+    expect(bad).toMatchObject({ healthy: false, rolledBack: true });
+    expect(ran[0]).toEqual(expect.arrayContaining(["rollback", "--name", "acme", "-y"]));
+  });
+});

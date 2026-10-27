@@ -3,7 +3,7 @@
  * Small, transactional, current-state only. History goes to D1 via the outbox.
  * Once deployed: bump HOT_SCHEMA_VERSION and append statements; never edit applied ones.
  */
-export const HOT_SCHEMA_VERSION = 8;
+export const HOT_SCHEMA_VERSION = 9;
 
 export const HOT_SCHEMA: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -105,4 +105,9 @@ export const HOT_SCHEMA: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS hub_outbox (seq INTEGER PRIMARY KEY, row_json TEXT NOT NULL)`,
   // v8: hourly BTC and SPY prices for the buy-and-hold benchmark beside the equity line (MLP0-024)
   `CREATE TABLE IF NOT EXISTS bench_history (at INTEGER PRIMARY KEY, btc REAL, spy REAL)`,
+  // v9: the app's feed (ADR-071): every card the brain sends to Discord, kept for the web app, which is the main
+  // dashboard. Discord is optional on top.
+  `CREATE TABLE IF NOT EXISTS inbox (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, channel TEXT NOT NULL,
+     msg_json TEXT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS inbox_channel ON inbox (channel, id)`,
 ];

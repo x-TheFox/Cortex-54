@@ -1235,6 +1235,40 @@ describe("court end-to-end (Phase 3)", () => {
     expect(dispatched).toHaveLength(1); // the fresh dossier is reused, not re-researched
   });
 
+  it("operator 2026-10-26: a partial fast dossier keeps the court waiting for the deep one, up to deep_wait_minutes", async () => {
+    const calls: string[] = [];
+    const llm = new LlmRouter(
+      { gemini: provider(bullJson, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => T0,
+    );
+    const t = setup({ clef: new ScriptedClef(answers), llm, dispatcher: { async dispatch() {} } });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    expect((await t.brain.pulse()).courtContracts).toBe(0); // dispatched, waiting
+    const fast = dossierBatch("BTC/USD", T0 + 120_000);
+    (fast.items[0] as { payload: Record<string, unknown> }).payload.complete = false;
+    t.advance(2 * 60_000);
+    expect((await t.brain.ingestBatch(fast)).ok).toBe(true);
+    t.advance(60_000);
+    expect((await t.brain.pulse()).courtContracts).toBe(0); // fast is in, but the deep run is still going
+    t.advance((doctrine.funnel.research.deep_wait_minutes - 3) * 60_000 + 30_000);
+    expect((await t.brain.pulse()).courtContracts).toBe(1); // deep too slow: convene on the fast one
+    expect(doctrine.funnel.research.deep_wait_minutes).toBeLessThan(doctrine.funnel.research.wait_minutes);
+
+    // a complete dossier releases at once
+    const t2 = setup({ clef: new ScriptedClef(answers), llm, dispatcher: { async dispatch() {} } });
+    await t2.brain.ingestBatch(cryptoBatch);
+    t2.market.set("BTC/USD", 130, 130.02);
+    t2.market.news.push(btcNews);
+    expect((await t2.brain.pulse()).courtContracts).toBe(0);
+    t2.advance(60_000);
+    await t2.brain.ingestBatch(dossierBatch("BTC/USD", T0 + 60_000));
+    t2.advance(60_000);
+    expect((await t2.brain.pulse()).courtContracts).toBe(1);
+  });
+
   it("ADR-051: the court convenes without a dossier once the wait expires", async () => {
     const calls: string[] = [];
     const llm = new LlmRouter(

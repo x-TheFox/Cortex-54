@@ -65,7 +65,8 @@ def dossier_job(doctrine_path: Path, symbol: str, context: str, now_ms: int, run
     def on_fast(fast: dict[str, Any]) -> None:
         if post is None or not (fast["findings"] or fast["summary"]):
             return
-        ok = post(dossier_batch(fast, fast["as_of"], run_url))
+        # the early fast ring is partial: the court keeps waiting for the deep dossier (up to deep_wait_minutes)
+        ok = post(dossier_batch({**fast, "complete": False}, fast["as_of"], run_url))
         print(f"dossier: fast ring posted ({len(fast['findings'])} findings) → {'ok' if ok else 'FAILED'}")
 
     d = research(task, now, now_ms, limits=limits_for(depth), on_fast=on_fast,
@@ -73,4 +74,4 @@ def dossier_job(doctrine_path: Path, symbol: str, context: str, now_ms: int, run
     if not d["findings"] and not d["summary"]:
         print(f"dossier: research produced nothing ({d['agent']['stop_reason']})", file=sys.stderr)
         return None
-    return dossier_batch(d, d["as_of"], run_url)
+    return dossier_batch({**d, "complete": True}, d["as_of"], run_url)

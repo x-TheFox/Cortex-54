@@ -37,13 +37,7 @@
       "verbatim_quote": "The Constitutional Spine: Enforcing 'models argue, code computes, the risk engine decides' via checkBull (clamping fantasy targets in code), uncitedNumbers (instrumenting hallucinations), Clairic grounding (forcing extracted numbers/entities to exist verbatim in source text), and DecisionContractSchema (which literally has no quantity field for an LLM to touch) is institutional-grade design.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Constitution / Risk Engine / Schema",
-      "tags": [
-        "constitution",
-        "risk-engine",
-        "hallucination-defense",
-        "clairic",
-        "architecture"
-      ]
+      "tags": ["constitution", "risk-engine", "hallucination-defense", "clairic", "architecture"]
     },
     {
       "id": "PSS-002",
@@ -59,14 +53,7 @@
       "verbatim_quote": "Hand-rolling a synchronous FIPS 180-4 SHA-256 (src/lib/sha256.ts) so the Durable Object never hits an await mid-append and forks the hash chain, reserving heat synchronously in SQLite before any await (ADR-004), and building idempotent c54-{P|L}-{contract8}-{E|S|X}-{attempt} order IDs with orphan adoption prove you actually understand distributed systems.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Durable Objects / SHA-256 / SQLite / Order Routing",
-      "tags": [
-        "concurrency",
-        "durable-objects",
-        "sha-256",
-        "sqlite",
-        "idempotency",
-        "distributed-systems"
-      ]
+      "tags": ["concurrency", "durable-objects", "sha-256", "sqlite", "idempotency", "distributed-systems"]
     },
     {
       "id": "PSS-003",
@@ -82,14 +69,7 @@
       "verbatim_quote": "Using Deflated Sharpe Ratio (DSR >= 0.95) and Probability of Backtest Overfitting (PBO) in your backtest lab—and honestly demoting four of your own losing strategies (bounce, inverse, trend, turn-of-month) to LAB while only promoting EQUITY_RSI2_PULLBACK_V1 (+0.27R, 78% win rate, DSR 0.99)—is rarer than gold in retail quant.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Backtest Lab / Quant Statistics",
-      "tags": [
-        "dsr",
-        "deflated-sharpe",
-        "pbo",
-        "statistics",
-        "quant",
-        "backtest"
-      ]
+      "tags": ["dsr", "deflated-sharpe", "pbo", "statistics", "quant", "backtest"]
     },
     {
       "id": "PSS-004",
@@ -105,14 +85,7 @@
       "verbatim_quote": "The Airbus ECAM Cockpit: A zero-dependency React 19 dark cockpit where 'nothing is lit when normal' (web/src/ecam.ts) and a 6-part adversarial Discord transcript make the invisible backend tangible and sellable.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Web Frontend / Discord Bot / Telemetry",
-      "tags": [
-        "ecam",
-        "telemetry",
-        "discord",
-        "react-19",
-        "cockpit",
-        "visualization"
-      ]
+      "tags": ["ecam", "telemetry", "discord", "react-19", "cockpit", "visualization"]
     },
     {
       "id": "PSS-005",
@@ -128,13 +101,7 @@
       "verbatim_quote": "Your learning loop is an empty ghost town: You built an elaborate isotonic/Platt calibration pipeline, source reputation weights (W_rep), decayed beliefs, and a PR-gated scar-tissue engine. Yet right now in your repo, config/calibration.json is 'maps': {} and config/scar-tissue.yaml is rules: [] because the system hasn't accumulated the >= 50 graded outcomes required to turn them on.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Learning Loop / Calibration / Scar-Tissue Engine",
-      "tags": [
-        "critique",
-        "learning-loop",
-        "calibration",
-        "scar-tissue",
-        "overengineering"
-      ]
+      "tags": ["critique", "learning-loop", "calibration", "scar-tissue", "overengineering"]
     },
     {
       "id": "PSS-006",
@@ -150,13 +117,7 @@
       "verbatim_quote": "Brain.ts is a 5,340-line God Object: Nine separate concerns (pulse loop, reconciliation, exits, funnel, court, execution, breakers, operator controls, Discord cards) live in one massive file sharing a mutable settings KV table. If you bolt the PDF features onto Brain.ts as-is, maintenance will collapse under its own weight.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Brain.ts / Core Architecture",
-      "tags": [
-        "critique",
-        "god-object",
-        "refactoring",
-        "technical-debt",
-        "brain.ts"
-      ]
+      "tags": ["critique", "god-object", "refactoring", "technical-debt", "brain.ts"]
     },
     {
       "id": "PSS-007",
@@ -172,14 +133,7 @@
       "verbatim_quote": "The 19-Secret Onboarding Wall: Deploying Cortex-54 today requires configuring Cloudflare Workers, two D1 databases, Workers KV, GitHub Actions, two Discord apps, 8 channel IDs, Alpaca keys, FMP, FRED, and four LLM providers (19 secrets in .dev.vars.example). Nobody on Gumroad will survive that setup. If a buyer has to read a 99-line RUNBOOK.md and run wrangler CLI commands just to see it work, your refund rate will hit 50%.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "DevOps / Deployment / Onboarding",
-      "tags": [
-        "critique",
-        "onboarding",
-        "commercialization",
-        "gumroad",
-        "secrets",
-        "wrangler"
-      ]
+      "tags": ["critique", "onboarding", "commercialization", "gumroad", "secrets", "wrangler"]
     },
     {
       "id": "PSS-008",
@@ -195,13 +149,7 @@
       "verbatim_quote": "The $54 Math Reality: At $54 equity, R1 risks 2.5% ($1.35) per trade. At +0.27R expectancy, your expected profit is $0.36 per trade before friction. Even if you implemented every PDF tomorrow, $54 will not make you meaningful money from trading PnL anytime soon. The code is worth 1,000x more as a software product and verifiable track-record engine than as a $54 brokerage account.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Business Model / Quant Economics",
-      "tags": [
-        "critique",
-        "economics",
-        "sizing",
-        "capital",
-        "commercialization"
-      ]
+      "tags": ["critique", "economics", "sizing", "capital", "commercialization"]
     },
     {
       "id": "PSS-009",
@@ -217,13 +165,7 @@
       "verbatim_quote": "You will blow up your $0/month Constitution: Your current architecture survives on Cloudflare's free tier because of strict rationing (45 subrequests per pulse, 10,000 Workers AI neurons/day, daily provider call caps). If you add PositionShadowDO running a 2-agent hearing every 15 minutes per open trade, a 4-agent parallel Mosaic swarm, an unconstrained 45-call web researcher, and 'overnight dreaming' perturbation replays, you will exhaust your free-tier quotas by 9:30 AM UTC and lock the brain into permanent REDUCE_ONLY mode.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Cloudflare Infrastructure / Rate Limits / Constitution",
-      "tags": [
-        "trap",
-        "rate-limits",
-        "cloudflare",
-        "free-tier",
-        "infrastructure"
-      ]
+      "tags": ["trap", "rate-limits", "cloudflare", "free-tier", "infrastructure"]
     },
     {
       "id": "PSS-010",
@@ -239,13 +181,7 @@
       "verbatim_quote": "You will violate Goodhart's Law on zero data: You currently have empty calibration maps. Adding strategy bandits, DSPy prompt auto-tuning, and multi-agent prediction markets when n < 50 just fits noise to noise.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Quant Lab / Prompt Tuning / Bandit Allocator",
-      "tags": [
-        "trap",
-        "goodharts-law",
-        "overfitting",
-        "statistics",
-        "noise"
-      ]
+      "tags": ["trap", "goodharts-law", "overfitting", "statistics", "noise"]
     },
     {
       "id": "PSS-011",
@@ -261,13 +197,7 @@
       "verbatim_quote": "You won't launch for 18 months: Building all 6 PDFs is a 2-year roadmap for a 4-person team. Using 'one more killer feature' to delay putting a buy button on the internet is the classic solo-founder death spiral.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Commercial Strategy / Project Management",
-      "tags": [
-        "trap",
-        "procrastination",
-        "launch",
-        "founder-psychology",
-        "commercialization"
-      ]
+      "tags": ["trap", "procrastination", "launch", "founder-psychology", "commercialization"]
     },
     {
       "id": "PSS-012",
@@ -283,14 +213,7 @@
       "verbatim_quote": "1. cortexd Local Daemon + BYOK | Eliminates the 19-secret Cloudflare setup wall. Buyers download a single binary/Docker container, run SQLite + Ollama/OpenRouter locally, and see the ECAM cockpit in 60 seconds. Triples your addressable Gumroad market. | BUILD FOR LAUNCH",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Packaging / cortexd / Local Mode",
-      "tags": [
-        "cortexd",
-        "daemon",
-        "byok",
-        "sqlite",
-        "packaging",
-        "top-6-feature"
-      ]
+      "tags": ["cortexd", "daemon", "byok", "sqlite", "packaging", "top-6-feature"]
     },
     {
       "id": "PSS-013",
@@ -306,13 +229,7 @@
       "verbatim_quote": "2. Co-Pilot Mode for Human Traders | Most retail traders don't want a black box trading for them; they want an AI Risk Officer that runs a 30-second Bull/Bear court on their trade idea, checks sizing, and blocks revenge trading. 10x larger market than pure autonomous bots. | BUILD FOR V1.1",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Co-Pilot / Discretionary Trading / Risk Officer",
-      "tags": [
-        "co-pilot",
-        "human-traders",
-        "risk-officer",
-        "courtroom",
-        "top-6-feature"
-      ]
+      "tags": ["co-pilot", "human-traders", "risk-officer", "courtroom", "top-6-feature"]
     },
     {
       "id": "PSS-014",
@@ -328,13 +245,7 @@
       "verbatim_quote": "3. Lateness Meter + Standing Orders ('Resting Convictions') | Solves your #1 live alpha killer: on a 60s pulse with free delayed data, you are late to breaking news. Measuring how much of the move already happened and letting the court post patient limit levels ('Buy SOL <= X until Friday') turns latency from a bug into discipline. | BUILD FOR ALPHA",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Execution Engine / Lateness Meter / Order Management",
-      "tags": [
-        "lateness-meter",
-        "standing-orders",
-        "limit-orders",
-        "alpha",
-        "top-6-feature"
-      ]
+      "tags": ["lateness-meter", "standing-orders", "limit-orders", "alpha", "top-6-feature"]
     },
     {
       "id": "PSS-015",
@@ -350,13 +261,7 @@
       "verbatim_quote": "4. Thesis Falsifier Watchers / Exit Re-Underwriting | Right now 90% of your IQ is on entry and exits are dumb price stops. Turning the bear's kill_criteria into live news/price tripwires and recording MFE/MAE across 1h/4h/1d/3d horizons gives you real exit intelligence. | BUILD FOR ALPHA",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Exit Engine / Kill Criteria / MFE-MAE",
-      "tags": [
-        "thesis-falsifier",
-        "exit-court",
-        "kill-criteria",
-        "mfe-mae",
-        "top-6-feature"
-      ]
+      "tags": ["thesis-falsifier", "exit-court", "kill-criteria", "mfe-mae", "top-6-feature"]
     },
     {
       "id": "PSS-016",
@@ -372,13 +277,7 @@
       "verbatim_quote": "5. Pre-Event ScenarioExecutionMatrix + Entity Anonymizer | Compiling if/then branches 2 hours before CPI/earnings gives you <50ms execution at T+0 with zero LLM latency. Scrubbing ticker/company names in the Backtest Lab (TICKER_742) fixes LLM pre-training look-ahead leakage. | BUILD FOR PRO TIER",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Scenario Matrix / Backtest Lab / Execution Plumber",
-      "tags": [
-        "scenario-matrix",
-        "latency",
-        "anonymizer",
-        "lookahead-bias",
-        "top-6-feature"
-      ]
+      "tags": ["scenario-matrix", "latency", "anonymizer", "lookahead-bias", "top-6-feature"]
     },
     {
       "id": "PSS-017",
@@ -394,13 +293,7 @@
       "verbatim_quote": "6. Monkey Control Group & Ghost Regret Portfolio | Running random entries with Cortex exits (and vice versa) in LAB proves whether your edge is selection or risk management. Tracking rejected trades shows which gates save money and which cost money. | BUILD IN LAB NOW",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Quant Lab / Ghost Portfolio / Control Group",
-      "tags": [
-        "monkey-control",
-        "ghost-portfolio",
-        "regret-dashboard",
-        "lab",
-        "top-6-feature"
-      ]
+      "tags": ["monkey-control", "ghost-portfolio", "regret-dashboard", "lab", "top-6-feature"]
     },
     {
       "id": "PSS-018",
@@ -416,13 +309,7 @@
       "verbatim_quote": "(Leave the .scar marketplace, agent copy-trading mesh, native OS widgets, and internal futarchy prediction markets for year two—they require a network effect you don't have yet.)",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Product Strategy / Roadmap",
-      "tags": [
-        "deferral",
-        "roadmap",
-        "network-effects",
-        "marketplace",
-        "focus"
-      ]
+      "tags": ["deferral", "roadmap", "network-effects", "marketplace", "focus"]
     },
     {
       "id": "PSS-019",
@@ -438,13 +325,7 @@
       "verbatim_quote": "Your Real Buyers: 1. AI / TypeScript / Cloudflare Developers who want to see how a real production Durable Object + D1 + multi-provider LLM router + property-tested state machine is built... 2. Quant-Curious Indie Hackers & Algo Traders who are sick of toy LangChain repos... 3. Discretionary Traders (once you add Co-Pilot Mode) who want an adversarial AI committee to roast their trade setups...",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Marketing / Landing Page / Personas",
-      "tags": [
-        "personas",
-        "buyers",
-        "marketing",
-        "positioning",
-        "audience"
-      ]
+      "tags": ["personas", "buyers", "marketing", "positioning", "audience"]
     },
     {
       "id": "PSS-020",
@@ -460,13 +341,7 @@
       "verbatim_quote": "Who You Must Repel: Non-technical 'passive income' seekers. State in bold on the checkout page: 'This is an autonomous quant research & governance harness, not a magic money printer. Our own backtest lab rejected 4 out of 5 baseline strategies.' That single sentence will scare away refund-prone buyers and make serious engineers pull out their credit cards immediately.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Checkout Page / Gumroad / Copywriting",
-      "tags": [
-        "copywriting",
-        "anti-refund",
-        "disqualification",
-        "trust",
-        "positioning"
-      ]
+      "tags": ["copywriting", "anti-refund", "disqualification", "trust", "positioning"]
     },
     {
       "id": "PSS-021",
@@ -482,13 +357,7 @@
       "verbatim_quote": "Fastest path (3–5 days): A docker-compose up or pnpm local mode (cortexd lite) that runs Brain.ts against your existing node:sqlite + FakeBroker simulator (test/sim/) and serves the React ECAM cockpit (web/) locally with one OpenRouter/Groq API key. You already built node:sqlite, FakeBroker, and web/mock-api.ts for testing—expose that as '1-Command Local Sandbox Mode' so buyers don't need Cloudflare on Day 1!",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Local Sandbox / Packaging / CLI",
-      "tags": [
-        "local-demo",
-        "pnpm-demo",
-        "fakebroker",
-        "packaging",
-        "onboarding"
-      ]
+      "tags": ["local-demo", "pnpm-demo", "fakebroker", "packaging", "onboarding"]
     },
     {
       "id": "PSS-022",
@@ -504,13 +373,7 @@
       "verbatim_quote": "Include a 'Replay Studio' preset: Ship 10 pre-recorded real Courtroom transcripts and 72-hour outcomes in the local DB so the moment they boot the app, they can scrub through a 6-part bull/bear hearing and watch the ECAM gauges react.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Replay Studio / Local DB Seed / UX",
-      "tags": [
-        "replay-studio",
-        "onboarding",
-        "courtroom",
-        "case-studies",
-        "ux"
-      ]
+      "tags": ["replay-studio", "onboarding", "courtroom", "case-studies", "ux"]
     },
     {
       "id": "PSS-023",
@@ -526,13 +389,7 @@
       "verbatim_quote": "Tier 1: Core ($89/launch $69) | Tier 2: Pro ($249/launch $199) | Tier 3: Syndicate ($799) | Tier 4: Court TV Live Feed ($19/mo recurring).",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Gumroad / Pricing / Product Strategy",
-      "tags": [
-        "pricing",
-        "gumroad",
-        "tiers",
-        "monetization",
-        "commercial-strategy"
-      ]
+      "tags": ["pricing", "gumroad", "tiers", "monetization", "commercial-strategy"]
     },
     {
       "id": "PSS-024",
@@ -548,14 +405,7 @@
       "verbatim_quote": "Title: 'Show HN: Cortex-54 – An autonomous AI trading harness with a constitutional risk engine and adversarial courtroom ($0/mo on Cloudflare Free Tier)' | The Hook: Lead with the engineering contrarianism: 'Every LLM trading bot lets the model pick sizes and hallucinate prices...'",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "GTM / Hacker News / Reddit / Marketing",
-      "tags": [
-        "gtm",
-        "show-hn",
-        "reddit",
-        "hacker-news",
-        "copywriting",
-        "launch-hook"
-      ]
+      "tags": ["gtm", "show-hn", "reddit", "hacker-news", "copywriting", "launch-hook"]
     },
     {
       "id": "PSS-025",
@@ -571,13 +421,7 @@
       "verbatim_quote": "Engineers love war stories (like your ADR-020 bug where ENTRY and EXIT both mapped to E and the simulator caught it, or ADR-027 where batching headlines in Clef compressed scores from 0.31 to 0.14). Put those war stories in the launch post—they prove the repo is battle-tested, not AI-generated slop.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Marketing / Storytelling / Technical Proof",
-      "tags": [
-        "war-stories",
-        "adr-020",
-        "adr-027",
-        "authenticity",
-        "social-proof"
-      ]
+      "tags": ["war-stories", "adr-020", "adr-027", "authenticity", "social-proof"]
     },
     {
       "id": "PSS-026",
@@ -593,14 +437,7 @@
       "verbatim_quote": "Render a 20-second dark-cockpit video (yc-parody or polished tone) showing a catalyst hitting the funnel, the Bull and Bear clashing, the Clef judge stamping NO TRADE — P(win) 14%, and the ECAM dials holding steady. Post that natively on X and Reddit.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Video Production / Social Media / brag Skill",
-      "tags": [
-        "video",
-        "brag",
-        "launch",
-        "x-twitter",
-        "reddit",
-        "hyperframes"
-      ]
+      "tags": ["video", "brag", "launch", "x-twitter", "reddit", "hyperframes"]
     },
     {
       "id": "PSS-027",
@@ -616,12 +453,7 @@
       "verbatim_quote": "Time to First Dollar ($1+): Day 1 to Day 3 of launch... First $1,000: Week 1 to Week 3... Month 1 Total: Conservative $1,000–$2,500, Base Case $3,500–$8,000... 90-Day Total: $12,000–$30,000+ in software sales, plus $500–$2,000/mo in recurring spectator subscriptions...",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Financial Projections / Business Plan",
-      "tags": [
-        "revenue",
-        "financials",
-        "projections",
-        "business-plan"
-      ]
+      "tags": ["revenue", "financials", "projections", "business-plan"]
     },
     {
       "id": "PSS-028",
@@ -637,13 +469,7 @@
       "verbatim_quote": "Your immediate move: Freeze new trading features for 7 days. Turn your existing test/sim/ (node:sqlite + FakeBroker) and web/ ECAM terminal into a 1-command local demo (pnpm demo) so a buyer doesn't need 19 Cloudflare/Alpaca secrets to run it, record a 20-second video of the courtroom and cockpit, and put the $69/$199 tiers live on Gumroad.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Sprint Planning / Execution Discipline",
-      "tags": [
-        "feature-freeze",
-        "sprint",
-        "discipline",
-        "execution",
-        "commercialization"
-      ]
+      "tags": ["feature-freeze", "sprint", "discipline", "execution", "commercialization"]
     },
     {
       "id": "PSS-029",
@@ -659,13 +485,7 @@
       "verbatim_quote": "In crypto and algo trading, closed-source binaries on Gumroad are the #1 vector for wallet drainers and API key theft. Even though you built the Local Clef Zero-Knowledge Vault, if the binary is closed-source, a smart buyer has no way to verify that cortexd isn't secretly sending their Alpaca, Kalshi, or LLM keys to your server.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Security / Trust / Key Management",
-      "tags": [
-        "key-stealer",
-        "security",
-        "closed-source",
-        "trust",
-        "crypto-paranoia"
-      ]
+      "tags": ["key-stealer", "security", "closed-source", "trust", "crypto-paranoia"]
     },
     {
       "id": "PSS-030",
@@ -681,13 +501,7 @@
       "verbatim_quote": "Default to Zero-Brokerage-Key Mode (Co-Pilot + Paper Sandbox): Make the primary onboarding experience Co-Pilot Mode and Local Paper Mode (FakeBroker). A buyer downloads the app, pastes only a free Groq or Gemini API key, types a ticker they want to trade, and watches the Mosaic Swarm, Kronos Lie Detector, and 6-part Courtroom roast or validate their setup. They get 90% of the value without ever handing you a financial credential.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Onboarding / Security / Co-Pilot",
-      "tags": [
-        "zero-key",
-        "paper-mode",
-        "sandbox",
-        "trust",
-        "security-defense"
-      ]
+      "tags": ["zero-key", "paper-mode", "sandbox", "trust", "security-defense"]
     },
     {
       "id": "PSS-031",
@@ -703,13 +517,7 @@
       "verbatim_quote": "Open-Source ONLY the 150-Line Execution Gatekeeper: Keep 99.5% of your stack (cortexd, the Brain, the Courtroom prompts, the Researcher, the Kronos engine) compiled and closed-source. Open-source only a tiny 150-line local proxy that holds the Alpaca/Kalshi keys and enforces your 8-rule constitution.json. Your closed-source cortexd binary emits an unsigned DecisionContract over localhost... and the tiny auditable script signs and sends the order.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Security / Execution Gatekeeper / Architecture",
-      "tags": [
-        "gatekeeper",
-        "closed-source",
-        "proxy",
-        "zero-knowledge",
-        "security-defense"
-      ]
+      "tags": ["gatekeeper", "closed-source", "proxy", "zero-knowledge", "security-defense"]
     },
     {
       "id": "PSS-032",
@@ -725,13 +533,7 @@
       "verbatim_quote": "Problem 2: Python & TypeScript Are Trivial to Decompile | If you ship a standard Electron/Tauri bundle with minified JS and .pyc files for cortex_research, a single buyer on Gumroad will unpack your .asar archive in 30 seconds and leak your entire codebase on Telegram.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "IP Protection / Obfuscation / Build Pipeline",
-      "tags": [
-        "decompilation",
-        "ip-theft",
-        "security",
-        "anti-piracy",
-        "vulnerability"
-      ]
+      "tags": ["decompilation", "ip-theft", "security", "anti-piracy", "vulnerability"]
     },
     {
       "id": "PSS-033",
@@ -747,14 +549,7 @@
       "verbatim_quote": "Compile the TypeScript brain (Brain.ts, court, risk, strategies) into V8 bytecode using Bytenode or bundle it inside a native binary, and compile your Python research/Kronos stack (cortex_research) into native C extensions (.so / .pyd) using Nuitka before wrapping it in the Tauri v2 Rust shell. Wire Gumroad's License Key Verification API directly into the Rust Tauri shell and cortexd boot sequence...",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Build System / Tauri / Bytenode / Nuitka / Licensing",
-      "tags": [
-        "bytenode",
-        "nuitka",
-        "tauri-v2",
-        "license-api",
-        "compilation",
-        "security-defense"
-      ]
+      "tags": ["bytenode", "nuitka", "tauri-v2", "license-api", "compilation", "security-defense"]
     },
     {
       "id": "PSS-034",
@@ -770,13 +565,7 @@
       "verbatim_quote": "Problem 3: Free-Tier Rate Limits Are Per-IP | Your architecture runs at $0/month because it rations 10,000 Workers AI neurons/day and rotates across Gemini (250/day), Groq (900/day), NIM (800/day), and OpenRouter (45/day). Plus, the 45-call Dual-Ring Researcher, 4-agent Mosaic Swarm, and PositionShadowDO 15-minute re-underwriting hearings multiply token burn by 5x–10x.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Networking / LLM Router / Cost Architecture",
-      "tags": [
-        "rate-limits",
-        "proxy-trap",
-        "token-burn",
-        "cost-control",
-        "vulnerability"
-      ]
+      "tags": ["rate-limits", "proxy-trap", "token-burn", "cost-control", "vulnerability"]
     },
     {
       "id": "PSS-035",
@@ -792,14 +581,7 @@
       "verbatim_quote": "The Fix: Never proxy LLM calls or web-scraping calls through your servers for desktop buyers. Every desktop cortexd instance must run strictly BYOK (Bring Your Own Keys) + Local Ollama/vLLM from the buyer's own IP address and their own free-tier API accounts. Your COGS per user stays $0.00.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Network Routing / BYOK / Ollama / FinOps",
-      "tags": [
-        "byok",
-        "ollama",
-        "zero-cogs",
-        "decentralized",
-        "finops",
-        "security-defense"
-      ]
+      "tags": ["byok", "ollama", "zero-cogs", "decentralized", "finops", "security-defense"]
     },
     {
       "id": "PSS-036",
@@ -815,13 +597,7 @@
       "verbatim_quote": "Tier 1: Co-Pilot & Research Desk ($129/launch $89) | Tier 2: Autonomous Pro Full Execution Suite ($299/launch $229) | Tier 3: 'Court TV' + Sovereign Thesis Relay ($39/mo) | Tier 4: Court-as-a-Service API & .scar Packs ($29–$79).",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Product Portfolio / Monetization / Gumroad",
-      "tags": [
-        "product-lineup",
-        "closed-source",
-        "tiers",
-        "monetization",
-        "sovereign-relay"
-      ]
+      "tags": ["product-lineup", "closed-source", "tiers", "monetization", "sovereign-relay"]
     },
     {
       "id": "PSS-037",
@@ -837,13 +613,7 @@
       "verbatim_quote": "Host a public, read-only version of your Airbus ECAM Cockpit on a domain. Tab 1 (Live Court TV): Visitors watch your master brain ingesting real-time news... Tab 2 (Try Co-Pilot Mode): Let a visitor click any of 5 pre-loaded live market catalysts from today... and watch the Bull, Bear, Rebuttal, Expert Panel, and Kronos Lie Detector battle it out in 10 seconds.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "GTM Funnel / Web Demo / Cloudflare Pages",
-      "tags": [
-        "launch-funnel",
-        "live-demo",
-        "court-tv",
-        "co-pilot-demo",
-        "gtm"
-      ]
+      "tags": ["launch-funnel", "live-demo", "court-tv", "co-pilot-demo", "gtm"]
     },
     {
       "id": "PSS-038",
@@ -859,14 +629,7 @@
       "verbatim_quote": "Lead With the 3 Hooks Nobody Else Has: Hook A (For Day/Swing Traders): 'I built an AI Lie Detector that pairs a 6-part LLM Bull/Bear Courtroom with Kronos...' Hook B (For Event/Macro Traders): 'Why LLM bots lose on CPI and Earnings: 20 seconds of inference latency...' Hook C (For Quant Skeptics): 'Every trading bot hides its losses. Cortex-54 runs a live Monkey Control Group...'",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Copywriting / Social Media / Launch Hooks",
-      "tags": [
-        "hooks",
-        "marketing",
-        "kronos",
-        "lie-detector",
-        "scenario-matrix",
-        "monkey-control"
-      ]
+      "tags": ["hooks", "marketing", "kronos", "lie-detector", "scenario-matrix", "monkey-control"]
     },
     {
       "id": "PSS-039",
@@ -882,13 +645,7 @@
       "verbatim_quote": "Time to First Dollar ($1+): Day 1 (within hours of posting the live Court TV link + Co-Pilot video)... First $1,000: 48 to 96 hours (~6 Co-Pilot sales at $89 + ~3 Pro sales at $229)... Month 1 Realistic Revenue: Conservative ~$4,200, Base Case ~$13,000 in Month 1 (with ~$1,950/mo in recurring MRR)... Breakout Case: $25,000–$45,000+ in the first 60 days...",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Financial Modeling / MRR Strategy",
-      "tags": [
-        "revenue",
-        "closed-source",
-        "projections",
-        "mrr",
-        "sovereign-relay"
-      ]
+      "tags": ["revenue", "closed-source", "projections", "mrr", "sovereign-relay"]
     },
     {
       "id": "PSS-040",
@@ -904,13 +661,7 @@
       "verbatim_quote": "If you build the entire stack this weekend, do not bury the UI under 50 tabs. Keep the Airbus ECAM rule sacred: 'Dark cockpit—when normal, nothing is lit'. Put Co-Pilot Mode (type a ticker -> get the full Mosaic + Kronos + Courtroom + Scenario Matrix) right at the top of the screen so a brand-new buyer gets their mind blown in the first 30 seconds of opening the app.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "UI/UX / Desktop Application / Onboarding",
-      "tags": [
-        "ux",
-        "hero-placement",
-        "co-pilot",
-        "anti-clutter",
-        "retention"
-      ]
+      "tags": ["ux", "hero-placement", "co-pilot", "anti-clutter", "retention"]
     },
     {
       "id": "MLP0-001",
@@ -926,13 +677,7 @@
       "verbatim_quote": "Position re-underwriting. This is the biggest structural gap I see. The court only hears a trade at entry. After that, exits are mechanical: stop, target, time. Real funds re-underwrite positions continuously. A cheap daily 'is the thesis still alive?' hearing would fix this.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Exit Engine / Contract Evaluation",
-      "tags": [
-        "re-underwriting",
-        "exit-court",
-        "kill-criteria",
-        "hedge-fund",
-        "risk"
-      ]
+      "tags": ["re-underwriting", "exit-court", "kill-criteria", "hedge-fund", "risk"]
     },
     {
       "id": "MLP0-002",
@@ -948,13 +693,7 @@
       "verbatim_quote": "Factor exposure desk and beta hedging. Your correlation guard is pairwise, but the real risk is factor concentration. Three crypto alts are one BTC-beta bet, and COIN, MSTR and IBIT are the same bet again... Because you can't short, the hedge is the inverse ETFs you already allowlisted: when net BTC beta passes a threshold, buy a small BITI sleeve sized to neutralize part of it.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Portfolio Risk / Beta Hedging / Inverse ETFs",
-      "tags": [
-        "factor-risk",
-        "beta-hedging",
-        "inverse-etf",
-        "market-neutral",
-        "portfolio"
-      ]
+      "tags": ["factor-risk", "beta-hedging", "inverse-etf", "market-neutral", "portfolio"]
     },
     {
       "id": "MLP0-003",
@@ -970,13 +709,7 @@
       "verbatim_quote": "Coverage analysts with living thesis files. The research desk builds a fresh dossier for each case. Sell-side analysts instead keep a running file per name and update it incrementally. You could give each watchlist symbol a coverage doc: current thesis, key numbers, what would change their mind, and the last five catalysts and how price reacted.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Research Desk / Token Optimization / Dossiers",
-      "tags": [
-        "coverage-files",
-        "living-thesis",
-        "research",
-        "token-efficiency",
-        "knowledge-base"
-      ]
+      "tags": ["coverage-files", "living-thesis", "research", "token-efficiency", "knowledge-base"]
     },
     {
       "id": "MLP0-004",
@@ -992,13 +725,7 @@
       "verbatim_quote": "A weekly house view. Funds run a macro meeting that produces a shared prior every desk conditions on. A weekly agent could write a short, falsifiable house view, for example 'risk-on while 10y < 4.5% and BTC funding neutral; fade AI-capex headlines.' It gets injected as context into Tier 2 and the court.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Macro Desk / Courtroom Context / House View",
-      "tags": [
-        "house-view",
-        "macro",
-        "priors",
-        "falsification",
-        "regime"
-      ]
+      "tags": ["house-view", "macro", "priors", "falsification", "regime"]
     },
     {
       "id": "MLP0-005",
@@ -1014,13 +741,7 @@
       "verbatim_quote": "Compliance and restricted list. Pull the free Nasdaq/NYSE halt feeds, SEC trading suspensions, delisting notices and pending corporate actions (splits, mergers, tender offers) into a deterministic restricted list checked at Tier 0. These are exactly the events that make an ATR stop meaningless.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Tier 0 Filter / Compliance / Halt Feeds",
-      "tags": [
-        "compliance",
-        "halts",
-        "sec-suspensions",
-        "corporate-actions",
-        "tier-0"
-      ]
+      "tags": ["compliance", "halts", "sec-suspensions", "corporate-actions", "tier-0"]
     },
     {
       "id": "MLP0-006",
@@ -1036,14 +757,7 @@
       "verbatim_quote": "Cross-asset lead-lag desk. A few relative-value signals are free and fit your universe: MSTR's premium to its BTC holdings (mNAV). IBIT's premium or discount to spot. COIN's beta-adjusted gap versus the weekend BTC move, which predicts the Monday open. BTC leading alts by minutes to hours.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Relative Value / Lead-Lag / Crypto-Equities",
-      "tags": [
-        "lead-lag",
-        "relative-value",
-        "mstr",
-        "coin",
-        "arbitrage",
-        "signals"
-      ]
+      "tags": ["lead-lag", "relative-value", "mstr", "coin", "arbitrage", "signals"]
     },
     {
       "id": "MLP0-007",
@@ -1059,13 +773,7 @@
       "verbatim_quote": "A real code quant seat. The panel's 'quant' seat is an LLM doing arithmetic, which your own philosophy says it shouldn't. Replace or augment it with an actual model: a logistic regression or gradient-boosted stump trained on your logged features... A seat with no language model at all is the only genuinely orthogonal vote you can add.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Courtroom Panel / Quant Voter / Machine Learning",
-      "tags": [
-        "code-quant",
-        "orthogonal-voter",
-        "ml",
-        "courtroom",
-        "diversity"
-      ]
+      "tags": ["code-quant", "orthogonal-voter", "ml", "courtroom", "diversity"]
     },
     {
       "id": "MLP0-008",
@@ -1081,13 +789,7 @@
       "verbatim_quote": "Calculator tools for the seats. Expose your pure TS functions (R:R, ATR multiples, z-scores, fee hurdle, distance to EMA) as tools the bull, bear and panel can call. They then cite computed results instead of producing numbers that uncitedNumbers has to catch afterward.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Courtroom Prompts / TypeScript Math Tools",
-      "tags": [
-        "calculator-tools",
-        "math",
-        "ts-functions",
-        "courtroom",
-        "hallucination-defense"
-      ]
+      "tags": ["calculator-tools", "math", "ts-functions", "courtroom", "hallucination-defense"]
     },
     {
       "id": "MLP0-009",
@@ -1103,13 +805,7 @@
       "verbatim_quote": "Precedent search (case law). Before each hearing, find the 5 most similar past hearings by feature vector: setup class, regime, ATR%, catalyst kind, spread. Show the court how each one actually turned out. You can do this as a SQL nearest-neighbor query in D1 with no embeddings. It fits the courtroom metaphor exactly...",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Courtroom / D1 Database / Precedent Search",
-      "tags": [
-        "precedent",
-        "case-law",
-        "nearest-neighbor",
-        "d1",
-        "courtroom"
-      ]
+      "tags": ["precedent", "case-law", "nearest-neighbor", "d1", "courtroom"]
     },
     {
       "id": "MLP0-010",
@@ -1125,13 +821,7 @@
       "verbatim_quote": "Distilled Tier-1 classifier. You have thousands of Clef-flash triage labels piling up in triage_log. Train a tiny TF-IDF plus logistic model on them, run it in TS at zero neurons, and only call Clef when the small model is uncertain (probability between 0.3 and 0.7). This could cut Tier-1 neuron spend by more than half...",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Tier 1 Triage / FinOps / Token Efficiency",
-      "tags": [
-        "distillation",
-        "tf-idf",
-        "logistic-regression",
-        "zero-neurons",
-        "cost-saving"
-      ]
+      "tags": ["distillation", "tf-idf", "logistic-regression", "zero-neurons", "cost-saving"]
     },
     {
       "id": "MLP0-011",
@@ -1147,13 +837,7 @@
       "verbatim_quote": "Operator Q&A agent. Add a read-only Discord command, something like /why NVDA or /explain yesterday. It answers from the journal, rejections ledger and court transcripts with citations to journal seq numbers. Right now understanding a decision means reading raw cards. This also becomes a product feature for the syndicate tier.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Discord Bot / Operator UX / Explainability",
-      "tags": [
-        "operator-qa",
-        "discord",
-        "explainability",
-        "journal",
-        "telemetry"
-      ]
+      "tags": ["operator-qa", "discord", "explainability", "journal", "telemetry"]
     },
     {
       "id": "MLP0-012",
@@ -1169,13 +853,7 @@
       "verbatim_quote": "Model drift canary. Free-tier model IDs change behavior or vanish without notice, and your prompts are tuned to specific models. Weekly, send a fixed golden set of 10–20 prompts to every provider in every chain and diff the outputs: schema compliance, probability distributions, refusal rate. Alert on drift before it silently changes your court's personality.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "LLM Router / Quality Assurance / Canary",
-      "tags": [
-        "model-drift",
-        "canary",
-        "golden-prompts",
-        "regression-testing",
-        "llm-monitoring"
-      ]
+      "tags": ["model-drift", "canary", "golden-prompts", "regression-testing", "llm-monitoring"]
     },
     {
       "id": "MLP0-013",
@@ -1191,12 +869,7 @@
       "verbatim_quote": "Temporal grounding sheet. LLMs reason from their training cutoff. A headline about 'the Fed chair' or 'the new tariff' can be misread if the model's world-model is stale. Inject a short, code-maintained 'current facts' block into every prompt: today's date, current policy rate, current Fed chair, recent major events from your own ingest.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Prompt Engineering / Context Injection",
-      "tags": [
-        "temporal-grounding",
-        "prompt-injection",
-        "world-model",
-        "accuracy"
-      ]
+      "tags": ["temporal-grounding", "prompt-injection", "world-model", "accuracy"]
     },
     {
       "id": "MLP0-014",
@@ -1212,13 +885,7 @@
       "verbatim_quote": "Research director with paper ingestion. Weekly, pull new SSRN/arXiv q-fin abstracts. An agent picks the 1–2 testable ideas that fit your constraints (long-only, cash, daily bars) and writes them as candidate rules. It queues them into the backtest lab with the deflated-Sharpe gate. This is the LAB mutation loop fed by literature instead of self-mutation.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Quant Lab / Paper Ingestion / Strategy Generation",
-      "tags": [
-        "paper-ingestion",
-        "arxiv",
-        "ssrn",
-        "quant-research",
-        "strategy-generation"
-      ]
+      "tags": ["paper-ingestion", "arxiv", "ssrn", "quant-research", "strategy-generation"]
     },
     {
       "id": "MLP0-015",
@@ -1234,13 +901,7 @@
       "verbatim_quote": "Code-deploy auto-rollback. Workers versions and gradual deployments let you split traffic to a new version. Watch the SLO signals (pulse completion, stage errors, outbox depth) for an hour after deploy and roll back automatically on breach. The dossier covers this for config, not code.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "DevOps / Cloudflare Workers / Rollback CI",
-      "tags": [
-        "auto-rollback",
-        "cloudflare",
-        "gradual-deploy",
-        "slo",
-        "reliability"
-      ]
+      "tags": ["auto-rollback", "cloudflare", "gradual-deploy", "slo", "reliability"]
     },
     {
       "id": "MLP0-016",
@@ -1256,12 +917,7 @@
       "verbatim_quote": "ADR drafting from diffs. When a PR changes doctrine or a risk module, an agent drafts the ADR entry automatically for you to edit. This attacks doc rot at the source rather than catching it later.",
       "impact_or_risk_level": "Low",
       "target_audience_or_subsystem": "Documentation / GitHub Actions / ADR",
-      "tags": [
-        "adr",
-        "documentation",
-        "git-diff",
-        "developer-experience"
-      ]
+      "tags": ["adr", "documentation", "git-diff", "developer-experience"]
     },
     {
       "id": "MLP0-017",
@@ -1277,12 +933,7 @@
       "verbatim_quote": "Investor-letter generator. Weekly, turn the Governor report card and best court transcripts into a readable letter for Track C. That's your content pipeline with near-zero marginal effort.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Marketing / Investor Relations / Content Pipeline",
-      "tags": [
-        "investor-letter",
-        "governor",
-        "content-marketing",
-        "automation"
-      ]
+      "tags": ["investor-letter", "governor", "content-marketing", "automation"]
     },
     {
       "id": "MLP0-018",
@@ -1298,13 +949,7 @@
       "verbatim_quote": "Universe review. The watchlists are hand-picked mega-caps, which is selection bias that never gets revisited. A monthly job could propose adds and drops based on liquidity, spread and catalyst frequency, delivered as a PR like everything else.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Universe Management / Watchlists / Selection Bias",
-      "tags": [
-        "universe-review",
-        "watchlists",
-        "selection-bias",
-        "liquidity",
-        "governance"
-      ]
+      "tags": ["universe-review", "watchlists", "selection-bias", "liquidity", "governance"]
     },
     {
       "id": "MLP0-019",
@@ -1320,13 +965,7 @@
       "verbatim_quote": "The 30-day clock punishes correct interventions. The autonomy clock resets on any operator action, including right ones. That nudges the operator toward not intervening when they should... I'd log a reason class on every intervention (safety, discretionary, maintenance) so the Governor and you can later see whether resets came from the system misbehaving or from you tinkering.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Governance / Autonomy Clock / Operator Controls",
-      "tags": [
-        "autonomy-clock",
-        "interventions",
-        "operator-loop",
-        "governance",
-        "audit"
-      ]
+      "tags": ["autonomy-clock", "interventions", "operator-loop", "governance", "audit"]
     },
     {
       "id": "MLP0-020",
@@ -1342,13 +981,7 @@
       "verbatim_quote": "Operator absence. Everything assumes a reachable operator. Add an operator dead-man: if nobody has acknowledged the daily anchor for N days, LIVE auto-winds down to Stop 0 and flat. This only ever tightens, so it fits the constitution.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Risk Engine / Fail-Safe / Operator Dead-Man",
-      "tags": [
-        "dead-man-switch",
-        "fail-safe",
-        "absence",
-        "risk-control",
-        "constitution"
-      ]
+      "tags": ["dead-man-switch", "fail-safe", "absence", "risk-control", "constitution"]
     },
     {
       "id": "MLP0-021",
@@ -1364,13 +997,7 @@
       "verbatim_quote": "Venue and stablecoin risk. The canonical symbol logic handles USDT and USDC pairs. A depeg monitor (USDC/USD, USDT/USD from free tickers) should veto those quote currencies at Tier 0. For crypto quotes generally, cross-check Alpaca against free Coinbase/Kraken tickers and treat disagreement as a bad-data veto.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Tier 0 Sanity / Stablecoin Depeg / Bad Data Guard",
-      "tags": [
-        "depeg-monitor",
-        "venue-risk",
-        "bad-data",
-        "crypto-quotes",
-        "tier-0"
-      ]
+      "tags": ["depeg-monitor", "venue-risk", "bad-data", "crypto-quotes", "tier-0"]
     },
     {
       "id": "MLP0-022",
@@ -1386,13 +1013,7 @@
       "verbatim_quote": "Gap risk the stops can't see. Equity stops don't protect overnight gaps, and inverse ETFs decay with daily rebalancing. Overnight or weekend holds need their own gap budget in sizing, not just ATR stops.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Position Sizing / Gap Risk / Overnight Protection",
-      "tags": [
-        "gap-risk",
-        "overnight-risk",
-        "position-sizing",
-        "stops",
-        "inverse-etf"
-      ]
+      "tags": ["gap-risk", "overnight-risk", "position-sizing", "stops", "inverse-etf"]
     },
     {
       "id": "MLP0-023",
@@ -1408,13 +1029,7 @@
       "verbatim_quote": "Thin crypto hours. Spreads and fill quality vary hugely by hour and on weekends. A time-of-day liquidity profile from your own quote history should gate entries, separate from the p90 spread idea already in the dossier.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Execution Plumber / Liquidity Profiling / Crypto",
-      "tags": [
-        "liquidity-profile",
-        "crypto-hours",
-        "spreads",
-        "slippage",
-        "timing"
-      ]
+      "tags": ["liquidity-profile", "crypto-hours", "spreads", "slippage", "timing"]
     },
     {
       "id": "MLP0-024",
@@ -1430,13 +1045,7 @@
       "verbatim_quote": "No daily benchmark. Every day, the HUD should show the book against buy-and-hold BTC and SPY at equal risk. If the system is quietly losing to doing nothing, you want to know in week two, not month three.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "HUD Cockpit / Benchmark / Attribution",
-      "tags": [
-        "benchmark",
-        "hud",
-        "spy",
-        "btc",
-        "alpha-verification"
-      ]
+      "tags": ["benchmark", "hud", "spy", "btc", "alpha-verification"]
     },
     {
       "id": "MLP0-025",
@@ -1452,13 +1061,7 @@
       "verbatim_quote": "Beyond Cortex: The constitution, contract, adversarial court and hash-chained journal pattern isn't really about trading. It's a generic harness for any autonomous agent spending real resources: ad budgets, cloud spend, procurement, on-call remediation. If the trading product works, the more valuable thing you may have built is the governance kernel.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Architecture / Governance Kernel / Enterprise AI",
-      "tags": [
-        "governance-kernel",
-        "enterprise-ai",
-        "agent-safety",
-        "audit-trail",
-        "commercialization"
-      ]
+      "tags": ["governance-kernel", "enterprise-ai", "agent-safety", "audit-trail", "commercialization"]
     },
     {
       "id": "MLP1-001",
@@ -1474,13 +1077,7 @@
       "verbatim_quote": "Pattern A: Pre-Event 'Scenario Tree' Compilation (Beating the Latency Trap) | Institutional desks never wait for a scheduled catalyst... Two hours before a known event, AgentCortexDO spins up a parallel swarm of 4 agents that research expectations, whisper numbers, and options-implied moves, and hold the Courtroom hearing in advance. The Output: ...deterministic ScenarioExecutionMatrix JSON into D1/SQLite memory...",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Scenario Matrix / Latency Optimization / Event Trading",
-      "tags": [
-        "scenario-tree",
-        "latency",
-        "pre-compilation",
-        "event-trading",
-        "pod-architecture"
-      ]
+      "tags": ["scenario-tree", "latency", "pre-compilation", "event-trading", "pod-architecture"]
     },
     {
       "id": "MLP1-002",
@@ -1496,13 +1093,7 @@
       "verbatim_quote": "Pattern B: Blind 'Mosaic Theory' Map-Reduce Swarm | How it works in parallel (Promise.all fan-out across Workers): 1. Sub-Agent 1 (Historical Analog Miner)... 2. Sub-Agent 2 (Expectations & 'Priced-In' Auditor)... 3. Sub-Agent 3 (Balance Sheet & Dilution Detective)... 4. Sub-Agent 4 (Cross-Asset & Sympathy Contagion Mapper)...",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Research Desk / Mosaic Swarm / Map-Reduce",
-      "tags": [
-        "mosaic-theory",
-        "parallel-agents",
-        "map-reduce",
-        "anchoring-bias",
-        "research"
-      ]
+      "tags": ["mosaic-theory", "parallel-agents", "map-reduce", "anchoring-bias", "research"]
     },
     {
       "id": "MLP1-003",
@@ -1518,13 +1109,7 @@
       "verbatim_quote": "Pattern C: 'Center Book' Pair-Trade Structuring (Market-Neutral Alpha) | Whenever the Bull Advocate proposes going Long on Ticker A, a parallel Pair-Structuring Agent queries cross-asset correlation to pair it with a short/inverse beta proxy in the same sector...",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Risk Engine / Pair Trading / Beta Neutrality",
-      "tags": [
-        "pair-trade",
-        "center-book",
-        "market-neutral",
-        "hedging",
-        "alpha"
-      ]
+      "tags": ["pair-trade", "center-book", "market-neutral", "hedging", "alpha"]
     },
     {
       "id": "MLP1-004",
@@ -1540,13 +1125,7 @@
       "verbatim_quote": "**1. SourceIntegrityAgent** | Sits at Tier 1.5 | Responsibilities: Verifies URL timestamps, publication latency, and checks if news was sourced from known PR syndication / SEO spam farms before passing to Court.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Tier 1.5 / News Verification / Intake Integrity",
-      "tags": [
-        "source-integrity",
-        "anti-seo",
-        "fake-news",
-        "pr-wire",
-        "tier-1.5"
-      ]
+      "tags": ["source-integrity", "anti-seo", "fake-news", "pr-wire", "tier-1.5"]
     },
     {
       "id": "MLP1-005",
@@ -1562,13 +1141,7 @@
       "verbatim_quote": "**2. PricedInAuditorAgent** | Responsibilities: Analyzes intraday volume, IV skew, and pre-catalyst drift to compute PricedInScore. Vetoes if 70%+ of expected move occurred prior to headline release.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Courtroom / Priced-In Auditor / Volume Profile",
-      "tags": [
-        "priced-in",
-        "volume-skew",
-        "exit-liquidity",
-        "intraday-drift",
-        "veto"
-      ]
+      "tags": ["priced-in", "volume-skew", "exit-liquidity", "intraday-drift", "veto"]
     },
     {
       "id": "MLP1-006",
@@ -1584,13 +1157,7 @@
       "verbatim_quote": "**3. DilutionForensicAgent** | Responsibilities: Scans recent 10-Q/S-3 filings or tokenomics schedules to see if management is dumping shares/tokens into catalyst spikes via ATM facilities, issuing an immediate veto.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Tier 2 / Dilution Detective / EDGAR Scraper",
-      "tags": [
-        "dilution",
-        "s-3",
-        "atm-facility",
-        "penny-stocks",
-        "sec-filings"
-      ]
+      "tags": ["dilution", "s-3", "atm-facility", "penny-stocks", "sec-filings"]
     },
     {
       "id": "MLP1-007",
@@ -1606,14 +1173,7 @@
       "verbatim_quote": "**4. RegimeMeteorologistAgent** | Responsibilities: Classifies macro regime (High Vol Trending, Low Vol Mean-Reverting, Liquidity Shock) using VIX, MOVE index, and yield curve slope; dynamically sets portfolio ATR multipliers.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Macro Desk / Regime Engine / Risk Multipliers",
-      "tags": [
-        "regime",
-        "meteorologist",
-        "vix",
-        "move-index",
-        "volatility",
-        "macro"
-      ]
+      "tags": ["regime", "meteorologist", "vix", "move-index", "volatility", "macro"]
     },
     {
       "id": "MLP1-008",
@@ -1629,13 +1189,7 @@
       "verbatim_quote": "**5. ExecutionPlumberAgent** | Responsibilities: Analyzes current order book depth, bid-ask spread, and historical slippage; determines optimal execution route (TWAP, VWAP, or IOC Limit).",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Execution Plumber / Order Routing / Slippage",
-      "tags": [
-        "execution-plumber",
-        "twap",
-        "vwap",
-        "microstructure",
-        "slippage"
-      ]
+      "tags": ["execution-plumber", "twap", "vwap", "microstructure", "slippage"]
     },
     {
       "id": "MLP1-009",
@@ -1651,12 +1205,7 @@
       "verbatim_quote": "**6. PositionWardenAgent** | Responsibilities: Runs during open trade lifecycle; monitors real-time order-book delta, sudden volume dry-ups, and opposing news catalysts to recommend early exit.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Position Shadow / Active Monitoring / Trade Warden",
-      "tags": [
-        "position-warden",
-        "active-monitoring",
-        "trade-lifecycle",
-        "order-flow"
-      ]
+      "tags": ["position-warden", "active-monitoring", "trade-lifecycle", "order-flow"]
     },
     {
       "id": "MLP1-010",
@@ -1672,13 +1221,7 @@
       "verbatim_quote": "**7. AutopsyCoronerAgent** | Responsibilities: Deconstructs every closed trade into attribution components (Alpha, Beta, Slippage, Model Drift) and writes findings into .scar tissue memory.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Post-Trade Lab / Autopsy / Scar-Tissue Memory",
-      "tags": [
-        "autopsy",
-        "coroner",
-        "post-mortem",
-        "attribution",
-        "scar-tissue"
-      ]
+      "tags": ["autopsy", "coroner", "post-mortem", "attribution", "scar-tissue"]
     },
     {
       "id": "MLP1-011",
@@ -1694,13 +1237,7 @@
       "verbatim_quote": "**8. CIOAllocatorAgent (MetaPod Capital Governor)** | Responsibilities: Computes Sharpe/Sortino ratios across strategies; dynamically scales capital allocations using Kelly-criterion fraction multipliers.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Capital Governor / Kelly Criterion / MetaPod Allocator",
-      "tags": [
-        "cio-allocator",
-        "kelly-criterion",
-        "capital-allocation",
-        "metapod",
-        "governor"
-      ]
+      "tags": ["cio-allocator", "kelly-criterion", "capital-allocation", "metapod", "governor"]
     },
     {
       "id": "MLP1-012",
@@ -1716,12 +1253,7 @@
       "verbatim_quote": "1. verify_timestamp_and_citation(url, quoted_claim) | Checks HTTP headers, Wayback Machine, and canonical tags to verify actual publication timestamp against quoted claims.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "MCP Tooling / News Intake / Citation Verification",
-      "tags": [
-        "mcp-tool",
-        "timestamp-verification",
-        "citations",
-        "web-scraping"
-      ]
+      "tags": ["mcp-tool", "timestamp-verification", "citations", "web-scraping"]
     },
     {
       "id": "MLP1-013",
@@ -1737,12 +1269,7 @@
       "verbatim_quote": "2. get_intraday_abnormality_profile(ticker) | Computes rolling z-score of volume and price velocity over 5m/15m/1h bars compared to 30-day baseline.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "MCP Tooling / Volume Analysis / Statistical Profiles",
-      "tags": [
-        "mcp-tool",
-        "z-scores",
-        "volume-profile",
-        "intraday-abnormality"
-      ]
+      "tags": ["mcp-tool", "z-scores", "volume-profile", "intraday-abnormality"]
     },
     {
       "id": "MLP1-014",
@@ -1758,12 +1285,7 @@
       "verbatim_quote": "3. query_historical_catalyst_base_rate(catalyst_category, market_cap_bucket, regime) | Queries D1 historical database for empirical win rates and distribution of price moves for similar catalysts in identical regimes.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "MCP Tooling / Base Rates / Empirical Statistics",
-      "tags": [
-        "mcp-tool",
-        "base-rates",
-        "catalyst-history",
-        "d1-database"
-      ]
+      "tags": ["mcp-tool", "base-rates", "catalyst-history", "d1-database"]
     },
     {
       "id": "MLP1-015",
@@ -1779,13 +1301,7 @@
       "verbatim_quote": "4. simulate_marginal_portfolio_var(proposed_legs[]) | Calculates incremental change in portfolio Value-at-Risk (VaR) and Expected Shortfall if proposed trade is added.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "MCP Tooling / Portfolio VaR / Risk Simulation",
-      "tags": [
-        "mcp-tool",
-        "var",
-        "expected-shortfall",
-        "risk-simulation",
-        "portfolio"
-      ]
+      "tags": ["mcp-tool", "var", "expected-shortfall", "risk-simulation", "portfolio"]
     },
     {
       "id": "MLP1-016",
@@ -1801,13 +1317,7 @@
       "verbatim_quote": "5. diff_sec_filing_sections(ticker, section_id) | Performs semantic diff between current and previous 10-K/10-Q sections (Item 1A Risk Factors, MD&A) to detect subtle operational changes.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "MCP Tooling / EDGAR Diff / Fundamental Research",
-      "tags": [
-        "mcp-tool",
-        "sec-diff",
-        "10-k",
-        "10-q",
-        "fundamental-analysis"
-      ]
+      "tags": ["mcp-tool", "sec-diff", "10-k", "10-q", "fundamental-analysis"]
     },
     {
       "id": "MLP1-017",
@@ -1823,12 +1333,7 @@
       "verbatim_quote": "6. scan_second_order_sympathy_nodes(primary_ticker, min_revenue_dependency) | Traverses supply-chain and competitor graph to identify collateral sympathetically impacted symbols.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "MCP Tooling / Knowledge Graph / Sympathy Plays",
-      "tags": [
-        "mcp-tool",
-        "knowledge-graph",
-        "supply-chain",
-        "sympathy-trading"
-      ]
+      "tags": ["mcp-tool", "knowledge-graph", "supply-chain", "sympathy-trading"]
     },
     {
       "id": "MLP1-018",
@@ -1844,13 +1349,7 @@
       "verbatim_quote": "1. Pre-Training 'Time-Travel' Leakage in the Backtest Lab | LLM foundation models already know post-2023 price histories; backtests look artificially genius unless tickers and dates are fully anonymized.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Backtest Lab / Lookahead Bias / Quant Integrity",
-      "tags": [
-        "time-travel-leakage",
-        "lookahead-bias",
-        "backtest",
-        "overfitting",
-        "blindspot"
-      ]
+      "tags": ["time-travel-leakage", "lookahead-bias", "backtest", "overfitting", "blindspot"]
     },
     {
       "id": "MLP1-019",
@@ -1866,13 +1365,7 @@
       "verbatim_quote": "2. The 'Split-Brain' Broker Reconciliation Trap | Mismatch between local SQLite state and Alpaca broker state caused by network timeouts during order placement; requires idempotent request tracking.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Order Routing / Broker Reconciliation / Idempotency",
-      "tags": [
-        "split-brain",
-        "reconciliation",
-        "idempotency",
-        "broker-sync",
-        "blindspot"
-      ]
+      "tags": ["split-brain", "reconciliation", "idempotency", "broker-sync", "blindspot"]
     },
     {
       "id": "MLP1-020",
@@ -1888,13 +1381,7 @@
       "verbatim_quote": "3. Corporate Actions, Splits & Ex-Dividend Hallucinations | Stock splits and dividend adjustments produce fake massive drops in raw price feeds, causing bogus court short signals unless raw prices are split-adjusted.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Data Ingest / Corporate Actions / Price Normalization",
-      "tags": [
-        "stock-splits",
-        "corporate-actions",
-        "data-integrity",
-        "hallucination",
-        "blindspot"
-      ]
+      "tags": ["stock-splits", "corporate-actions", "data-integrity", "hallucination", "blindspot"]
     },
     {
       "id": "MLP1-021",
@@ -1910,13 +1397,7 @@
       "verbatim_quote": "4. The 'Liquidity Mirage' on Catalyst Spikes | Level 1 bid-ask quotes look tight during news announcements, but top-of-book depth is razor thin; market orders suffer devastating 3-5% slippage.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Execution / Slippage Control / Microstructure",
-      "tags": [
-        "liquidity-mirage",
-        "slippage",
-        "level-2-depth",
-        "market-orders",
-        "blindspot"
-      ]
+      "tags": ["liquidity-mirage", "slippage", "level-2-depth", "market-orders", "blindspot"]
     },
     {
       "id": "MLP1-022",
@@ -1932,13 +1413,7 @@
       "verbatim_quote": "5. Correlated 'Hidden Factor' Stacking | Holding 3 uncorrelated individual stock longs that all secretly share high sensitivity to USD dollar strength or semiconductor capex cycles.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Portfolio Risk / Factor Risk / Barra Decomposition",
-      "tags": [
-        "hidden-factors",
-        "factor-stacking",
-        "correlation",
-        "macro-risk",
-        "blindspot"
-      ]
+      "tags": ["hidden-factors", "factor-stacking", "correlation", "macro-risk", "blindspot"]
     },
     {
       "id": "MLP1-023",
@@ -1954,12 +1429,7 @@
       "verbatim_quote": "1. Prompt & Model Regression CI/CD ('The Courtroom Bar Exam'): Automated test suite running 25 standardized historical market cases on every prompt commit; blocks PR if win rate drops >5%.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "CI/CD / Prompt Engineering / Testing",
-      "tags": [
-        "prompt-ci",
-        "bar-exam",
-        "regression-testing",
-        "github-actions"
-      ]
+      "tags": ["prompt-ci", "bar-exam", "regression-testing", "github-actions"]
     },
     {
       "id": "MLP1-024",
@@ -1975,13 +1445,7 @@
       "verbatim_quote": "2. Chaos-Monkey 'Kill-Switch' Drills: Automated routine that randomly injects simulated network disconnections, 500 API errors, and corrupted payloads into sandbox to verify fail-safe shutdown.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Chaos Engineering / Resilience / Testing",
-      "tags": [
-        "chaos-monkey",
-        "resilience",
-        "fault-injection",
-        "fail-safe",
-        "testing"
-      ]
+      "tags": ["chaos-monkey", "resilience", "fault-injection", "fail-safe", "testing"]
     },
     {
       "id": "MLP1-025",
@@ -1997,13 +1461,7 @@
       "verbatim_quote": "3. Semantic Catalyst Deduplication Cache (FinOps Saver): Embeds incoming news headlines with small vector model; discards articles with >0.92 cosine similarity to articles ingested within the last 4 hours.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Tier 0 / FinOps / Vector Deduplication",
-      "tags": [
-        "deduplication",
-        "embeddings",
-        "cosine-similarity",
-        "finops",
-        "token-saving"
-      ]
+      "tags": ["deduplication", "embeddings", "cosine-similarity", "finops", "token-saving"]
     },
     {
       "id": "MLP2-001",
@@ -2019,13 +1477,7 @@
       "verbatim_quote": "Prediction markets like Kalshi (regulated in the US, has an API) let you buy contracts for a few cents to a dollar each. Max loss is the premium, and a correct contrarian call can pay 3–10x. That's the convex, small-ticket, defined-risk payoff $54 needs... The desk only trades when your calibrated probability beats the market price by more than fees plus a margin.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Prediction Desk / Kalshi / Convex Payoffs",
-      "tags": [
-        "kalshi",
-        "prediction-markets",
-        "convexity",
-        "event-contracts",
-        "superforecasting"
-      ]
+      "tags": ["kalshi", "prediction-markets", "convexity", "event-contracts", "superforecasting"]
     },
     {
       "id": "MLP2-002",
@@ -2041,12 +1493,7 @@
       "verbatim_quote": "Hold-or-harvest judge. When a position hits target, a cheap LLM judge reviews fresh evidence and decides: take profit, or switch to a trailing stop and keep riding. Grade both paths against what actually happened.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Exit Engine / Profit Taking / Trailing Stops",
-      "tags": [
-        "hold-or-harvest",
-        "right-tail",
-        "trailing-stop",
-        "exit-management"
-      ]
+      "tags": ["hold-or-harvest", "right-tail", "trailing-stop", "exit-management"]
     },
     {
       "id": "MLP2-003",
@@ -2062,12 +1509,7 @@
       "verbatim_quote": "Pyramiding with locked-in profit. When a winner is up 1R, open a new contract to add size, with the original stop moved to breakeven. Total risk never exceeds the rung cap. The constitution forbids averaging down, not adding to winners, and requiring a new contract keeps U1 intact.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Risk Engine / Pyramiding / Position Sizing",
-      "tags": [
-        "pyramiding",
-        "breakeven-stop",
-        "convexity",
-        "position-sizing"
-      ]
+      "tags": ["pyramiding", "breakeven-stop", "convexity", "position-sizing"]
     },
     {
       "id": "MLP2-004",
@@ -2083,13 +1525,7 @@
       "verbatim_quote": "Scheduled-catalyst calendar. Crypto token unlocks, earnings dates, FDA decision dates, ETF flow reports, index rebalances. These are known in advance, so the research desk can pre-build the dossier and the court can hear the case before the event.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Funnel Intake / Event Calendar / Pre-Debate",
-      "tags": [
-        "catalyst-calendar",
-        "earnings",
-        "token-unlocks",
-        "fda",
-        "latency-defense"
-      ]
+      "tags": ["catalyst-calendar", "earnings", "token-unlocks", "fda", "latency-defense"]
     },
     {
       "id": "MLP2-005",
@@ -2105,13 +1541,7 @@
       "verbatim_quote": "Self-tuning funnel thresholds. Once each tier's expected return per neuron is measured, thresholds adjust automatically toward whatever produces the most graded profit, rather than staying hand-set.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Funnel / FinOps / Token Economics",
-      "tags": [
-        "funnel-tuning",
-        "neurons",
-        "token-economics",
-        "optimization",
-        "finops"
-      ]
+      "tags": ["funnel-tuning", "neurons", "token-economics", "optimization", "finops"]
     },
     {
       "id": "MLP2-006",
@@ -2127,12 +1557,7 @@
       "verbatim_quote": "Wider universe. Run the cheap Tier 0 and Tier 1 over every liquid Alpaca crypto pair and a much larger fractional-equity list, not 13 pairs and 18 tickers.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Universe / Asset Coverage / Intake Funnel",
-      "tags": [
-        "universe-expansion",
-        "crypto",
-        "fractional-shares",
-        "funnel-breadth"
-      ]
+      "tags": ["universe-expansion", "crypto", "fractional-shares", "funnel-breadth"]
     },
     {
       "id": "MLP2-007",
@@ -2148,12 +1573,7 @@
       "verbatim_quote": "A dynamic capital allocator across strategies: Use Thompson sampling (a multi-armed bandit) over your strategies and the court, fed by realized R. Capital tilts automatically toward whatever is working in the current regime and away from what's decaying, within the rung caps.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Capital Allocation / Thompson Sampling / Multi-Armed Bandit",
-      "tags": [
-        "thompson-sampling",
-        "multi-armed-bandit",
-        "capital-allocation",
-        "bayesian"
-      ]
+      "tags": ["thompson-sampling", "multi-armed-bandit", "capital-allocation", "bayesian"]
     },
     {
       "id": "MLP2-008",
@@ -2169,13 +1589,7 @@
       "verbatim_quote": "Prompts that optimize themselves: Treat the bull, bear and judge prompts as parameters. Each week, generate a few prompt variants (DSPy-style), replay them against last month's graded hearings in the locked-window replay, and promote the variant with the best calibration and graded return, by PR.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Prompt Engineering / DSPy / Self-Optimization",
-      "tags": [
-        "dspy",
-        "prompt-optimization",
-        "auto-tuning",
-        "courtroom",
-        "calibration"
-      ]
+      "tags": ["dspy", "prompt-optimization", "auto-tuning", "courtroom", "calibration"]
     },
     {
       "id": "MLP3-001",
@@ -2191,12 +1605,7 @@
       "verbatim_quote": "1. Flipping the 90/10 Brain Split: The 'Exit Courtroom' & Active Position Engineering | Flipping this to 50/50 creates an active Exit Courtroom that manages open trades with the same intellectual depth as entry.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "PositionShadowDO / Exit Court / Lifecycle Engineering",
-      "tags": [
-        "exit-courtroom",
-        "position-shadow",
-        "brain-split",
-        "trade-management"
-      ]
+      "tags": ["exit-courtroom", "position-shadow", "brain-split", "trade-management"]
     },
     {
       "id": "MLP3-002",
@@ -2212,13 +1621,7 @@
       "verbatim_quote": "1. The De-Risk Tranche (35%): Sold automatically into the first liquidity spike (+1.0 ATR) so the remaining 65% of the trade is completely 'free'. 2. The Thesis Core (45%): Held until the catalyst reaches full price discovery or a counter-headline hits. 3. The Runner (20%): Trailed purely by Kronos K-line volatility cones until exhaustion.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Execution Engine / Tranche Sizing / Scale-Out",
-      "tags": [
-        "tranches",
-        "scale-out",
-        "de-risk",
-        "runner",
-        "position-sizing"
-      ]
+      "tags": ["tranches", "scale-out", "de-risk", "runner", "position-sizing"]
     },
     {
       "id": "MLP3-003",
@@ -2234,12 +1637,7 @@
       "verbatim_quote": "While a trade is open, the researcher switches into Post-Entry Wiretap Mode, polling specifically for news that triggers the Bear Prosecutor's contract kill_criteria or competitor sympathy moves.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Research Desk / Wiretap Mode / Falsification",
-      "tags": [
-        "wiretap-mode",
-        "surveillance",
-        "kill-criteria",
-        "active-monitoring"
-      ]
+      "tags": ["wiretap-mode", "surveillance", "kill-criteria", "active-monitoring"]
     },
     {
       "id": "MLP3-004",
@@ -2255,12 +1653,7 @@
       "verbatim_quote": "Cortex calculates a real-time Velocity-Adjusted Expectancy (Ev) on every open position (Ev = (Current R / Time Held) * P(target)). If velocity decays below hurdle, it rotates capital to fresher opportunities.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Risk Engine / Velocity Metrics / Capital Rotation",
-      "tags": [
-        "velocity-expectancy",
-        "opportunity-cost",
-        "capital-rotation",
-        "metrics"
-      ]
+      "tags": ["velocity-expectancy", "opportunity-cost", "capital-rotation", "metrics"]
     },
     {
       "id": "MLP3-005",
@@ -2276,13 +1669,7 @@
       "verbatim_quote": "1. News-First Ingestion: Clairic and the broad news scanner watch the global firehose without filtering by ticker first... 2. Entity-to-Symbol Resolution... 3. Ephemeral Hot-Porting: The Porter dynamically registers the symbol into Cortex's active table, backfills its last 512 bars, and runs the Court within 90s.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Data Ingestion / Hot-Porting / Symbol Generalization",
-      "tags": [
-        "hot-porting",
-        "news-first",
-        "named-entity",
-        "generalization",
-        "intake"
-      ]
+      "tags": ["hot-porting", "news-first", "named-entity", "generalization", "intake"]
     },
     {
       "id": "MLP3-006",
@@ -2298,13 +1685,7 @@
       "verbatim_quote": "The Two Rings work together: Fast Ingest Ring processes 20 parallel web sources in 15 seconds; Deep Archive Ring audits SEC filings and fundamental health. They communicate via structured JSON memos.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Research Desk / Dual-Ring Architecture / Scraping",
-      "tags": [
-        "dual-ring",
-        "fast-ring",
-        "deep-archive",
-        "research",
-        "architecture"
-      ]
+      "tags": ["dual-ring", "fast-ring", "deep-archive", "research", "architecture"]
     },
     {
       "id": "MLP3-007",
@@ -2320,12 +1701,7 @@
       "verbatim_quote": "Every time the researcher's token buffer crosses 55% capacity, an automatic Compaction Micro-Pass runs, synthesizing established facts and discarding boilerplate to keep memory lean.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Context Management / Token Efficiency / Compaction",
-      "tags": [
-        "token-compaction",
-        "context-window",
-        "memory-management",
-        "finops"
-      ]
+      "tags": ["token-compaction", "context-window", "memory-management", "finops"]
     },
     {
       "id": "MLP3-008",
@@ -2341,13 +1717,7 @@
       "verbatim_quote": "When the Research Agent brings a 9/10 bullish news catalyst to the Courtroom, Cortex simultaneously feeds 512 raw OHLCV bars into Kronos. If Kronos indicates institutions are secretly distributing into the spike, the Bear Prosecutor uses Kronos's forecast to veto the trade.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Kronos / Time-Series Foundation Model / Bimodal Fusion",
-      "tags": [
-        "kronos",
-        "bimodal-fusion",
-        "lie-detector",
-        "candlesticks",
-        "foundation-model"
-      ]
+      "tags": ["kronos", "bimodal-fusion", "lie-detector", "candlesticks", "foundation-model"]
     },
     {
       "id": "MLP3-009",
@@ -2363,12 +1733,7 @@
       "verbatim_quote": "As long as the real market candles print inside Kronos's upper bullish fan, the PositionShadowDO lets the 20% runner ride; if price breaches the lower cone boundary, it exits immediately.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Exit Engine / Trailing Stops / Kronos Cones",
-      "tags": [
-        "trailing-stops",
-        "kronos-cones",
-        "volatility",
-        "exit-management"
-      ]
+      "tags": ["trailing-stops", "kronos-cones", "volatility", "exit-management"]
     },
     {
       "id": "MLP3-010",
@@ -2384,12 +1749,7 @@
       "verbatim_quote": "What gets published: 1. Live Research Drops... 2. Courtroom Transcripts & Post-Mortems: Full 6-part Bull/Bear debates attached to the SHA-256 trade journal hash... 3. Bounty Queries... Users can import specialized .scar packs to upgrade agent memory.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Ecosystem / Marketplace / .scar Memory Cartridges",
-      "tags": [
-        "scar-marketplace",
-        "memory-hub",
-        "decentralized-alpha",
-        "cartridges"
-      ]
+      "tags": ["scar-marketplace", "memory-hub", "decentralized-alpha", "cartridges"]
     },
     {
       "id": "MLP3-011",
@@ -2405,13 +1765,7 @@
       "verbatim_quote": "Sovereign Thesis Relay (Game-Changer): The leading agent streams its approved Thesis + Courtroom Transcript to your local node over WebSocket. Your local node sizes and executes the order locally, eliminating the massive copy-trade slippage of traditional follower pools.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Sovereign Relay / Subscription MRR / Copy Trading",
-      "tags": [
-        "sovereign-relay",
-        "copy-trading",
-        "zero-slippage",
-        "websocket",
-        "mrr"
-      ]
+      "tags": ["sovereign-relay", "copy-trading", "zero-slippage", "websocket", "mrr"]
     },
     {
       "id": "MLP3-012",
@@ -2427,13 +1781,7 @@
       "verbatim_quote": "How Clef works locally: The cloud brain emits unsigned DecisionContracts over localhost. Local Clef validates constitutional limits, signs the contract using local broker keys, and dispatches to the exchange without keys ever leaving the machine.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Security / Clef Vault / Key Management",
-      "tags": [
-        "clef-vault",
-        "zero-knowledge",
-        "security",
-        "local-signing",
-        "proxy"
-      ]
+      "tags": ["clef-vault", "zero-knowledge", "security", "local-signing", "proxy"]
     },
     {
       "id": "MLP3-013",
@@ -2449,13 +1797,7 @@
       "verbatim_quote": "macOS & Windows Desktop Widgets: Floating pill widget displaying real-time system pulse status, current regime, open position count, and 1-click emergency halt.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Desktop Shell / Menu Bar Widget / Telemetry",
-      "tags": [
-        "desktop-widget",
-        "pulse-pill",
-        "menu-bar",
-        "tauri",
-        "emergency-kill"
-      ]
+      "tags": ["desktop-widget", "pulse-pill", "menu-bar", "tauri", "emergency-kill"]
     },
     {
       "id": "MLP3-014",
@@ -2471,13 +1813,7 @@
       "verbatim_quote": "Android Companion App ('Cortex Pocket C2'): Streams live ECAM telemetry, push alerts for courtroom verdicts, and features a biometric kill-switch to flatten positions from your phone.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Mobile App / Android / Biometric Kill-Switch",
-      "tags": [
-        "android-c2",
-        "pocket-pit-wall",
-        "biometrics",
-        "mobile",
-        "kill-switch"
-      ]
+      "tags": ["android-c2", "pocket-pit-wall", "biometrics", "mobile", "kill-switch"]
     },
     {
       "id": "MLP4-001",
@@ -2493,12 +1829,7 @@
       "verbatim_quote": "Immediate re-underwriting on headline impact: a quick mini-hearing on a held position when new news hits that symbol, instead of waiting for the stop or target. The question is 'is the thesis still alive?', not 'should I buy?'",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Exit Engine / News Intake / Re-Underwriting",
-      "tags": [
-        "re-underwriting",
-        "news-impact",
-        "exit-engine",
-        "thesis-validity"
-      ]
+      "tags": ["re-underwriting", "news-impact", "exit-engine", "thesis-validity"]
     },
     {
       "id": "MLP4-002",
@@ -2514,13 +1845,7 @@
       "verbatim_quote": "Live kill-criteria watchers: the bear already writes 'the bull is wrong if…' conditions. Turn each one into a running monitor that triggers an exit review the moment it's met.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Risk Engine / Kill Criteria / Bear Prosecutor",
-      "tags": [
-        "kill-criteria",
-        "tripwires",
-        "falsification",
-        "bear-prosecutor",
-        "exits"
-      ]
+      "tags": ["kill-criteria", "tripwires", "falsification", "bear-prosecutor", "exits"]
     },
     {
       "id": "MLP4-003",
@@ -2536,12 +1861,7 @@
       "verbatim_quote": "Scale-out ladders: take partial profit at the first target, trail the rest, and adapt trail width to regime and volatility rather than using a fixed ATR multiple.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Execution Engine / Trailing Stops / Scale-Out",
-      "tags": [
-        "scale-out",
-        "trailing-stops",
-        "volatility-regime",
-        "atr-multiples"
-      ]
+      "tags": ["scale-out", "trailing-stops", "volatility-regime", "atr-multiples"]
     },
     {
       "id": "MLP4-004",
@@ -2557,12 +1877,7 @@
       "verbatim_quote": "Opportunity-cost rotation: when a stronger candidate shows up and slots are full, compare it against the weakest current holding and rotate if the edge gap is big enough.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Portfolio Governor / Slot Rotation / Opportunity Cost",
-      "tags": [
-        "opportunity-cost",
-        "slot-rotation",
-        "portfolio-management",
-        "efficiency"
-      ]
+      "tags": ["opportunity-cost", "slot-rotation", "portfolio-management", "efficiency"]
     },
     {
       "id": "MLP4-005",
@@ -2578,12 +1893,7 @@
       "verbatim_quote": "Weekly portfolio hearing: one court session over the whole book, covering concentration, correlation, stale positions, and what to trim.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Governance / Portfolio Court / Risk Management",
-      "tags": [
-        "portfolio-hearing",
-        "correlation-creep",
-        "stale-positions",
-        "risk-audit"
-      ]
+      "tags": ["portfolio-hearing", "correlation-creep", "stale-positions", "risk-audit"]
     },
     {
       "id": "MLP4-006",
@@ -2599,13 +1909,7 @@
       "verbatim_quote": "Event-aware holds: automatic de-risk before earnings, FOMC, CPI or token unlocks on held names, with re-entry logic afterwards.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Risk Engine / Event De-Risking / Binary Events",
-      "tags": [
-        "event-de-risking",
-        "earnings-risk",
-        "fomc",
-        "binary-events",
-        "gap-protection"
-      ]
+      "tags": ["event-de-risking", "earnings-risk", "fomc", "binary-events", "gap-protection"]
     },
     {
       "id": "MLP4-007",
@@ -2621,13 +1925,7 @@
       "verbatim_quote": "Exit grading in the Governor: score every exit separately, including how much was left on the table, how deep the drawdown went before exit, and whether early exits were right. This gives exits their own learning loop.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Governor / Exit Grading / Regret Metrics",
-      "tags": [
-        "exit-grading",
-        "regret-accounting",
-        "governor",
-        "post-mortem",
-        "metrics"
-      ]
+      "tags": ["exit-grading", "regret-accounting", "governor", "post-mortem", "metrics"]
     },
     {
       "id": "MLP4-008",
@@ -2643,12 +1941,7 @@
       "verbatim_quote": "Relationship graph: news on one company automatically surfaces its suppliers, customers, competitors and sector ETFs as candidates.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Research Desk / Entity Graph / Sympathy Plays",
-      "tags": [
-        "relationship-graph",
-        "supply-chain",
-        "competitors",
-        "sympathy-trading"
-      ]
+      "tags": ["relationship-graph", "supply-chain", "competitors", "sympathy-trading"]
     },
     {
       "id": "MLP4-009",
@@ -2664,13 +1957,7 @@
       "verbatim_quote": "Primary-source chasing: the researcher follows an article back to the original filing, press release or transcript before trusting it.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Research Desk / Source Verification / Clairic",
-      "tags": [
-        "primary-source",
-        "verification",
-        "edgar",
-        "anti-hallucination",
-        "research"
-      ]
+      "tags": ["primary-source", "verification", "edgar", "anti-hallucination", "research"]
     },
     {
       "id": "MLP4-010",
@@ -2686,12 +1973,7 @@
       "verbatim_quote": "Contradiction hunter: a dedicated research pass that only looks for disconfirming evidence, fed straight to the bear.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Research Desk / Bear Prosecutor / Contradiction Hunter",
-      "tags": [
-        "contradiction-hunter",
-        "bear-prosecutor",
-        "confirmation-bias",
-        "adversarial"
-      ]
+      "tags": ["contradiction-hunter", "bear-prosecutor", "confirmation-bias", "adversarial"]
     },
     {
       "id": "MLP4-011",
@@ -2707,12 +1989,7 @@
       "verbatim_quote": "Research library: dossiers persist per symbol and update incrementally, so the next hearing on NVDA starts from last week's dossier.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Research Desk / Symbol Library / Token Efficiency",
-      "tags": [
-        "research-library",
-        "incremental-updates",
-        "token-efficiency",
-        "knowledge-store"
-      ]
+      "tags": ["research-library", "incremental-updates", "token-efficiency", "knowledge-store"]
     },
     {
       "id": "MLP4-012",
@@ -2728,13 +2005,7 @@
       "verbatim_quote": "Parallel researchers: run several researchers with different angles (fundamental, macro, sentiment, technical) at once, then merge their findings.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Research Desk / Parallel Agents / Specialization",
-      "tags": [
-        "parallel-research",
-        "multi-angle",
-        "fundamental",
-        "technical",
-        "sentiment"
-      ]
+      "tags": ["parallel-research", "multi-angle", "fundamental", "technical", "sentiment"]
     },
     {
       "id": "MLP4-013",
@@ -2750,12 +2021,7 @@
       "verbatim_quote": "Research budget scales with stakes: bigger potential positions or higher-conviction setups get longer, deeper research runs.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Research Desk / FinOps / Compute Budgeting",
-      "tags": [
-        "research-budget",
-        "compute-scaling",
-        "finops",
-        "token-allocation"
-      ]
+      "tags": ["research-budget", "compute-scaling", "finops", "token-allocation"]
     },
     {
       "id": "MLP4-014",
@@ -2771,12 +2037,7 @@
       "verbatim_quote": "Post-move forensics: when a watched symbol moves sharply without the agent acting, research why. This finds blind spots in intake.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Quant Lab / Post-Move Forensics / Intake Audit",
-      "tags": [
-        "post-move-forensics",
-        "missed-trades",
-        "omission-errors",
-        "intake-audit"
-      ]
+      "tags": ["post-move-forensics", "missed-trades", "omission-errors", "intake-audit"]
     },
     {
       "id": "MLP4-015",
@@ -2792,13 +2053,7 @@
       "verbatim_quote": "Social intake with pump detection: Reddit, X and StockTwits as a signal source, with bot and coordinated-pump filtering.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Data Ingest / Social Sentiment / Bot Filtering",
-      "tags": [
-        "social-sentiment",
-        "pump-detection",
-        "fintwit",
-        "reddit",
-        "bot-filter"
-      ]
+      "tags": ["social-sentiment", "pump-detection", "fintwit", "reddit", "bot-filter"]
     },
     {
       "id": "MLP4-016",
@@ -2814,13 +2069,7 @@
       "verbatim_quote": "Earnings call listener: transcribe calls and score tone shifts and evasive answers in real time.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Research Desk / Audio Ingest / Speech-to-Text",
-      "tags": [
-        "earnings-calls",
-        "audio-transcription",
-        "tone-analysis",
-        "nlp",
-        "executive-evasion"
-      ]
+      "tags": ["earnings-calls", "audio-transcription", "tone-analysis", "nlp", "executive-evasion"]
     },
     {
       "id": "MLP4-017",
@@ -2836,12 +2085,7 @@
       "verbatim_quote": "Strategy-proposer agent: writes new strategy candidates, backtests them in the lab, and opens PRs for you to review.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Quant Lab / Strategy Proposer / Autonomous Dev",
-      "tags": [
-        "strategy-proposer",
-        "auto-quant",
-        "backtest-lab",
-        "pull-requests"
-      ]
+      "tags": ["strategy-proposer", "auto-quant", "backtest-lab", "pull-requests"]
     },
     {
       "id": "MLP4-018",
@@ -2857,13 +2101,7 @@
       "verbatim_quote": "Ops agent: reads logs and failures and opens fix PRs or incident summaries.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "DevOps / SRE / Tail Worker / Automated Fixes",
-      "tags": [
-        "ops-agent",
-        "incident-remediation",
-        "sre",
-        "automated-pr",
-        "devops"
-      ]
+      "tags": ["ops-agent", "incident-remediation", "sre", "automated-pr", "devops"]
     },
     {
       "id": "MLP4-019",
@@ -2879,13 +2117,7 @@
       "verbatim_quote": "Ask the journal: plain-language questions like 'why did you sell SOL Tuesday?' answered from the journal and court transcripts.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Cockpit UX / Explainability / Journal Search",
-      "tags": [
-        "ask-the-journal",
-        "nlp",
-        "explainability",
-        "journal-search",
-        "cockpit"
-      ]
+      "tags": ["ask-the-journal", "nlp", "explainability", "journal-search", "cockpit"]
     },
     {
       "id": "MLP4-020",
@@ -2901,12 +2133,7 @@
       "verbatim_quote": "Goal mode: you set a target return, maximum drawdown and time horizon, and the agent proposes a doctrine to match.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Onboarding / Goal Mode / Parameter Synthesis",
-      "tags": [
-        "goal-mode",
-        "doctrine-synthesis",
-        "risk-parameters",
-        "onboarding"
-      ]
+      "tags": ["goal-mode", "doctrine-synthesis", "risk-parameters", "onboarding"]
     },
     {
       "id": "MLP4-021",
@@ -2922,12 +2149,7 @@
       "verbatim_quote": "Model auto-benchmarking: the router continuously scores providers on quality, latency and cost per role and reorders its chains itself.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "LLM Router / Dynamic Routing / Auto-Benchmarking",
-      "tags": [
-        "model-routing",
-        "auto-benchmarking",
-        "latency",
-        "cost-optimization"
-      ]
+      "tags": ["model-routing", "auto-benchmarking", "latency", "cost-optimization"]
     },
     {
       "id": "MLP4-022",
@@ -2943,13 +2165,7 @@
       "verbatim_quote": "Verified leaderboards: rank agents by hash-chained journal proofs, so track records can't be faked. This is the trust layer for copy trading.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Community / Leaderboard / Cryptographic Proofs",
-      "tags": [
-        "verified-leaderboard",
-        "sha-256",
-        "cryptographic-proof",
-        "trust-layer",
-        "copy-trading"
-      ]
+      "tags": ["verified-leaderboard", "sha-256", "cryptographic-proof", "trust-layer", "copy-trading"]
     },
     {
       "id": "MLP4-023",
@@ -2965,12 +2181,7 @@
       "verbatim_quote": "Scar-tissue exchange: share and import lessons from other users' losses.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Community / Scar-Tissue / Collective Memory",
-      "tags": [
-        "scar-exchange",
-        "collective-learning",
-        "loss-prevention",
-        "cartridges"
-      ]
+      "tags": ["scar-exchange", "collective-learning", "loss-prevention", "cartridges"]
     },
     {
       "id": "MLP4-024",
@@ -2986,12 +2197,7 @@
       "verbatim_quote": "Paper tournaments: seasonal competitions between strategies or agents.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Community / Tournaments / Growth Marketing",
-      "tags": [
-        "tournaments",
-        "paper-trading",
-        "community-engagement",
-        "gamification"
-      ]
+      "tags": ["tournaments", "paper-trading", "community-engagement", "gamification"]
     },
     {
       "id": "MLP4-025",
@@ -3007,12 +2213,7 @@
       "verbatim_quote": "Shared jury: other users' agents can serve as panel seats on your hearings, if they opt in.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Courtroom / Shared Jury / P2P Consensus",
-      "tags": [
-        "shared-jury",
-        "p2p-consensus",
-        "courtroom",
-        "decentralized-agents"
-      ]
+      "tags": ["shared-jury", "p2p-consensus", "courtroom", "decentralized-agents"]
     },
     {
       "id": "MLP4-026",
@@ -3028,12 +2229,7 @@
       "verbatim_quote": "Data-source bounties: the community builds and maintains connectors, and the best ones get merged.",
       "impact_or_risk_level": "Low",
       "target_audience_or_subsystem": "Developer Ecosystem / Bounties / Connectors",
-      "tags": [
-        "data-bounties",
-        "open-source",
-        "connectors",
-        "community-ecosystem"
-      ]
+      "tags": ["data-bounties", "open-source", "connectors", "community-ecosystem"]
     },
     {
       "id": "MLP4-027",
@@ -3049,14 +2245,7 @@
       "verbatim_quote": "Multi-broker adapters: IBKR, Coinbase, Kraken, Tradier and others.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Execution Layer / Broker Adapters / Multi-Venue",
-      "tags": [
-        "multi-broker",
-        "ibkr",
-        "kraken",
-        "coinbase",
-        "tradier",
-        "adapters"
-      ]
+      "tags": ["multi-broker", "ibkr", "kraken", "coinbase", "tradier", "adapters"]
     },
     {
       "id": "MLP4-028",
@@ -3072,12 +2261,7 @@
       "verbatim_quote": "Plugin SDK: a standard interface for adding data sources, strategies and model providers.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Developer SDK / Plugins / Extensibility",
-      "tags": [
-        "plugin-sdk",
-        "extensibility",
-        "developer-tools",
-        "modularity"
-      ]
+      "tags": ["plugin-sdk", "extensibility", "developer-tools", "modularity"]
     },
     {
       "id": "MLP4-029",
@@ -3093,13 +2277,7 @@
       "verbatim_quote": "More control channels: Telegram or Signal for control, plus a kill switch on Apple Watch and in phone notifications.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Remote Control / Telegram / Signal / Apple Watch",
-      "tags": [
-        "remote-c2",
-        "telegram",
-        "signal",
-        "apple-watch",
-        "kill-switch"
-      ]
+      "tags": ["remote-c2", "telegram", "signal", "apple-watch", "kill-switch"]
     },
     {
       "id": "MLP4-030",
@@ -3115,12 +2293,7 @@
       "verbatim_quote": "Sub-portfolios: separate pots with their own constitutions, for example a conservative pot and an experimental pot.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Portfolio Architecture / Sub-Portfolios / Compartmentalization",
-      "tags": [
-        "sub-portfolios",
-        "multi-pot",
-        "risk-isolation",
-        "governance"
-      ]
+      "tags": ["sub-portfolios", "multi-pot", "risk-isolation", "governance"]
     },
     {
       "id": "MLP4-031",
@@ -3136,13 +2309,7 @@
       "verbatim_quote": "Encrypted memory backup and sync: pairs with memory uploading and local mode.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Security / Cloud Backup / AES Encryption",
-      "tags": [
-        "encrypted-backup",
-        "sync",
-        "zero-knowledge",
-        "r2-storage",
-        "security"
-      ]
+      "tags": ["encrypted-backup", "sync", "zero-knowledge", "r2-storage", "security"]
     },
     {
       "id": "MLP4-032",
@@ -3158,12 +2325,7 @@
       "verbatim_quote": "Stress replay: 'what would today's book do in March 2020 or the 2022 crash?', run on demand.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Risk Dashboard / Stress Testing / Historical Replay",
-      "tags": [
-        "stress-replay",
-        "crash-simulation",
-        "black-swan",
-        "risk-testing"
-      ]
+      "tags": ["stress-replay", "crash-simulation", "black-swan", "risk-testing"]
     },
     {
       "id": "MLP4-033",
@@ -3179,12 +2341,7 @@
       "verbatim_quote": "Tax awareness: wash-sale avoidance, tax-lot selection and tax-loss harvesting.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Execution Engine / Tax Optimization / HIFO Accounting",
-      "tags": [
-        "tax-loss-harvesting",
-        "hifo",
-        "wash-sale",
-        "after-tax-returns"
-      ]
+      "tags": ["tax-loss-harvesting", "hifo", "wash-sale", "after-tax-returns"]
     },
     {
       "id": "MLP4-034",
@@ -3200,13 +2357,7 @@
       "verbatim_quote": "Idle-cash sweep: put uninvested cash into a yield instrument.",
       "impact_or_risk_level": "Low",
       "target_audience_or_subsystem": "Cash Management / Yield Sweep / Treasury Proxies",
-      "tags": [
-        "cash-sweep",
-        "yield",
-        "sgov",
-        "treasury-proxies",
-        "finops"
-      ]
+      "tags": ["cash-sweep", "yield", "sgov", "treasury-proxies", "finops"]
     },
     {
       "id": "MLP4-035",
@@ -3222,12 +2373,7 @@
       "verbatim_quote": "Decision replay theater: scrub through any past hearing alongside what the price did afterwards.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Cockpit UX / Replay Theater / Interactive Playback",
-      "tags": [
-        "replay-theater",
-        "ux",
-        "interactive-scrubber",
-        "case-review"
-      ]
+      "tags": ["replay-theater", "ux", "interactive-scrubber", "case-review"]
     },
     {
       "id": "MLP4-036",
@@ -3243,12 +2389,7 @@
       "verbatim_quote": "Shareholder letter: a weekly narrative report written by the agent.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Reporting / Shareholder Letter / Narrative Reports",
-      "tags": [
-        "shareholder-letter",
-        "narrative-report",
-        "syndicate",
-        "marketing"
-      ]
+      "tags": ["shareholder-letter", "narrative-report", "syndicate", "marketing"]
     },
     {
       "id": "MLP4-037",
@@ -3264,13 +2405,7 @@
       "verbatim_quote": "Beginner explain mode in the cockpit.",
       "impact_or_risk_level": "Low",
       "target_audience_or_subsystem": "Cockpit UX / Explain Mode / Accessibility",
-      "tags": [
-        "explain-mode",
-        "ux",
-        "tooltips",
-        "accessibility",
-        "quant-education"
-      ]
+      "tags": ["explain-mode", "ux", "tooltips", "accessibility", "quant-education"]
     },
     {
       "id": "MLP5-001",
@@ -3286,13 +2421,7 @@
       "verbatim_quote": "1. First principles: where does money actually come from? | Cortex cannot compete on Information Speed with free delayed data. Its edge must come from Synthesis Depth, Behavioral Discipline, and Structural Flow exploitation.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Constitution / Edge Classification / Doctrine",
-      "tags": [
-        "first-principles",
-        "edge-sources",
-        "market-microstructure",
-        "discipline",
-        "doctrine"
-      ]
+      "tags": ["first-principles", "edge-sources", "market-microstructure", "discipline", "doctrine"]
     },
     {
       "id": "MLP5-002",
@@ -3308,12 +2437,7 @@
       "verbatim_quote": "Imagine Cortex staffed like a real fund, and ask which chairs are empty... The agent reasons calmly hours before instead of under pressure during.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Multi-Agent Architecture / Role Alignment / Pod Structure",
-      "tags": [
-        "hedge-fund-seats",
-        "agent-roles",
-        "specialization",
-        "multi-agent-system"
-      ]
+      "tags": ["hedge-fund-seats", "agent-roles", "specialization", "multi-agent-system"]
     },
     {
       "id": "MLP5-003",
@@ -3329,13 +2453,7 @@
       "verbatim_quote": "3. The day trader and prop desk lens | Merging fundamental catalyst reasoning with prop desk craft like opening range breakouts and tape velocity.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Execution Plumber / Day Trading / Tape Reading",
-      "tags": [
-        "day-trader-craft",
-        "orb",
-        "vwap",
-        "tape-reading",
-        "inflection-levels"
-      ]
+      "tags": ["day-trader-craft", "orb", "vwap", "tape-reading", "inflection-levels"]
     },
     {
       "id": "MLP5-004",
@@ -3351,12 +2469,7 @@
       "verbatim_quote": "4. Inversion: how does Cortex die? | Systematic audit of existential failure modes: silent provider prompt degradation, broker order queue lockup, and flash depegs.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Risk Engine / Inversion Matrix / Catastrophe Defense",
-      "tags": [
-        "inversion",
-        "existential-risk",
-        "circuit-breakers",
-        "system-safety"
-      ]
+      "tags": ["inversion", "existential-risk", "circuit-breakers", "system-safety"]
     },
     {
       "id": "MLP5-005",
@@ -3372,12 +2485,7 @@
       "verbatim_quote": "5. Things only an AI agent can do | Zero emotional fatigue, instant cross-asset correlation scanning, and running dozens of simultaneous hearings in parallel.",
       "impact_or_risk_level": "Medium",
       "target_audience_or_subsystem": "Core Architecture / Parallelism / AI Edge",
-      "tags": [
-        "ai-superpowers",
-        "parallel-hearings",
-        "zero-fatigue",
-        "cross-asset-scan"
-      ]
+      "tags": ["ai-superpowers", "parallel-hearings", "zero-fatigue", "cross-asset-scan"]
     },
     {
       "id": "MLP5-006",
@@ -3393,13 +2501,7 @@
       "verbatim_quote": "6. Data nobody's mining | Scrape non-traditional data feeds: government procurement portals, corporate job posting trends, shipping container AIS feeds, and patent filings.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Data Ingest / Alternative Data / Non-Crowded Alpha",
-      "tags": [
-        "alternative-data",
-        "usaspending",
-        "patents",
-        "job-postings",
-        "alpha"
-      ]
+      "tags": ["alternative-data", "usaspending", "patents", "job-postings", "alpha"]
     },
     {
       "id": "MLP5-007",
@@ -3415,12 +2517,7 @@
       "verbatim_quote": "Intervention-to-rule compiler. It protects the 30-day clock and compounds your own judgment into the system.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Operator Loop / Rule Compiler / Knowledge Capture",
-      "tags": [
-        "rule-compiler",
-        "operator-wisdom",
-        "autonomy-clock",
-        "compounding-judgment"
-      ]
+      "tags": ["rule-compiler", "operator-wisdom", "autonomy-clock", "compounding-judgment"]
     },
     {
       "id": "MLP5-008",
@@ -3436,12 +2533,7 @@
       "verbatim_quote": "9. Moonshots | The Self-Revising Constitutional Republic: a meta-governance layer where autonomous agents propose and vote on amendments to secondary constitutional rules based on multi-month performance.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Governance / Meta-Republic / Autonomous Evolution",
-      "tags": [
-        "moonshot",
-        "self-revising",
-        "constitutional-republic",
-        "autonomous-governance"
-      ]
+      "tags": ["moonshot", "self-revising", "constitutional-republic", "autonomous-governance"]
     },
     {
       "id": "MLP5-009",
@@ -3457,12 +2549,7 @@
       "verbatim_quote": "1. Lateness meter. It's cheap, and it probably explains a lot of losing news trades.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Tier 1.5 / Lateness Meter / Priority Build",
-      "tags": [
-        "lateness-meter",
-        "priority-build",
-        "alpha-protection",
-        "sunk-move"
-      ]
+      "tags": ["lateness-meter", "priority-build", "alpha-protection", "sunk-move"]
     },
     {
       "id": "MLP5-010",
@@ -3478,12 +2565,7 @@
       "verbatim_quote": "3. Ghost portfolio and regret dashboard. It tells you which gates are costing money and which are saving it.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Quant Lab / Ghost Portfolio / Regret Dashboard",
-      "tags": [
-        "ghost-portfolio",
-        "regret-dashboard",
-        "priority-build",
-        "gate-audit"
-      ]
+      "tags": ["ghost-portfolio", "regret-dashboard", "priority-build", "gate-audit"]
     },
     {
       "id": "MLP6-001",
@@ -3499,13 +2581,7 @@
       "verbatim_quote": "Discovery phase (crux-first hearings). Before any arguments, the bull and bear each name the single fact that would flip their position. The research desk is then sent after those facts only. Right now research is broad and front-loaded. This makes it aimed at whatever the decision is actually sensitive to...",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Courtroom Orchestration / Crux Discovery / Research Efficiency",
-      "tags": [
-        "crux-first",
-        "discovery-phase",
-        "courtroom",
-        "token-efficiency",
-        "falsification"
-      ]
+      "tags": ["crux-first", "discovery-phase", "courtroom", "token-efficiency", "falsification"]
     },
     {
       "id": "MLP6-002",
@@ -3521,13 +2597,7 @@
       "verbatim_quote": "Appeals court. A rejected candidate shouldn't simply be dead for six hours. If new evidence shows up, such as a follow-up filing or price confirming the thesis, the case can be appealed. A different model mix hears it under a 'standard of review': the ruling only reverses if the new evidence is material.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Courtroom / Appeals Court / Re-Entry",
-      "tags": [
-        "appeals-court",
-        "standard-of-review",
-        "re-entry",
-        "courtroom",
-        "materiality"
-      ]
+      "tags": ["appeals-court", "standard-of-review", "re-entry", "courtroom", "materiality"]
     },
     {
       "id": "MLP6-003",
@@ -3543,13 +2613,7 @@
       "verbatim_quote": "Standing orders ('resting convictions'). The court approves a conditional thesis instead of a trade now. For example: 'buy SOL at or below X, thesis valid until Friday, void if Y happens.' The system then waits for price to come to it. This splits what from when: The court decides what is worth owning. A timing agent picks the moment...",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Execution Engine / Standing Orders / Limit Execution",
-      "tags": [
-        "standing-orders",
-        "resting-convictions",
-        "limit-orders",
-        "latency-defense",
-        "timing"
-      ]
+      "tags": ["standing-orders", "resting-convictions", "limit-orders", "latency-defense", "timing"]
     },
     {
       "id": "MLP6-004",
@@ -3565,13 +2629,7 @@
       "verbatim_quote": "Monkey control group. Run two shadow strategies in LAB: 1. Random entry + Cortex exits. A monkey throws darts to pick candidates... but the exits use your stops, trailing logic and re-underwriting hearings. 2. Cortex entry + random exit... Comparing the three Sharpe ratios tells you where your actual edge lives.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Backtest Lab / Control Groups / Edge Attribution",
-      "tags": [
-        "monkey-control",
-        "control-groups",
-        "scientific-method",
-        "edge-attribution",
-        "lab"
-      ]
+      "tags": ["monkey-control", "control-groups", "scientific-method", "edge-attribution", "lab"]
     },
     {
       "id": "MLP6-005",
@@ -3587,12 +2645,7 @@
       "verbatim_quote": "MFE/MAE with horizon relabeling. It gives you real exit intelligence from data you already generate... Track Maximum Favorable Excursion and Maximum Adverse Excursion across 1h, 4h, 1d, and 3d horizons.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Quant Lab / MFE-MAE / Exit Optimization",
-      "tags": [
-        "mfe-mae",
-        "horizon-relabeling",
-        "price-trajectories",
-        "exit-intelligence"
-      ]
+      "tags": ["mfe-mae", "horizon-relabeling", "price-trajectories", "exit-intelligence"]
     },
     {
       "id": "MLP6-006",
@@ -3608,13 +2661,7 @@
       "verbatim_quote": "The market is now full of other LLM bots. That's a new kind of counterparty... Naive-bot consensus fade. It's the most novel edge here and specific to 2026.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Courtroom / Counterparty Edge / Bot Fading",
-      "tags": [
-        "consensus-fade",
-        "counterparty-edge",
-        "retail-bots",
-        "crowded-trades",
-        "contrarian"
-      ]
+      "tags": ["consensus-fade", "counterparty-edge", "retail-bots", "crowded-trades", "contrarian"]
     },
     {
       "id": "MLP6-007",
@@ -3630,12 +2677,7 @@
       "verbatim_quote": "Corporate-flow calendar. Some buyers and sellers are known in advance: Russell reconstitution, month-end pension flows, corporate buyback blackout dates. These are deterministic structural flows.",
       "impact_or_risk_level": "High",
       "target_audience_or_subsystem": "Data Ingest / Structural Flows / Index Rebalancing",
-      "tags": [
-        "corporate-flow",
-        "structural-alpha",
-        "russell-reconstitution",
-        "pension-flows"
-      ]
+      "tags": ["corporate-flow", "structural-alpha", "russell-reconstitution", "pension-flows"]
     },
     {
       "id": "MLP6-008",
@@ -3651,12 +2693,7 @@
       "verbatim_quote": "The operator loop: logging operator friction, hesitation and manual interventions to systematically refine the human-machine interface.",
       "impact_or_risk_level": "Low",
       "target_audience_or_subsystem": "Cockpit Telemetry / Operator Telemetry / UX Audit",
-      "tags": [
-        "operator-telemetry",
-        "friction-log",
-        "hesitation-metrics",
-        "ux-refinement"
-      ]
+      "tags": ["operator-telemetry", "friction-log", "hesitation-metrics", "ux-refinement"]
     },
     {
       "id": "MLP6-009",
@@ -3672,12 +2709,7 @@
       "verbatim_quote": "2. Standing orders. This one structural change kills lateness and turns the court into a patient buyer.",
       "impact_or_risk_level": "Critical",
       "target_audience_or_subsystem": "Execution Engine / Standing Orders / Priority Build",
-      "tags": [
-        "standing-orders",
-        "priority-build",
-        "patient-buyer",
-        "limit-execution"
-      ]
+      "tags": ["standing-orders", "priority-build", "patient-buyer", "limit-execution"]
     },
     {
       "id": "MLP6-010",
@@ -3693,12 +2725,7 @@
       "verbatim_quote": "4. Naive-bot consensus fade. It's the most novel edge here and specific to 2026.",
       "impact_or_risk_level": "Strategic",
       "target_audience_or_subsystem": "Courtroom / Counterparty Edge / Priority Build",
-      "tags": [
-        "consensus-fade",
-        "priority-build",
-        "2026-edge",
-        "contrarian-alpha"
-      ]
+      "tags": ["consensus-fade", "priority-build", "2026-edge", "contrarian-alpha"]
     }
   ]
 }

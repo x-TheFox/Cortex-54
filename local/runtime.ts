@@ -5,12 +5,12 @@ import { AlpacaClient, AlpacaMarketData } from "../src/broker/AlpacaClient.ts";
 import type { BrokerApi, MarketDataApi } from "../src/broker/types.ts";
 import { type ClefApi, WorkersAiClef } from "../src/clef/ClefClient.ts";
 import { type ClairicApi, WorkersAiClairic } from "../src/clef/clairic.ts";
-import { CloudflareRestAi, ShimClef } from "../src/clef/portable.ts";
+import { CloudflareRestAi, ShimClairic, ShimClef } from "../src/clef/portable.ts";
 import { Brain, type PulseReport } from "../src/cortex/Brain.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "../src/cortex/hot-schema.ts";
 import { getKV, setKV } from "../src/cortex/store.ts";
-import { LlmRouter } from "../src/court/llm.ts";
-import { buildProviders, withByok } from "../src/court/providers.ts";
+import { buildPool, type PoolReport, poolRouter } from "../src/court/pool.ts";
+import { buildProviders } from "../src/court/providers.ts";
 import {
   type ChannelKey,
   type DiscordMessage,
@@ -29,8 +29,9 @@ import {
 import { hubFromEnv } from "../src/hub/client.ts";
 import { verifySignedBody } from "../src/lib/hmac.ts";
 import type { AccountId } from "../src/lib/ids.ts";
+import { InboxNotifier, readFeed } from "../src/notify/inbox.ts";
 import { ntfyUrl, PushNotifier } from "../src/notify/push.ts";
-import { handleWeb, loginLink, type WebBrain } from "../src/web/api.ts";
+import { handleWeb, loginLink, type WebBrain, type WebSettings } from "../src/web/api.ts";
 import { pill, pillAuthorized, swiftbar } from "../src/web/pill.ts";
 import type { LocalConfig } from "./config.ts";
 import { LocalJobs } from "./jobs.ts";
@@ -131,6 +132,8 @@ export interface LocalOptions {
   cfg: LocalConfig;
   now?: () => number;
   /** tests: inject fakes instead of real network clients */
+  /** ADR-071: the settings page's backend (the CLI provides it, with a reload that applies saved settings) */
+  settings?: WebSettings;
   overrides?: {
     broker?: BrokerApi;
     market?: MarketDataApi;
@@ -182,17 +185,18 @@ export class LocalCortex {
       );
     } else broker = new SimBroker(this.sql, market, cfg.starting_cash, now);
 
-    const providers = buildProviders(k);
-    const d = withByok(
+    // ADR-072: built-in free providers + the user's endpoints, as one pool in round robin
+    const built = buildPool(
       {
         ...DOCTRINE,
-        // local mode has no free-tier walls: the doctrine's caps that only existed for them can relax
         universe: { ...DOCTRINE.universe, enabled: DOCTRINE.universe.enabled && Boolean(alpacaKey) },
       },
-      providers,
-      k,
+      buildProviders(k),
+      cfg.llm,
     );
-    const { clef, clairic } = this.clefFor(cfg, providers);
+    const d = built.d;
+    this.pool = built.report;
+    const { clef, clairic } = this.clefFor(cfg, built);
     this.console = new ConsoleNotifier(o.overrides?.quiet ?? false);
     const notifiers: Notifier[] = [this.console];
     if (k.DISCORD_BOT_TOKEN)
@@ -200,6 +204,8 @@ export class LocalCortex {
     let notifier: Notifier = notifiers.length === 1 ? this.console : new Multi(notifiers);
     const push = ntfyUrl(k.NTFY_TOPIC, k.NTFY_URL);
     if (push) notifier = new PushNotifier(notifier, push, noGuard);
+    // ADR-071: the app's feed gets every card, whatever else is configured
+    notifier = new InboxNotifier(this.sql, notifier, now);
 
     this.jobs = new LocalJobs({ researchDir: join(root, "research"), home, url: this.url(), cfg });
     this.brain = new Brain({
@@ -214,7 +220,7 @@ export class LocalCortex {
       now,
       clef: o.overrides?.clef !== undefined ? o.overrides.clef : clef,
       clairic,
-      llm: Object.keys(providers).length ? new LlmRouter(providers, d) : null,
+      llm: built.report.entries.length ? poolRouter(built, cfg.llm.prefs) : null,
       calibration: CALIBRATION,
       scar: mergeScar(SCAR_TISSUE, loadLocalScar(home)), // + memory packs the operator applied (ADR-068)
       dispatcher: cfg.research.enabled ? this.jobs : null,
@@ -235,40 +241,33 @@ export class LocalCortex {
     return `http://${this.o.cfg.bind === "0.0.0.0" ? "127.0.0.1" : this.o.cfg.bind}:${this.o.cfg.port}`;
   }
 
+  /** see resolveClef */
+  clefMode = "off";
+
+  /** what the settings page shows about the model pool */
+  pool: PoolReport | null = null;
+
   private clefFor(
     cfg: LocalConfig,
-    providers: ReturnType<typeof buildProviders>,
+    built: ReturnType<typeof buildPool>,
   ): { clef: ClefApi | null; clairic: ClairicApi | null } {
-    const k = cfg.keys;
-    const cf =
-      k.CLOUDFLARE_ACCOUNT_ID && k.CLOUDFLARE_API_TOKEN
-        ? new CloudflareRestAi(k.CLOUDFLARE_ACCOUNT_ID, k.CLOUDFLARE_API_TOKEN)
-        : null;
-    if (cfg.clef === "off") return { clef: null, clairic: null };
-    if (cf && cfg.clef !== "shim") return { clef: new WorkersAiClef(cf), clairic: new WorkersAiClairic(cf) };
-    if (cfg.clef === "cloudflare") return { clef: null, clairic: null };
-    // shim: the strongest model the user has a key for
-    const order: [string, string | undefined][] = [
-      ["anthropic", "claude-opus-5-5"],
-      ["openai", k.OPENAI_MODEL || "gpt-5"],
-      ["custom", k.CUSTOM_LLM_MODEL],
-      ["ollama", k.OLLAMA_MODEL],
-      ["gemini", "gemini-3.5-flash"],
-      ["groq", "openai/gpt-oss-120b"],
-    ];
-    for (const [p, model] of order) {
-      const prov = providers[p];
-      if (prov && model) return { clef: new ShimClef(prov, model), clairic: null };
-    }
-    return { clef: null, clairic: null };
+    const r = resolveClef(cfg, built);
+    this.clefMode = r.label;
+    return { clef: r.clef, clairic: r.clairic };
   }
 
   /** One pulse (also what the timer runs). */
   async pulse(): Promise<PulseReport> {
-    const r = await this.brain.pulse();
+    const run = this.brain.pulse();
+    this.inflight = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    const r = await run;
     this.lastReport = r;
     return r;
   }
+  private inflight: Promise<void> = Promise.resolve();
 
   private schedule(seconds: number): void {
     if (this.stopped) return;
@@ -305,8 +304,19 @@ export class LocalCortex {
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
-    await new Promise<void>((res) => (this.server ? this.server.close(() => res()) : res()));
+    await this.inflight; // never close the databases under a running pulse
+    await new Promise<void>((res) => {
+      if (!this.server) return res();
+      this.server.close(() => res());
+      this.server.closeAllConnections(); // browsers keep connections alive; a reload must not wait for them
+    });
     await this.brain.flushJournal().catch(() => undefined);
+    try {
+      this.sql.db.close();
+      this.d1.db.close();
+    } catch {
+      /* already closed */
+    }
   }
 
   async loginLink(): Promise<string | null> {
@@ -333,6 +343,8 @@ export class LocalCortex {
     const b = this.brain;
     return {
       status: async () => b.status(),
+      feed: async (q) => readFeed(this.sql, q),
+      settings: this.o.settings,
       memory: async () => b.memoryView(),
       equity: async (days) => b.equityHistory(Date.now() - Math.min(35, Math.max(1, days)) * 86_400_000),
       forecast: async (s) => b.forecastView(s),
@@ -353,7 +365,7 @@ export class LocalCortex {
       book: async () => {
         const r = await b.bookReview(true);
         return r
-          ? `📒 Book review: ${r.lines.length} position(s), gross $${r.grossUsd}`
+          ? `📒 Book review posted to the feed (REPORTS): ${r.lines.length} position(s), gross $${r.grossUsd}.`
           : "Book review unavailable.";
       },
       universe: () => b.universeView(),
@@ -430,7 +442,12 @@ export class LocalCortex {
     if (url.pathname.startsWith("/api/"))
       return handleWeb(
         request,
-        { WEB_SESSION_SECRET: cfg.secrets.web_session, OPERATOR_DISCORD_ID: "local", DB: this.d1 },
+        {
+          WEB_SESSION_SECRET: cfg.secrets.web_session,
+          OPERATOR_DISCORD_ID: "local",
+          DB: this.d1,
+          SESSION_TTL_MS: 30 * 86_400_000, // your own computer: stay signed in (local mode is paper-only)
+        },
         this.webBrain(),
       );
     if (request.method === "GET") return this.staticFile(url.pathname);
@@ -456,4 +473,54 @@ export class LocalCortex {
   account(): AccountId {
     return "PAPER";
   }
+}
+
+export interface ClefChoice {
+  clef: ClefApi | null;
+  clairic: ClairicApi | null;
+  /** "cloudflare" (recommended) | "llm:<provider>/<model>" (stand-in, slightly weaker) | "off" */
+  label: string;
+}
+
+/**
+ * Clef + Clairic for local mode (ADR-063, operator 2026-10-26). Cloudflare Workers AI with the user's own account is
+ * the real thing. Without it, the user's own LLM answers the same structured formats (ShimClef / ShimClairic): it
+ * works, but a general chat model is less calibrated than Clef, so performance drops a little.
+ */
+export function resolveClef(cfg: LocalConfig, built: ReturnType<typeof buildPool>): ClefChoice {
+  const k = cfg.keys;
+  if (cfg.clef === "off") return { clef: null, clairic: null, label: "off" };
+  if (cfg.clef !== "llm" && k.CLOUDFLARE_ACCOUNT_ID && k.CLOUDFLARE_API_TOKEN) {
+    const cf = new CloudflareRestAi(k.CLOUDFLARE_ACCOUNT_ID, k.CLOUDFLARE_API_TOKEN);
+    return { clef: new WorkersAiClef(cf), clairic: new WorkersAiClairic(cf), label: "cloudflare" };
+  }
+  if (cfg.clef === "cloudflare") return { clef: null, clairic: null, label: "off" };
+  // the stand-in: a paid model if the user has one (usually the strongest), else the first in the pool
+  const entries = built.report.entries;
+  const pick = entries.find((e) => e.tier === "paid") ?? entries[0];
+  const prov = pick ? built.providers[pick.provider] : undefined;
+  if (pick && prov)
+    return {
+      clef: new ShimClef(prov, pick.model),
+      clairic: new ShimClairic(prov, pick.model),
+      label: `llm:${pick.source}/${pick.model}`,
+    };
+  return { clef: null, clairic: null, label: "off" };
+}
+
+/** What the user is told about Clef in setup, doctor and the settings page. */
+export function clefNotice(label: string): { ok: boolean; level: "ok" | "degraded" | "off"; text: string } {
+  if (label === "cloudflare")
+    return { ok: true, level: "ok", text: "Clef + Clairic on your Cloudflare Workers AI (recommended)." };
+  if (label.startsWith("llm:"))
+    return {
+      ok: true,
+      level: "degraded",
+      text: `Your own model (${label.slice(4)}) is standing in for Clef and Clairic. It works, but performance is marginally lower than with Cloudflare AI: a general model is less calibrated at sorting news and less exact at pulling numbers out of announcements. Add a free Cloudflare AI key to fix that.`,
+    };
+  return {
+    ok: false,
+    level: "off",
+    text: "Clef is off: no Cloudflare AI key and no LLM. News triage, structure, the judge and catalyst facts are skipped; rule strategies still trade.",
+  };
 }

@@ -136,7 +136,10 @@ funnel:
   research: # ADR-051: web research desk (GitHub Actions agent, free LLM chain) builds a sourced dossier per court case
     enabled: true
     fresh_hours: 12 # a dossier younger than this is reused instead of researching again
-    wait_minutes: 25 # the court holds a case this long for its dossier, then convenes without it
+    wait_minutes: 25 # the court holds a case this long for any dossier, then convenes without one
+    # operator 2026-10-26: the court waits for the DEEP dossier; the fast ring is only the fallback when the deep one
+    # isn't in 12 min after dispatch (deep runs take ~6–15 min; past 12 the catalyst is going stale)
+    deep_wait_minutes: 12
     max_per_day: 16 # dispatches per UTC day (the court itself is capped at 12)
   tier3:
     max_sprints_per_day: 12
@@ -180,10 +183,6 @@ llm_routing:
     nim/deepseek-ai/deepseek-v4.1-flash: deepseek
     nim/nvidia/nemotron-3-ultra-550b-a55b: nvidia
     openrouter/google/gemma-4-31b-it:free: google
-    anthropic: anthropic
-    openai: openai
-    ollama: local
-    custom: custom
   # Probe 2026-10-26 (bull prompt, live BTC): gemini-3.5 ok in ~14 s (503 at peak), qwen ok in ~2 s, gpt-oss-20b ok in
   # ~2 s; nemotron (NIM and OpenRouter) answers in prose, not JSON; deepseek times out at 60 s, so it is out of both
   # chains (one timeout ate 40% of the hearing deadline).
@@ -210,22 +209,8 @@ llm_routing:
       - { provider: groq, model: openai/gpt-oss-120b }
       - { provider: groq, model: openai/gpt-oss-20b }
       - { provider: gemini, model: gemini-3.5-flash }
-  # ADR-063 BYOK (product): with the user's own keys these hops go first; no key → the free chains above as before.
-  # Bull and bear lead with different families, so a cross-family pair exists whenever two frontier keys do.
-  byok:
-    bull:
-      - { provider: anthropic, model: claude-opus-5-5 }
-      - { provider: openai, model: gpt-5 } # set the model your OpenAI account offers (OPENAI_MODEL overrides)
-      - { provider: custom, model: default }
-      - { provider: ollama, model: default }
-    bear:
-      - { provider: openai, model: gpt-5 }
-      - { provider: anthropic, model: claude-opus-5-5 }
-      - { provider: custom, model: default }
-      - { provider: ollama, model: default }
-    panel:
-      - { provider: anthropic, model: claude-opus-5-5 }
-      - { provider: openai, model: gpt-5 }
+  # ADR-063 BYOK (revised 2026-10-26): the user's two endpoints (bull + bear) are put in front of these chains at
+  # runtime from BYOK_* keys (src/court/providers.ts withByok), each model its own family. Nothing to configure here.
   require_cross_family: true
   hearing_deadline_ms: 150000 # audit W2-05: past 60% skip the panel, past 40% skip the rebuttal
   daily_call_caps: { gemini: 250, groq: 900, nim: 800, openrouter: 45 } # audit W2-06: under each free RPD

@@ -218,6 +218,8 @@ export const DossierPayloadSchema = z.object({
   as_of: z.number().int(),
   /** ADR-057: fast (the court's copy), deep (replaces it later), watch (an open position). Older runs: absent. */
   stage: z.enum(["fast", "deep", "watch"]).default("fast"),
+  /** false only for the early fast ring of a run still going deep: the court keeps waiting (deep_wait_minutes) */
+  complete: z.boolean().default(true),
   summary: z.string().max(1200),
   /** ADR-057: the general market picture today (the MARKET scope). */
   market_context: z.string().max(700).default(""),

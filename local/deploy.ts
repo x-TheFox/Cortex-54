@@ -133,12 +133,7 @@ export function brainSecrets(cfg: LocalConfig, ingest: string): Record<string, s
     ...pick("GROQ_API_KEY"),
     ...pick("NVIDIA_API_KEY"),
     ...pick("OPENROUTER_API_KEY"),
-    ...pick("ANTHROPIC_API_KEY"),
-    ...pick("OPENAI_API_KEY"),
-    ...pick("OPENAI_MODEL"),
-    ...pick("CUSTOM_LLM_BASE_URL"),
-    ...pick("CUSTOM_LLM_API_KEY"),
-    ...pick("CUSTOM_LLM_MODEL"),
+    ...(cfg.llm.endpoints.length ? { LLM_POOL: JSON.stringify(cfg.llm) } : {}),
     ...pick("DISCORD_BOT_TOKEN"),
     ...pick("NTFY_TOPIC"),
     ...pick("NTFY_URL"),
@@ -274,5 +269,63 @@ export function deploy(o: DeployOptions): DeployResult {
     kv,
     steps,
     cloud: { url: url ?? "", worker: o.name, ingest_hmac: ingest },
+  };
+}
+
+/**
+ * After a deploy (MLP0-015, re-verdict for the product): wait until the new brain answers /health with the
+ * constitution this build was made from; if it doesn't within the window, roll the Worker back to its previous version
+ * (non-interactive). A first-ever deploy has nothing to roll back to, which the result says.
+ */
+export async function verifyDeploy(o: {
+  url: string;
+  name: string;
+  cfg: LocalConfig;
+  expectConstitution: string;
+  run: DeployOptions["run"];
+  fetcher?: (u: string, i?: RequestInit) => Promise<Response>;
+  sleep?: (ms: number) => Promise<void>;
+  tries?: number;
+}): Promise<{ healthy: boolean; rolledBack: boolean; detail: string }> {
+  const f = o.fetcher ?? ((u, i) => fetch(u, i));
+  const sleep = o.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  let last = "no answer";
+  for (let i = 0; i < (o.tries ?? 18); i++) {
+    try {
+      const r = await f(`${o.url}/health`, { signal: AbortSignal.timeout(8_000) });
+      const h = (await r.json().catch(() => null)) as { constitution_sha256?: string } | null;
+      if (r.ok && h?.constitution_sha256 === o.expectConstitution)
+        return { healthy: true, rolledBack: false, detail: "the new brain is answering" };
+      last = r.ok ? "an older version is still answering" : `HTTP ${r.status}`;
+    } catch (e) {
+      last = String(e).slice(0, 120);
+    }
+    await sleep(5_000);
+  }
+  const k = o.cfg.keys;
+  const rb = o.run(
+    "pnpm",
+    [
+      "-s",
+      "wrangler",
+      "rollback",
+      "--name",
+      o.name,
+      "-m",
+      `cortex deploy: health check failed (${last})`,
+      "-y",
+    ],
+    {
+      CLOUDFLARE_ACCOUNT_ID: k.CLOUDFLARE_ACCOUNT_ID ?? "",
+      CLOUDFLARE_API_TOKEN: k.CLOUDFLARE_API_TOKEN ?? "",
+    },
+  );
+  return {
+    healthy: false,
+    rolledBack: rb.status === 0,
+    detail:
+      rb.status === 0
+        ? `health check failed (${last}); rolled back to the previous version`
+        : `health check failed (${last}); no previous version to roll back to (${(rb.stderr || rb.stdout).slice(0, 160)})`,
   };
 }

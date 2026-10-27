@@ -28,15 +28,10 @@ FRED_API_KEY=
 NTFY_TOPIC=
 NTFY_URL=
 PILL_TOKEN=
-# ADR-063 BYOK court models (optional; paid keys are the user's choice)
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
-OPENAI_MODEL=
-OLLAMA_BASE_URL=
-OLLAMA_MODEL=
-CUSTOM_LLM_BASE_URL=
-CUSTOM_LLM_API_KEY=
-CUSTOM_LLM_MODEL=
+# ADR-072 model pool (optional): your own endpoints as JSON, e.g.
+# {"endpoints":[{"id":"claude","name":"Anthropic","format":"anthropic","url":"https://api.anthropic.com","key":"sk-ant-…",
+#   "models":["claude-opus-5-5"],"tier":"paid"}],"prefs":{"prefer":"free_first","round_robin":true}}
+LLM_POOL=
 RUNNER_MODE=
 # ADR-068 community hub (optional): cortex hub keygen prints a key
 HUB_URL=

@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { PoolConfigSchema } from "../src/court/pool.ts";
 
 /**
  * Local-mode configuration (ADR-064): one JSON file in the CORTEX home (default ~/.cortex54, override with
@@ -17,14 +18,6 @@ export const KEY_NAMES = [
   "GROQ_API_KEY",
   "NVIDIA_API_KEY",
   "OPENROUTER_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
-  "OPENAI_MODEL",
-  "OLLAMA_BASE_URL",
-  "OLLAMA_MODEL",
-  "CUSTOM_LLM_BASE_URL",
-  "CUSTOM_LLM_API_KEY",
-  "CUSTOM_LLM_MODEL",
   "CLOUDFLARE_ACCOUNT_ID",
   "CLOUDFLARE_API_TOKEN",
   "DISCORD_BOT_TOKEN",
@@ -48,8 +41,13 @@ export const LocalConfigSchema = z.object({
   mode: z.enum(["demo", "paper"]),
   bind: z.string().default("127.0.0.1"),
   port: z.number().int().min(1024).max(65535).default(8754),
-  /** Clef for Tier 1/2 and the judge: Cloudflare Workers AI REST, an LLM shim, or off (funnel disabled) */
-  clef: z.enum(["auto", "cloudflare", "shim", "off"]).default("auto"),
+  /**
+   * Clef + Clairic: auto = Cloudflare Workers AI when its key is set, else the user's LLM as a structured stand-in
+   * (slightly weaker); cloudflare = only Workers AI; llm = always the stand-in; off = funnel disabled.
+   */
+  clef: z
+    .preprocess((v) => (v === "shim" ? "llm" : v), z.enum(["auto", "cloudflare", "llm", "off"]))
+    .default("auto"),
   research: z
     .object({ enabled: z.boolean().default(true), max_parallel: z.number().int().min(1).max(4).default(2) })
     .default({ enabled: true, max_parallel: 2 }),
@@ -60,6 +58,13 @@ export const LocalConfigSchema = z.object({
     pill_token: z.string().min(32),
   }),
   keys: z.partialRecord(z.enum(KEY_NAMES), z.string()).default({}),
+  /** ADR-072: the user's own model endpoints (any number) and how the court uses the pool */
+  llm: PoolConfigSchema.default({
+    endpoints: [],
+    prefs: { prefer: "free_first", round_robin: true, allow_same_model: false },
+  }),
+  /** ADR-073: first-run onboarding finished (the app shows the welcome screen until then) */
+  onboarded: z.boolean().default(false),
   /** ADR-065: the user's own cloud brain (cortex deploy), which this machine serves as a research runner */
   cloud: z.object({ url: z.string(), worker: z.string(), ingest_hmac: z.string().min(32) }).optional(),
 });

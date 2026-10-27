@@ -2542,16 +2542,35 @@ ${postmortem}`,
       `related:${dz.symbol}`,
       now,
     );
-    this.sql.exec(
-      "INSERT OR REPLACE INTO dossiers (symbol, as_of, json, received_at) VALUES (?, ?, ?, ?)",
+    // a late partial (fast ring) never replaces a complete dossier of the same run or newer
+    const have = one<{ json: string; as_of: number }>(
+      this.sql,
+      "SELECT json, as_of FROM dossiers WHERE symbol = ?",
       dz.symbol,
-      Math.min(dz.as_of, now),
-      JSON.stringify(dz),
-      now,
     );
-    // release the cases waiting for it: the next pulse's court hears them with the dossier attached
-    this.sql.exec("DELETE FROM court_waits WHERE symbol = ?", dz.symbol);
-    this.sql.exec("DELETE FROM settings WHERE key = ?", `research_pending:${dz.symbol}`);
+    const haveComplete = have ? (JSON.parse(have.json) as { complete?: boolean }).complete !== false : false;
+    if (!(dz.complete === false && have && haveComplete && have.as_of >= dz.as_of - 30 * 60_000))
+      this.sql.exec(
+        "INSERT OR REPLACE INTO dossiers (symbol, as_of, json, received_at) VALUES (?, ?, ?, ?)",
+        dz.symbol,
+        Math.min(dz.as_of, now),
+        JSON.stringify(dz),
+        now,
+      );
+    const cfg = this.d.funnel.research;
+    if (dz.complete) {
+      // release the cases waiting for it: the next pulse's court hears them with the full dossier attached
+      this.sql.exec("DELETE FROM court_waits WHERE symbol = ?", dz.symbol);
+      this.sql.exec("DELETE FROM settings WHERE key = ?", `research_pending:${dz.symbol}`);
+    } else {
+      // operator 2026-10-26: keep waiting for the deep dossier, but no longer than deep_wait_minutes after dispatch;
+      // then the court convenes on this fast one
+      this.sql.exec(
+        "UPDATE court_waits SET until_at = MIN(until_at, until_at - ?) WHERE symbol = ?",
+        Math.max(0, cfg.wait_minutes - cfg.deep_wait_minutes) * 60_000,
+        dz.symbol,
+      );
+    }
     this.journal.append(
       "SYSTEM",
       "DOSSIER",
@@ -2562,6 +2581,7 @@ ${postmortem}`,
         read: dz.findings.filter((f) => f.verified).length,
         sources: dz.sources.length,
         stage: dz.stage,
+        complete: dz.complete,
         watched,
         ...dz.agent,
       },
@@ -3831,13 +3851,13 @@ ${postmortem}`,
       )
     ) {
       await this.flushJournal();
-      return `📚 Research desk dispatched for ${target.symbol}. The court convenes when the dossier lands (≤ ${this.d.funnel.research.wait_minutes} min) — watch #bull-vs-bear-court.`;
+      return `📚 Research desk dispatched for ${target.symbol}. The court convenes when the deep research lands (fast research after ${this.d.funnel.research.deep_wait_minutes} min if the deep run is slow; ≤ ${this.d.funnel.research.wait_minutes} min) — its card appears in the feed (COURT).`;
     }
     const n = await this.runCourt();
     await this.flushJournal();
     return n > 0
-      ? `Court session for ${target.symbol} finished — see #bull-vs-bear-court.`
-      : `Court session for ${target.symbol} ended without a contract — see #bull-vs-bear-court or the journal.`;
+      ? `Court session for ${target.symbol} finished — see the feed (COURT).`
+      : `Court session for ${target.symbol} ended without a contract — the reasons are in the feed (COURT).`;
   }
 
   /**
@@ -3879,8 +3899,8 @@ ${postmortem}`,
     const n = await this.runCourt();
     await this.flushJournal();
     return n > 0
-      ? `🔥 Roast of ${target.symbol} is in #bull-vs-bear-court (no order placed).`
-      : `The idea on ${target.symbol} didn't survive — the reasons are in #bull-vs-bear-court or \`/why ${target.symbol}\`.`;
+      ? `🔥 Roast of ${target.symbol} is in the feed (COURT). No order placed.`
+      : `The idea on ${target.symbol} didn't survive — the reasons are in the feed (COURT), or ask WHY ${target.symbol}.`;
   }
 
   /**

@@ -122,6 +122,8 @@ export const DoctrineSchema = z.object({
       enabled: z.boolean(),
       fresh_hours: z.number().positive().max(72),
       wait_minutes: z.number().int().min(1).max(120),
+      /** operator 2026-10-26: with a fast dossier in hand, wait this long (from dispatch) for the deep one */
+      deep_wait_minutes: z.number().int().min(1).max(120).default(12),
       max_per_day: z.number().int().nonnegative().max(100),
     }),
     tier3: z.object({
@@ -174,13 +176,6 @@ export const DoctrineSchema = z.object({
     hearing_deadline_ms: z.number().int().positive().default(150_000),
     /** Audit W2-06: calls per provider per UTC day (free-tier RPD with margin); an exhausted provider is skipped. */
     daily_call_caps: z.record(z.string(), z.number().int().nonnegative()).default({}),
-    /**
-     * ADR-063 BYOK: hops tried FIRST when the user brought a key for that provider (anthropic, openai, ollama,
-     * custom). Absent keys leave the free chains untouched; the cross-family rule still applies.
-     */
-    byok: z
-      .object({ bull: z.array(LlmHop), bear: z.array(LlmHop), panel: z.array(LlmHop) })
-      .default({ bull: [], bear: [], panel: [] }),
   }),
   regime_gates: z.object({
     crypto_composite_min_for_longs: z.number().min(0).max(100),

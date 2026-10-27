@@ -397,6 +397,68 @@ function forecast(now: number, symbol: string, empty: boolean) {
   };
 }
 
+/** Synthetic /api/feed (ADR-071): one card per kind, newest first. */
+function feed(now: number, channel: string | null) {
+  const items = [
+    {
+      id: 6,
+      ts: now - 4 * 60_000,
+      channel: "executions",
+      msg: {
+        embeds: [
+          {
+            title: "🟢 BUY BTC/USD filled · PAPER",
+            color: 0x10b981,
+            description: "0.00016 @ **$62,410.50** · stop $61,180 · target $64,900",
+            fields: [
+              { name: "Strategy", value: "CRYPTO_BREAKOUT_BASELINE_V1", inline: true },
+              { name: "Risk", value: "$0.19 (0.4% of equity)", inline: true },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      id: 5,
+      ts: now - 22 * 60_000,
+      channel: "court",
+      msg: {
+        embeds: [
+          {
+            title: "⚖️ Court · NVDA",
+            color: 0x38bdf8,
+            description:
+              "Bull (gemini-3.5-flash): earnings beat by 12%, guidance raised.\nBear (gpt-oss-120b): priced in; gap above the 20-day range.",
+            fields: [{ name: "Verdict", value: "Not traded: bear lethality 0.71 over the 0.6 bar" }],
+            footer: { text: "6 calls · 41 s" },
+          },
+        ],
+      },
+    },
+    {
+      id: 4,
+      ts: now - 50 * 60_000,
+      channel: "alarms",
+      msg: { content: "⚠️ Groq rate-limited for 10 minutes; the court rotated to the next model." },
+    },
+    {
+      id: 3,
+      ts: now - 2 * 3_600_000,
+      channel: "world_intel",
+      msg: {
+        embeds: [
+          {
+            title: "📰 SOL: network upgrade date set",
+            color: 0xf59e0b,
+            description: "Triage 0.62 material · priority 1.4",
+          },
+        ],
+      },
+    },
+  ];
+  return channel ? items.filter((i) => i.channel === channel) : items;
+}
+
 export function mockApi(): Plugin {
   return {
     name: "cortex-mock-api",
@@ -467,6 +529,15 @@ export function mockApi(): Plugin {
             return send(forecast(now, url.searchParams.get("symbol") ?? "BTC/USD", empty));
           case "/api/equity":
             return send(empty ? {} : { PAPER: curve(now, 54, 24 * 14, 0.7) });
+          case "/api/feed":
+            return send(
+              empty || url.searchParams.get("before") ? [] : feed(now, url.searchParams.get("channel")),
+            );
+          case "/api/settings":
+            return send({
+              managed: "cloud",
+              message: "(dev mock) Settings are served by a local brain: run `pnpm cortex demo` to try them.",
+            });
           case "/api/command":
             return send({ ok: true, message: "(dev mock) command accepted; nothing was sent to the brain" });
           case "/api/login":

@@ -1,30 +1,36 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, watchFile, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { AlpacaClient } from "../src/broker/AlpacaClient.ts";
+import { type ApiFormat, listModels, normalizeUrl, PRESETS, presetForKey } from "../src/court/models.ts";
+import { buildPool } from "../src/court/pool.ts";
 import { buildProviders } from "../src/court/providers.ts";
-import { SCAR_TISSUE } from "../src/generated/config.ts";
+import { CONSTITUTION_SHA256, DOCTRINE, SCAR_TISSUE } from "../src/generated/config.ts";
 import { agentIdOf, canonical, generateAgentKey, publicKeyOf } from "../src/hub/protocol.ts";
 import {
   applyKeys,
+  configPath,
   cortexHome,
   type KEY_NAMES,
   keyNames,
   type LocalConfig,
+  LocalConfigSchema,
   loadConfig,
   newConfig,
   saveConfig,
 } from "./config.ts";
-import { deploy } from "./deploy.ts";
+import { deploy, verifyDeploy } from "./deploy.ts";
+import { type Check, configChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
 import { applyPack, exportPack, loadLocalScar, mergeScar, stagePack } from "./memory.ts";
 import { claimOnce } from "./runner.ts";
-import { LocalCortex } from "./runtime.ts";
+import { clefNotice, LocalCortex, resolveClef } from "./runtime.ts";
 import { install, plan, uninstall } from "./service.ts";
+import { LocalSettings, mergeEndpoints } from "./settings.ts";
 import { fileSql } from "./store.ts";
 
 /**
@@ -58,13 +64,6 @@ const multi = (n: string) =>
 const json = flag("json");
 const out = (human: string, data: unknown) => console.log(json ? JSON.stringify(data, null, 2) : human);
 
-interface Check {
-  name: string;
-  ok: boolean;
-  detail: string;
-  fix?: string;
-}
-
 async function portFree(port: number, bind: string): Promise<boolean> {
   return new Promise((res) => {
     const s = createServer();
@@ -72,8 +71,6 @@ async function portFree(port: number, bind: string): Promise<boolean> {
     s.listen(port, bind, () => s.close(() => res(true)));
   });
 }
-
-const has = (cmd: string) => spawnSync(cmd, ["--version"], { stdio: "ignore" }).status === 0;
 
 async function doctor(home: string): Promise<Check[]> {
   const c: Check[] = [];
@@ -105,87 +102,28 @@ async function doctor(home: string): Promise<Check[]> {
       fix: "Run `cortex setup --mode demo --yes` (no keys needed) or `cortex setup` for paper trading.",
     });
   c.push({
-    name: "web terminal",
+    name: "web app",
     ok: existsSync(join(ROOT, "public", "index.html")),
     detail: join(ROOT, "public"),
     fix: "Run `pnpm web:build`.",
   });
-  c.push({
-    name: "uv (research jobs)",
-    ok: has("uv"),
-    detail: has("uv") ? "found" : "missing",
-    fix: "Install uv (https://docs.astral.sh/uv/) — research, Kronos and the Governor run with it.",
-  });
-  c.push({
-    name: "git (pinned research skills)",
-    ok: has("git"),
-    detail: has("git") ? "found" : "missing",
-    fix: "Install git.",
-  });
   if (cfg) {
-    c.push({ name: "mode", ok: true, detail: cfg.mode });
+    const free = await portFree(cfg.port, cfg.bind);
+    // a busy port is fine when it's this CORTEX answering there
+    const ours =
+      !free &&
+      (await fetch(`http://${cfg.bind === "0.0.0.0" ? "127.0.0.1" : cfg.bind}:${cfg.port}/health`, {
+        signal: AbortSignal.timeout(3_000),
+      })
+        .then(async (r) => String(((await r.json()) as { name?: string }).name ?? "").startsWith("CORTEX-54"))
+        .catch(() => false));
     c.push({
       name: "port",
-      ok: await portFree(cfg.port, cfg.bind),
-      detail: `${cfg.bind}:${cfg.port}`,
-      fix: "Another process uses the port (a running cortexd?), or change `port` in config.json.",
+      ok: free || ours,
+      detail: ours ? `${cfg.bind}:${cfg.port} (CORTEX is running there)` : `${cfg.bind}:${cfg.port}`,
+      fix: "Another program uses this port; change `port` in config.json.",
     });
-    const k = cfg.keys;
-    if (cfg.mode === "paper") {
-      if (!k.ALPACA_PAPER_KEY_ID || !k.ALPACA_PAPER_SECRET)
-        c.push({
-          name: "alpaca paper keys",
-          ok: false,
-          detail: "missing",
-          fix: "Create a free Alpaca paper account and run `cortex setup --set ALPACA_PAPER_KEY_ID=… --set ALPACA_PAPER_SECRET=…`.",
-        });
-      else {
-        try {
-          const a = await new AlpacaClient(
-            "https://paper-api.alpaca.markets",
-            { keyId: k.ALPACA_PAPER_KEY_ID, secret: k.ALPACA_PAPER_SECRET },
-            () => undefined,
-          ).account();
-          c.push({
-            name: "alpaca paper keys",
-            ok: a.status === "ACTIVE",
-            detail: `account ${a.status}, equity $${a.equity}`,
-          });
-        } catch (e) {
-          c.push({
-            name: "alpaca paper keys",
-            ok: false,
-            detail: String(e).slice(0, 160),
-            fix: "Check the keys (paper, not live) in the Alpaca dashboard.",
-          });
-        }
-      }
-    }
-    const providers = Object.keys(buildProviders(k));
-    c.push({
-      name: "court models",
-      ok: providers.length >= 2,
-      detail: providers.join(", ") || "none",
-      fix: "The court needs two model families: add any two of GEMINI_API_KEY / GROQ_API_KEY (free) or ANTHROPIC_API_KEY / OPENAI_API_KEY (your own paid keys).",
-    });
-    const clef =
-      k.CLOUDFLARE_ACCOUNT_ID && k.CLOUDFLARE_API_TOKEN
-        ? "Cloudflare Workers AI"
-        : providers.length
-          ? "shim on your chat model"
-          : "off";
-    c.push({
-      name: "Clef (Tier 1/2 + judge)",
-      ok: clef !== "off",
-      detail: clef,
-      fix: "Add CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN (free Workers AI), or any chat model key for the shim.",
-    });
-    c.push({
-      name: "kill switch",
-      ok: !existsSync(join(home, "KILLED")),
-      detail: existsSync(join(home, "KILLED")) ? "KILLED" : "clear",
-      fix: "`cortex rearm` when you mean it.",
-    });
+    c.push(...(await configChecks(cfg, home)));
   }
   return c;
 }
@@ -199,6 +137,7 @@ async function setup(home: string): Promise<void> {
   if (bind) cfg = { ...cfg, bind };
   if (opt("port")) cfg = { ...cfg, port: Number(opt("port")) };
   cfg = applyKeys(cfg, multi("set"));
+  if (flag("onboarded")) cfg = { ...cfg, onboarded: true };
   if (!flag("yes") && process.stdin.isTTY) {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const ask = async (q: string, d = "") => (await rl.question(`${q}${d ? ` [${d}]` : ""}: `)).trim() || d;
@@ -213,11 +152,10 @@ async function setup(home: string): Promise<void> {
     const prompts: [(typeof KEY_NAMES)[number], string][] = [
       ["ALPACA_PAPER_KEY_ID", "Alpaca PAPER key id (paper mode, also unlocks news + stocks)"],
       ["ALPACA_PAPER_SECRET", "Alpaca PAPER secret"],
-      ["GEMINI_API_KEY", "Gemini API key (free tier works)"],
-      ["GROQ_API_KEY", "Groq API key (free tier works)"],
-      ["ANTHROPIC_API_KEY", "Anthropic API key (optional, your own paid key)"],
-      ["OPENAI_API_KEY", "OpenAI API key (optional)"],
-      ["CLOUDFLARE_ACCOUNT_ID", "Cloudflare account id (optional: real Clef via free Workers AI)"],
+      [
+        "CLOUDFLARE_ACCOUNT_ID",
+        "Cloudflare account id (recommended: real Clef + Clairic on free Workers AI)",
+      ],
       ["CLOUDFLARE_API_TOKEN", "Cloudflare API token with Workers AI permission"],
       ["NTFY_TOPIC", "ntfy topic for phone alerts (optional, 16+ random chars)"],
     ];
@@ -225,6 +163,11 @@ async function setup(home: string): Promise<void> {
       const v = await ask(`${label}${cfg.keys[k] ? " (set)" : ""}`);
       if (v) cfg = applyKeys(cfg, [`${k}=${v}`]);
     }
+    if (!cfg.keys.CLOUDFLARE_ACCOUNT_ID || !cfg.keys.CLOUDFLARE_API_TOKEN)
+      console.log(
+        "\nNote: without Cloudflare AI, your own LLM stands in for Clef + Clairic. It works, but performance is marginally lower.\n",
+      );
+    cfg = await modelsPrompt(cfg, ask);
     rl.close();
   }
   const p = saveConfig(cfg, home);
@@ -239,12 +182,53 @@ async function setup(home: string): Promise<void> {
   );
 }
 
-async function start(home: string, cfg: LocalConfig, minutes?: number): Promise<void> {
-  const c = new LocalCortex({ home, root: ROOT, cfg });
+async function start(home: string, first: LocalConfig, minutes?: number): Promise<void> {
+  let cfg = first;
+  let c: LocalCortex;
+  let reloading = false;
+  const settings = new LocalSettings({
+    home,
+    cfg: () => cfg,
+    pool: () => c.pool,
+    health: () => c.health(),
+    clef: () => clefNotice(c.clefMode),
+    // ADR-071: apply saved settings in-process (same port, same login session secret)
+    reload: () => {
+      if (reloading) return;
+      reloading = true;
+      void (async () => {
+        try {
+          await c.stop();
+          cfg = loadConfig(home) ?? cfg;
+          seen = JSON.stringify(cfg);
+          c = new LocalCortex({ home, root: ROOT, cfg, settings });
+          await c.start();
+          console.log(`[settings] applied (${cfg.mode} mode)`);
+        } catch (e) {
+          console.error(`[settings] reload failed: ${String(e).slice(0, 300)}`);
+        } finally {
+          reloading = false;
+        }
+      })();
+    },
+  });
+  c = new LocalCortex({ home, root: ROOT, cfg, settings });
   await c.start();
+  // ADR-073: changes made outside the app (an agent running `cortex llm add`, `cortex setup --set …`) apply live
+  let seen = JSON.stringify(cfg);
+  watchFile(configPath(home), { interval: 1500 }, () => {
+    try {
+      const next = loadConfig(home);
+      if (!next || JSON.stringify(next) === seen || reloading) return;
+      seen = JSON.stringify(next);
+      settings.reloadNow();
+    } catch {
+      /* half-written file: the next tick reads it whole */
+    }
+  });
   const link = await c.loginLink();
   out(
-    `CORTEX-54 ${cfg.mode} mode running at ${c.url()}\nWeb terminal (single-use login, 10 min): ${link}\nStop with Ctrl+C.`,
+    `CORTEX-54 ${cfg.mode} mode running at ${c.url()}\nWeb app (single-use login, 10 min): ${link}\nStop with Ctrl+C.`,
     {
       ok: true,
       url: c.url(),
@@ -283,7 +267,8 @@ async function main(): Promise<void> {
       out(
         `${checks
           .map(
-            (x) => `${x.ok ? "✅" : "❌"} ${x.name}: ${x.detail}${x.ok || !x.fix ? "" : `\n   → ${x.fix}`}`,
+            (x) =>
+              `${x.ok ? (x.warn ? "⚠️ " : "✅") : "❌"} ${x.name}: ${x.detail}${(x.ok && !x.warn) || !x.fix ? "" : `\n   → ${x.fix}`}`,
           )
           .join("\n")}\n${bad.length ? `${bad.length} thing(s) to fix.` : "All good."}`,
         { ok: bad.length === 0, checks },
@@ -362,9 +347,17 @@ async function main(): Promise<void> {
         },
       });
       saveConfig({ ...cfg, cloud: r.cloud }, home);
+      const runner = (cmd: string, a: string[], env: Record<string, string>) => {
+        const p = spawnSync(cmd, a, { cwd: ROOT, env: { ...process.env, ...env }, encoding: "utf8" });
+        return { status: p.status ?? 1, stdout: p.stdout ?? "", stderr: p.stderr ?? "" };
+      };
+      const v = r.url
+        ? await verifyDeploy({ url: r.url, name, cfg, expectConstitution: CONSTITUTION_SHA256, run: runner })
+        : { healthy: false, rolledBack: false, detail: "no URL in the deploy output" };
+      if (!v.healthy) process.exitCode = 1;
       return out(
-        `Deployed ${name}: ${r.url}\nSentinel: ${r.sentinelUrl}\nResearch jobs wait for this machine: run \`cortex runner\` (or \`cortex service install\`).`,
-        { ok: true, ...r, cloud: { url: r.cloud.url, worker: r.cloud.worker } },
+        `${v.healthy ? "Deployed" : "Deploy FAILED its health check"} ${name}: ${r.url}\n${v.detail}\nSentinel: ${r.sentinelUrl}\nResearch jobs wait for this machine: run \`cortex runner\` (or \`cortex service install\`).`,
+        { ok: v.healthy, ...r, verify: v, cloud: { url: r.cloud.url, worker: r.cloud.worker } },
       );
     }
     case "runner": {
@@ -481,13 +474,111 @@ async function main(): Promise<void> {
       }
       throw new Error("cortex memory export | import <file|pack-id> | apply <id>");
     }
+    case "support": {
+      // ADR-073: a redacted diagnostics file to send for help (no keys, no secrets)
+      const cfg = loadConfig(home);
+      if (!cfg) throw new Error("no config: run `cortex setup` first");
+      const built = buildPool(DOCTRINE, buildProviders(cfg.keys), cfg.llm);
+      const s = new LocalSettings({
+        home,
+        cfg: () => cfg,
+        reload: () => undefined,
+        pool: () => built.report,
+        clef: () => clefNotice(resolveClef(cfg, built).label),
+      });
+      const file = join(home, `support-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.json`);
+      writeFileSync(file, `${JSON.stringify(await s.support(), null, 2)}\n`, { mode: 0o600 });
+      return out(`Support file written (no keys or secrets in it): ${file}`, { ok: true, path: file });
+    }
+    case "llm": {
+      // ADR-072: the model pool from the command line (what an agent uses to set things up)
+      let cfg = loadConfig(home);
+      if (!cfg) throw new Error("no config: run `cortex setup --mode demo --yes` first");
+      const sub = args[1] ?? "list";
+      const report = () =>
+        buildPool(DOCTRINE, buildProviders(cfg?.keys ?? {}), cfg?.llm ?? newConfig().llm).report;
+      if (sub === "list")
+        return out(
+          `${report()
+            .entries.map((e) => `${e.tier.padEnd(5)} ${e.source} · ${e.model} (${e.family})`)
+            .join("\n")}\n${report()
+            .notes.map((n) => n.text)
+            .join(" ")}`,
+          {
+            endpoints: cfg.llm.endpoints.map((e) => ({ ...e, key: e.key ? "set" : "" })),
+            prefs: cfg.llm.prefs,
+            pool: report(),
+          },
+        );
+      if (sub === "add") {
+        const input = args[2];
+        if (!input)
+          throw new Error(
+            "cortex llm add <key-or-url> [--url U] [--format openai|anthropic] [--models a,b] [--tier free|paid|local] [--name N]",
+          );
+        const ask = async (q: string, d = "") => {
+          if (!process.stdin.isTTY) throw new Error(`${q}: pass it as a flag (non-interactive)`);
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          const a = (await rl.question(`${q}${d ? ` [${d}]` : ""}: `)).trim() || d;
+          rl.close();
+          return a;
+        };
+        const r = await addFromInput(cfg, input, ask, {
+          ...(opt("format") ? { format: opt("format") as string } : {}),
+          ...(opt("url") ? { url: opt("url") as string } : {}),
+          ...(opt("models") ? { models: opt("models") as string } : {}),
+          ...(opt("tier") ? { tier: opt("tier") as string } : {}),
+          ...(opt("name") ? { name: opt("name") as string } : {}),
+        });
+        cfg = r.cfg;
+        saveConfig(cfg, home);
+        return out(
+          `${r.message}\n${report()
+            .notes.map((n) => n.text)
+            .join(" ")}`,
+          { ok: true, message: r.message, pool: report() },
+        );
+      }
+      if (sub === "remove") {
+        const id = args[2];
+        const endpoints = cfg.llm.endpoints.filter((e) => e.id !== id);
+        if (endpoints.length === cfg.llm.endpoints.length)
+          throw new Error(`no endpoint ${id} (cortex llm list --json shows ids)`);
+        saveConfig({ ...cfg, llm: { ...cfg.llm, endpoints } }, home);
+        return out(`Removed ${id}.`, { ok: true });
+      }
+      if (sub === "models") {
+        const e = cfg.llm.endpoints.find((x) => x.id === args[2]);
+        const r = e
+          ? await listModels(e.format, e.url, e.key)
+          : await listModels((opt("format") as ApiFormat) ?? "openai", args[2], opt("key") ?? "");
+        return out(r.ok ? r.models.join("\n") : `Could not list: ${r.error}`, r);
+      }
+      if (sub === "prefs") {
+        const prefs = {
+          ...cfg.llm.prefs,
+          ...(opt("prefer") ? { prefer: opt("prefer") } : {}),
+          ...(opt("round-robin") ? { round_robin: opt("round-robin") !== "off" } : {}),
+          ...(opt("same-model") ? { allow_same_model: opt("same-model") === "yes" } : {}),
+        };
+        const next = LocalConfigSchema.parse({ ...cfg, llm: { ...cfg.llm, prefs } });
+        saveConfig(next, home);
+        return out(
+          `prefer ${next.llm.prefs.prefer} · round robin ${next.llm.prefs.round_robin ? "on" : "off"} · same model ${next.llm.prefs.allow_same_model ? "allowed" : "not allowed"}`,
+          { ok: true, prefs: next.llm.prefs },
+        );
+      }
+      throw new Error(
+        "cortex llm list | add <key-or-url> | remove <id> | models <id-or-url> | prefs [--prefer free_first|paid_first|mixed] [--round-robin on|off] [--same-model yes|no]",
+      );
+    }
     case "keys": {
       const cfg = loadConfig(home);
       return out(cfg ? keyNames(cfg).join("\n") : "no config", { keys: cfg ? keyNames(cfg) : [] });
     }
     default:
       console.log(
-        "cortex setup | doctor | start | demo | link | service install|uninstall|print | kill | rearm | keys   (--json for machine output)",
+        "cortex setup | doctor | start | demo | link | support | llm list|add|remove|models|prefs | service install|uninstall|print | kill | rearm | keys   (--json for machine output)",
       );
   }
 }
@@ -499,3 +590,94 @@ main().catch((e) => {
   });
   process.exitCode = 1;
 });
+
+/**
+ * Interactive models (ADR-072): paste any key or a local URL; known keys are recognized (Gemini, Groq, NIM go to the
+ * built-in providers with their verified models), anything else becomes an endpoint with its models discovered.
+ */
+async function modelsPrompt(
+  cfg: LocalConfig,
+  ask: (q: string, d?: string) => Promise<string>,
+): Promise<LocalConfig> {
+  console.log(
+    "\nAI models for the court. Paste API keys one at a time (free: aistudio.google.com/apikey, console.groq.com/keys),\nor a local address like http://127.0.0.1:11434/v1 (Ollama). Blank line when done.",
+  );
+  for (;;) {
+    const report = buildPool(DOCTRINE, buildProviders(cfg.keys), cfg.llm).report;
+    console.log(`  Now: ${report.notes.map((n) => n.text).join(" ")}`);
+    const v = await ask("Key or URL");
+    if (!v) break;
+    const r = await addFromInput(cfg, v, ask);
+    cfg = r.cfg;
+    console.log(`  ${r.message}`);
+  }
+  return cfg;
+}
+
+/** One key or URL → a built-in key or a new endpoint (shared by setup and `cortex llm add`). */
+async function addFromInput(
+  cfg: LocalConfig,
+  input: string,
+  ask: (q: string, d?: string) => Promise<string>,
+  o: { format?: string; url?: string; models?: string; tier?: string; name?: string } = {},
+): Promise<{ cfg: LocalConfig; message: string }> {
+  const isUrl = /^https?:\/\//.test(input);
+  const preset = isUrl
+    ? (PRESETS.find((p) => p.url && input.startsWith(p.url.replace(/\/v1$/, ""))) ?? null)
+    : presetForKey(input);
+  if (preset?.builtinKey && !isUrl && !o.url) {
+    cfg = applyKeys(cfg, [`${preset.builtinKey}=${input}`]);
+    return { cfg, message: `${preset.name}: key saved (uses its verified free models).` };
+  }
+  // a URL (or an unrecognized key) is OpenAI-compatible unless told otherwise: that is what almost every server speaks,
+  // and an agent running this can't answer prompts
+  const format: ApiFormat = (o.format ?? preset?.format ?? "openai") === "anthropic" ? "anthropic" : "openai";
+  const url = normalizeUrl(
+    format,
+    o.url ?? (isUrl ? input : preset?.url || (await ask("Base URL", normalizeUrl(format, "")))),
+  );
+  const key = isUrl ? (o.url ? input : "") : input;
+  const listed = await listModels(format, url, key);
+  let models: string[] = [];
+  if (o.models)
+    models = o.models
+      .split(",")
+      .map((m) => m.trim())
+      .filter(Boolean);
+  else if (listed.ok && listed.models.length) {
+    const shown = listed.models.slice(0, 60);
+    for (const [i, m] of shown.entries()) console.log(`    ${String(i + 1).padStart(2)}. ${m}`);
+    if (listed.models.length > shown.length)
+      console.log(`    … and ${listed.models.length - shown.length} more (type a name)`);
+    const pick = await ask("Models to use (numbers or names, comma-separated)", "1");
+    models = pick
+      .split(",")
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .map((x) => (/^\d+$/.test(x) ? (shown[Number(x) - 1] ?? "") : x))
+      .filter(Boolean);
+  } else {
+    console.log(`    Could not list models here (${listed.ok ? "empty list" : listed.error}).`);
+    models = (await ask("Model name(s) exactly as the endpoint expects (comma-separated)"))
+      .split(",")
+      .map((m) => m.trim())
+      .filter(Boolean);
+  }
+  if (!models.length) return { cfg, message: "No model chosen; nothing added." };
+  const llm = cfg.llm;
+  const endpoints = mergeEndpoints(llm.endpoints, [
+    ...llm.endpoints,
+    {
+      name: o.name ?? preset?.name ?? new URL(listed.url).host,
+      format,
+      url: listed.url,
+      key,
+      models,
+      tier: o.tier ?? preset?.tier ?? "paid",
+    },
+  ]);
+  return {
+    cfg: { ...cfg, llm: { ...llm, endpoints } },
+    message: `Added ${models.length} model(s) from ${new URL(listed.url).host}.`,
+  };
+}

@@ -14,8 +14,9 @@ CORTEX-54 is a single, always-alive autonomous trading agent that runs **entirel
 Alpaca accounts in lockstep: a **$54 paper account** and a **$54 real-money account**. It reads the real
 world (news, filings, crypto microstructure, regime data), filters it through a four-tier cognitive funnel
 that spends thinking like money (math → Clef-flash → Clef → frontier LLM debate), and may only trade through
-a schema-valid `DecisionContract` that a deterministic risk engine sizes and can veto. A Discord bot is the
-command center (alerts, HUD, autonomy dial, kill-switch). Trading is fully autonomous: no human approves trades. The harness, not any model, is the product:
+a schema-valid `DecisionContract` that a deterministic risk engine sizes and can veto. The app (web panel,
+desktop shell) is the command center: feed, ask, settings, autonomy dial, kill-switch; Discord is an optional add-on
+(ADR-071). Trading is fully autonomous: no human approves trades. The harness, not any model, is the product:
 **models reason, code computes, the risk engine decides, the operator governs.**
 
 Hard constraint from the operator: **$0 operating cost. No paid plans, no credit cards on file, ever.**
@@ -97,7 +98,7 @@ Full detail: `docs/ARCHITECTURE.md`. Budget math: `docs/FREE_TIER_BUDGET.md`.
 | 0 Reflex | TypeScript | DO pulse | free | stops, breakers, staleness, spread/fee gates, dedupe, watchlist relevance, ALL arithmetic |
 | 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | one item per call (~1.2 neurons), ≤8 per pulse; promote P(material) ≥ 0.45 and priority ≥ 1.2 (ADR-037) |
 | 2 Structure | `@cf/cloudflare/clef` (27B) | DO | ~4,000 neurons/day | Tier 0 evidence (code) → long_favored, regime fit, bear-lethality, setup, quality; ≤1/pulse, ≤40/day |
-| 3 Court | free LLM chains + Clef 27B synth | DO pulse (ADR-028) | free-tier RPD | bull → **cross-family** bear → bull rebuttal → expert panel (quant, risk, macro) → Clef synth → calibrated COURT contract; ≤1/pulse, ≤12/day (ADR-044) |
+| 3 Court | model pool (free chains + the user's endpoints, round robin, ADR-072) + Clef 27B synth | DO pulse (ADR-028) | free-tier RPD / endpoint caps | bull → **cross-family** bear → bull rebuttal → expert panel (quant, risk, macro) → Clef synth → calibrated COURT contract; ≤1/pulse, ≤12/day (ADR-044) |
 
 Clef probabilities are **not** win rates. They pass through our own calibration map
 (`config/calibration.json`, produced by the Governor from logged outcomes) before the sizer sees them.
@@ -270,20 +271,23 @@ src/
   budget/FreeTierBudget.ts free-tier meter + per-invocation subrequest guard
   journal/Journal.ts       hash chain + D1 outbox
   strategy/                indicators + CRYPTO_BREAKOUT_BASELINE_V1 (deterministic, RULE contracts)
-  discord/                 signature verify, commands, interactions, notifier (REST)
+  discord/                 signature verify, commands, interactions, notifier (REST), token-only auto-setup (setup.ts)
   lib/                     sync sha256, uuidv7, client_order_id, money helpers
   clef/                    Clef client (real response format), Tier 1 triage, Tier 2 structure (pure)
-  court/                   Tier 0 evidence, LLM router + providers, versioned prompts, bull/bear/synth/contract (pure)
+  court/                   Tier 0 evidence, LLM router + providers, model pool (pool.ts, models.ts: endpoints, round
+                           robin, discovery, presets — ADR-072), versioned prompts, bull/bear/synth/contract (pure)
+  notify/                  ntfy push, the app's feed inbox (inbox.ts, ADR-071)
   data/ workflows/         (later)
-web/                      web terminal: React 19 + Vite (dark cockpit, ADR-036); builds into public/ (gitignored);
-                          mock-api.ts serves synthetic data for `pnpm web:dev` only. PRODUCT.md / DESIGN.md at root
+web/                      the app's panel: React 19 + Vite (dark cockpit, ADR-036; FEED / ASK / SETTINGS / TODAY and
+                          first-launch onboarding, ADR-071/073); builds into public/ (gitignored); mock-api.ts serves
+                          synthetic data for `pnpm web:dev` only. PRODUCT.md / DESIGN.md at root
 workers/sentinel/         independent watchdog + kill-switch worker (own wrangler.jsonc, vendored verify.ts,
                           writes the KV kill flag the brain reads — ADR-015)
 research/                 Python (uv): cortex_research.run crypto|equity|world — runs pinned upstream skills, signs,
                           POSTs /ingest/batch (research.yml); governor/ (ADR-030); options/ shadow lab (ADR-031);
                           pytest in CI. ADR-026
 local/                    cortexd local mode + `cortex` CLI (ADR-064/065): runtime, sandbox broker, jobs, service,
-                          deploy, runner, memory packs
+                          deploy, runner, memory packs, settings backend + live reload (settings.ts), agent-prompt.ts
 desktop/                  Tauri v2 app (ADR-066): src-tauri/ shell; bundles dist/cortexd + an official Node runtime
 hub/                      community hub Worker + D1 migrations (ADR-068), hosted by the publisher
 src/universe/ src/portfolio/ src/hub/   dynamic universe + scout (058), exits/lateness/book (059–061), hub protocol (068)
@@ -316,7 +320,9 @@ pnpm discord:register     # (global) slash commands for both Discord apps (needs
 gh workflow run governor -f weekly=true                     # governor now (report card + calibration proposal)
 # Discord /terminal → single-use link to the web terminal (https://cortex.samplayz2ks.workers.dev)
 gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATTEN ALL (ADR-022); action=rearm to clear
-pnpm cortex <setup|doctor|start|demo|link|service|kill|rearm|deploy|runner|hub|memory> [--json]   # local mode (ADR-064)
+pnpm cortex <setup|doctor|start|demo|link|llm|service|kill|rearm|deploy|runner|hub|memory> [--json]   # local mode (ADR-064)
+pnpm cortex llm add <key-or-url> [--models a,b]   # model pool (ADR-072): list | add | remove | models | prefs
+pnpm cortex support       # redacted support file (no secrets) for asking for help (ADR-074)
 pnpm demo                 # keyless local demo on live crypto prices (simulated broker)
 pnpm cortexd:build        # dist/cortexd bundle (no TS source); pnpm desktop:runtime && pnpm desktop:build → the app
 pnpm canary               # model drift canary against every court model (weekly in canary.yml, ADR-070)
@@ -465,5 +471,13 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   models + portable Clef, cortexd local mode, desktop app, job queue + cortex deploy, community hub, Chronos-2 companion,
   drift canary + chaos test. Product direction: closed-source desktop/headless software + a hosted hub
   (docs/DISTRIBUTION.md).
+- 2026-10-26 (evening): app-first round (operator; docs/IDEAS_WORKLOG.md §E). ADR-071: the app is the dashboard (FEED
+  from a hot-store inbox, ASK, SETTINGS; Discord optional, connects from a bot token; LIVE ratification from the app on a
+  fresh sign-in). ADR-072: the model pool (unlimited OpenAI/Anthropic-compatible endpoints, discovery, round robin with
+  cooldowns and caps, one-model warning); Clef/Clairic only on Cloudflare AI, else a structured stand-in (marginally
+  lower, and the user is told). ADR-073: first-launch onboarding (wizard or agent prompt), live settings reload,
+  TODAY summary. Hot schema v9. ADR-074: the court waits for the deep dossier (fast one after 12 min); the research
+  desk uses the user's pool; support file + HEALTH in the app; `cortex deploy` verifies and rolls back; model
+  scoreboard. Every idea re-reviewed for the app-first objective (IDEAS_WORKLOG §F).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

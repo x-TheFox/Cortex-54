@@ -266,3 +266,23 @@ describe("cortexd runtime (ADR-064)", () => {
     expect((await c.pulse()).kill).toBe("KILLED");
   });
 });
+
+describe("agent setup prompt (ADR-073)", () => {
+  it("the app's copy and docs/SETUP_WITH_AN_AGENT.md are the same text", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { AGENT_PROMPT } = await import("../local/agent-prompt.ts");
+    expect(readFileSync("docs/SETUP_WITH_AN_AGENT.md", "utf8")).toContain(AGENT_PROMPT);
+    // every command it tells an agent to run exists
+    for (const sub of [
+      "llm add",
+      "llm list",
+      "llm models",
+      "llm prefs",
+      "setup --mode",
+      "doctor --json",
+      "link",
+      "kill",
+    ])
+      expect(AGENT_PROMPT).toContain(`cortex ${sub}`);
+  });
+});

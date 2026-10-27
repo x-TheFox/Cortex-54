@@ -4,8 +4,8 @@ import type { BrokerApi } from "../broker/types.ts";
 import { InvocationMeter } from "../budget/FreeTierBudget.ts";
 import { WorkersAiClef } from "../clef/ClefClient.ts";
 import { WorkersAiClairic } from "../clef/clairic.ts";
-import { LlmRouter } from "../court/llm.ts";
-import { buildProviders, withByok } from "../court/providers.ts";
+import { buildPool, parsePool, poolRouter } from "../court/pool.ts";
+import { buildProviders } from "../court/providers.ts";
 import { DiscordNotifier, type Notifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
 import type { Env } from "../env.ts";
 import {
@@ -18,6 +18,7 @@ import {
 } from "../generated/config.ts";
 import { hubFromEnv } from "../hub/client.ts";
 import type { AccountId } from "../lib/ids.ts";
+import { InboxNotifier, readFeed } from "../notify/inbox.ts";
 import { ntfyUrl, PushNotifier } from "../notify/push.ts";
 import { Brain, parseKillFlag, type SloView, type StatusView } from "./Brain.ts";
 import { GitHubDispatcher } from "./dispatch.ts";
@@ -93,33 +94,39 @@ export class AgentCortexDO extends DurableObject<Env> {
           ? { keyId: env.ALPACA_LIVE_KEY_ID, secret: env.ALPACA_LIVE_SECRET }
           : null;
 
-    // ADR-063: the user's own frontier keys (if any) lead the court chains; the free chains follow
-    const providers = buildProviders(env);
-    const d = withByok(DOCTRINE, providers, env);
+    // ADR-072: the model pool = built-in free providers + the user's own endpoints (LLM_POOL), in round robin
+    const pool = parsePool(env.LLM_POOL);
+    const built = buildPool(DOCTRINE, buildProviders(env), pool);
+    const d = built.d;
     this.brain = new Brain({
       sql: this.sql,
       d,
       c: CONSTITUTION,
       brokers,
       market: dataKey ? new AlpacaMarketData(dataKey, guard) : null,
-      notifier: withPush(
-        env.DISCORD_BOT_TOKEN
-          ? new DiscordNotifier(
-              env.DISCORD_BOT_TOKEN,
-              parseChannels(env.DISCORD_CHANNELS),
-              guard,
-              undefined,
-              discordReport(this.sql),
-            )
-          : new NullNotifier(),
-        env,
-        guard,
+      // ADR-071: every card lands in the app's feed first; Discord and phone pushes are optional extras
+      notifier: new InboxNotifier(
+        this.sql,
+        withPush(
+          env.DISCORD_BOT_TOKEN
+            ? new DiscordNotifier(
+                env.DISCORD_BOT_TOKEN,
+                parseChannels(env.DISCORD_CHANNELS),
+                guard,
+                undefined,
+                discordReport(this.sql),
+              )
+            : new NullNotifier(),
+          env,
+          guard,
+        ),
+        () => Date.now(),
       ),
       d1: env.DB,
       readKillFlag: async () => parseKillFlag(await env.FLAGS.get("killed")),
       clef: new WorkersAiClef(env.AI),
       clairic: new WorkersAiClairic(env.AI),
-      llm: new LlmRouter(providers, d),
+      llm: poolRouter(built, pool.prefs),
       calibration: CALIBRATION,
       scar: SCAR_TISSUE,
       // ADR-065: RUNNER_MODE=queue hands jobs to a linked desktop runner; otherwise GitHub Actions when configured
@@ -317,12 +324,21 @@ export class AgentCortexDO extends DurableObject<Env> {
     return this.brain.requestRoast(symbol, thesis, by);
   }
 
+  async feed(q: {
+    channel: string | null;
+    before: number | null;
+    limit: number;
+    exclude?: string[];
+  }): Promise<unknown> {
+    return readFeed(this.sql, q);
+  }
+
   async book(): Promise<string> {
     this.begin();
     const b = await this.brain.bookReview(true);
     await this.brain.flushJournal();
     return b
-      ? `📒 Book review posted to #governor (${b.lines.length} position(s)).`
+      ? `📒 Book review posted to the feed (REPORTS) (${b.lines.length} position(s)).`
       : "Book review unavailable (no market data).";
   }
 

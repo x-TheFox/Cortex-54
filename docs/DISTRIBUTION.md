@@ -40,7 +40,7 @@ runs it.** We host exactly one service, the community hub, and it never touches 
 ## Not built yet (the commercial layer)
 
 - **Licensing:** a key check against the storefront's license API (Gumroad/Lemon Squeezy), cached, with an offline
-  grace period. Free tier = demo + paper with the free model chains; paid = BYOK frontier models, hub publishing and
+  grace period. Free tier = demo + paper with the free model chains; paid = paid endpoints in the model pool, hub publishing and
   following, deep research ring.
 - **Signed auto-updates:** Tauri's updater with our signing key; the headless image pulls tagged versions.
 - **Code signing / notarization:** Apple Developer ID and a Windows code-signing certificate (both cost money).
