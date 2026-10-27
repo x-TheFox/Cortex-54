@@ -20,7 +20,13 @@ const tp = join(mkdtempSync(join(tmpdir(), "savant-tp-")), "THIRD_PARTY_NOTICES.
 execFileSync("pnpm", ["exec", "tsx", "scripts/third-party.ts", tp], { stdio: "inherit" });
 writeFileSync("landing-dist/legal/third-party.html", page(readFileSync(tp, "utf8")).html);
 // ADR-090: Vercel serves landing-dist as a static site; its headers and redirects (downloads, updates) travel with it
-writeFileSync("landing-dist/vercel.json", readFileSync("landing/vercel.json", "utf8"));
+// ADR-092: the redirects name the public repository that holds the installers (the source repository is private)
+const releases = process.env.SAVANT_RELEASES_REPO ?? "x-TheFox/Cortex-54";
+if (!/^[\w.-]+\/[\w.-]+$/.test(releases)) throw new Error("SAVANT_RELEASES_REPO must look like owner/repo");
+writeFileSync(
+  "landing-dist/vercel.json",
+  readFileSync("landing/vercel.json", "utf8").replaceAll("x-TheFox/Cortex-54", releases),
+);
 if (!existsSync("landing-dist/index.html") || !existsSync("landing-dist/demo/index.html")) {
   throw new Error("landing build incomplete");
 }

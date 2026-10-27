@@ -6,8 +6,8 @@
 export const CHECKOUT_URL = "https://whop.com/savant-agent/";
 
 export const PLANS = {
-  monthly: { price: "$29", per: "month", url: "https://whop.com/checkout/plan_4bBHwmIccRi3d" },
-  yearly: { price: "$249", per: "year", url: "https://whop.com/checkout/plan_1uDX0TPE2wKea" },
+  monthly: { price: "$35", per: "month", url: "https://whop.com/checkout/plan_4bBHwmIccRi3d" },
+  yearly: { price: "$299", per: "year", url: "https://whop.com/checkout/plan_1uDX0TPE2wKea" },
   demo: { url: "https://whop.com/checkout/plan_YlojATUwHM5Um" },
 } as const;
 

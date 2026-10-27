@@ -1154,7 +1154,7 @@ order ids, licence and backup kinds, `CORTEX_*` variables, the keychain service 
 **Context:** operator: sell through Whop (storefront, checkout, licence management) with monthly and yearly plans, a
 free demo and a 7-day trial. Whop licence keys can only be checked with a server-side API key, which must never ship
 inside the app.
-**Decision:** Whop product `prod_sdzK9Kr4E2Kgz` (route `savant-agent`): Monthly $29 and Yearly $249, each with a 7-day
+**Decision:** Whop product `prod_sdzK9Kr4E2Kgz` (route `savant-agent`): Monthly $35 and Yearly $299, each with a 7-day
 trial (initial price 0, so nothing is charged during it), and a free demo plan. Whop's Software app is attached, so
 every membership carries a licence key and the buyer finds key and downloads in their Whop orders. A small Worker,
 `savant-license` (`workers/license`), holds the Whop API key and the publisher's Ed25519 signing key: `POST

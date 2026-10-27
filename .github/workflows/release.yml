@@ -35,6 +35,12 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+# ADR-092: with the source repository private, installers are published to a public, binary-only repository
+# (repository variable RELEASES_REPO, e.g. x-TheFox/savant-releases, and a fine-grained token RELEASES_TOKEN with
+# Contents: read and write on it). Unset = releases stay in this repository. `gh` reads GH_REPO.
+env:
+  GH_REPO: ${{ vars.RELEASES_REPO || github.repository }}
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -59,14 +65,23 @@ jobs:
           echo "tag=$(echo "$out" | jq -r .tag)" >> "$GITHUB_OUTPUT"
       - name: Draft the release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
+          SOURCE_TOKEN: ${{ github.token }}
         run: |
           # a failed earlier run leaves a draft under the same tag: replace it (published releases are never touched)
           if [ "$(gh release view "${{ steps.v.outputs.tag }}" --json isDraft --jq .isDraft 2>/dev/null)" = "true" ]; then
             gh release delete "${{ steps.v.outputs.tag }}" --yes
           fi
-          gh release create "${{ steps.v.outputs.tag }}" --draft --target "$GITHUB_SHA" \
-            --title "Savant ${{ steps.v.outputs.version }}" --notes-file release-notes.md
+          if [ "$GH_REPO" = "$GITHUB_REPOSITORY" ]; then
+            gh release create "${{ steps.v.outputs.tag }}" --draft --target "$GITHUB_SHA" \
+              --title "Savant ${{ steps.v.outputs.version }}" --notes-file release-notes.md
+          else
+            # the version comes from this repository's tags (scripts/changelog.ts), so tag the source here too
+            git tag -f "${{ steps.v.outputs.tag }}" "$GITHUB_SHA"
+            git push -f "https://x-access-token:${SOURCE_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "refs/tags/${{ steps.v.outputs.tag }}"
+            gh release create "${{ steps.v.outputs.tag }}" --draft \
+              --title "Savant ${{ steps.v.outputs.version }}" --notes-file release-notes.md
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: notes
@@ -165,7 +180,7 @@ jobs:
       - name: Upload to the draft release
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
         run: |
           shopt -s nullglob
           files=()
@@ -193,7 +208,7 @@ jobs:
       - run: pnpm config:build && pnpm web:demo
       - name: Upload
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
         run: |
           (cd demo-dist && zip -qr ../cortex54-demo-cockpit.zip .)
           gh release upload "${{ needs.plan.outputs.tag }}" cortex54-demo-cockpit.zip --clobber
@@ -217,7 +232,7 @@ jobs:
       - name: Updater manifest
         id: manifest
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
         run: |
           if ls art/updater-*.json >/dev/null 2>&1; then
             node scripts/updater-manifest.ts art "${{ needs.plan.outputs.version }}" art/release-notes.md > latest.json
@@ -227,7 +242,7 @@ jobs:
           fi
       - name: Publish (only when at least one platform built)
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
         run: |
           n=$(gh release view "${{ needs.plan.outputs.tag }}" --json assets --jq '[.assets[].name | select(test("\\.(dmg|msi|msix|exe|AppImage|deb|rpm)$"))] | length')
           if [ "$n" -gt 0 ]; then

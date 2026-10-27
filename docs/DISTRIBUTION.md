@@ -53,7 +53,7 @@ runs it.** We host exactly one service, the community hub, and it never touches 
   login) and releases come out signed and notarized. Needs an Apple Developer account.
 - **Not planned: a Windows code-signing certificate** (operator decision); SmartScreen asks once on the installers.
 - **Store, checkout and licences (ADR-086):** Whop product `prod_sdzK9Kr4E2Kgz` (https://whop.com/savant-agent/):
-  Monthly $29 and Yearly $249 (7-day trial each) and a free demo plan. Buyers get a licence key in their Whop orders;
+  Monthly $35 and Yearly $299 (7-day trial each) and a free demo plan. Buyers get a licence key in their Whop orders;
   the app trades a key at the licence server (`workers/license`, `pnpm deploy:license`) for a machine-bound token that
   lasts 14 days and renews daily. Only the paid plans unlock trading.
 - **Landing page (ADR-090):** https://getsavant.pro on Vercel (`pnpm deploy:landing`), with pricing, the demo cockpit at

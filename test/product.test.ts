@@ -446,3 +446,55 @@ describe("shipped-build protection (ADR-089)", () => {
     expect(execFileSync(process.execPath, [f], { encoding: "utf8" }).trim()).toBe("78");
   });
 });
+
+describe("Governor proposals on a customer's install (ADR-091)", () => {
+  it("nothing applies until approved; approved maps must be shrink-only; rules merge into the local scar tissue", async () => {
+    const { readProposals, decideProposal, loadLocalCalibration } = await import("../local/proposals.ts");
+    const { loadLocalScar } = await import("../local/memory.ts");
+    const { writeFileSync: w, mkdirSync: md } = await import("node:fs");
+    const h = tmp();
+    md(join(h, "proposals"));
+    const cal = (pts: number[][]) => ({
+      version: 1,
+      generated_at: 1,
+      maps: { "court.win_prob": { n: 60, points: pts, brier_raw: 0.24, brier_calibrated: 0.22 } },
+    });
+    w(
+      join(h, "proposals", "calibration.json"),
+      JSON.stringify(
+        cal([
+          [0.2, 0.2],
+          [0.9, 0.6],
+        ]),
+      ),
+    );
+    const rule = {
+      id: "SCAR-101",
+      kind: "context",
+      rule: "Thin weekend books punished breakouts three times.",
+      evidence: ["a", "b", "c"],
+      added: "2026-10-27",
+    };
+    w(join(h, "proposals", "scar-tissue.json"), JSON.stringify({ version: 1, rules: [rule] }));
+    expect(readProposals(h).calibration?.n).toBe(60);
+    expect(readProposals(h).scars.map((s) => s.id)).toEqual(["SCAR-101"]);
+    expect(loadLocalCalibration(h)).toBeNull(); // not applied yet
+    expect(decideProposal(h, { which: "calibration", approve: true }).ok).toBe(true);
+    expect(loadLocalCalibration(h)?.maps["court.win_prob"]?.n).toBe(60);
+    expect(decideProposal(h, { which: "scar", id: "SCAR-101", approve: true }).ok).toBe(true);
+    expect(loadLocalScar(h).rules.map((r) => r.id)).toEqual(["SCAR-101"]);
+    expect(readProposals(h)).toEqual({ calibration: null, scars: [] });
+    // a map that would raise confidence is never offered (and never loads)
+    w(
+      join(h, "proposals", "calibration.json"),
+      JSON.stringify(
+        cal([
+          [0.2, 0.2],
+          [0.6, 0.9],
+        ]),
+      ),
+    );
+    expect(readProposals(h).calibration).toBeNull();
+    expect(decideProposal(h, { which: "calibration", approve: true }).ok).toBe(false);
+  });
+});

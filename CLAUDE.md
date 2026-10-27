@@ -50,10 +50,12 @@ No model, no Governor, no Discord button can change them at runtime.
    ≥90% puts the system in `REDUCE_ONLY`. We never fail open. We never trade on a guess.
 7. **The journal is append-only and hash-chained.** No UPDATE or DELETE on journal tables (SQL triggers block
    them). The daily chain head is posted to Discord as an external anchor.
-8. **Self-modification is a pull request; real money needs ratification.** The Governor can only *propose*
-   doctrine/scar-tissue/calibration changes as a GitHub PR; the operator merges. There is **no approve-each-trade
-   mode**. LIVE stays dormant (Stop 0) until every roadmap phase is built and the fully autonomous PAPER account
-   passes the graduation gate; then the operator ratifies once (`RATIFY`) and LIVE trades autonomously.
+8. **Self-modification needs approval; real money needs ratification.** The Governor can only *propose*
+   calibration/scar-tissue changes, and proposals can only tighten. On the publisher's own deployment a proposal is a
+   GitHub PR the operator merges; on a customer's install it is a proposal in the app (Settings → Governor proposals)
+   the user approves or dismisses (ADR-091). There is **no approve-each-trade mode**. LIVE joins at Stop 0 and trades
+   only after the operator ratifies it (`RATIFY` on a fresh sign-in); the paper graduation gate is shown as advice
+   before ratifying (ADR-083).
 
 If you are about to write code that weakens any of these, stop and ask the operator.
 
@@ -504,7 +506,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   running on the page, constitution and limits printed from config/ at build time, the demo cockpit one click from
   the hero. GitHub Pages now serves the page at the root and the demo cockpit at `/demo/`.
 - 2026-10-27: launch round (operator). ADR-085 rebrand: **Savant** (the app) with **Cortex** (the agent), "54" retired.
-  ADR-086 Whop checkout/licences ($29/mo, $249/yr, 7-day trial, free demo) + the `savant-license` Worker. ADR-087 legal
+  ADR-086 Whop checkout/licences ($35/mo, $299/yr, 7-day trial, free demo) + the `savant-license` Worker. ADR-087 legal
   set + first-launch terms. ADR-088 pre-launch audit response (`docs/AUDIT_2026-10-27.md`). ADR-089 shipped-build
   protection (obfuscation, bytecode, tamper check). ADR-090 getsavant.pro on Vercel, downloads/updates via the domain.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).

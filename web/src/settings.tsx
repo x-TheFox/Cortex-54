@@ -1388,6 +1388,91 @@ export function PhoneSection({ s, save, saving }: { s: SettingsView; save: Save;
 
 // ------------------------------------------------------------------ licence (ADR-086)
 
+/**
+ * ADR-091: what the weekly Governor would change. Nothing applies until the user approves it here (constitution U8).
+ * Proposals can only make the robot more careful: a calibration map only lowers confidence, a rule only vetoes.
+ */
+export function ProposalsSection({ s, reload }: { s: SettingsView; reload: () => void }) {
+  const [r, setR] = useState<Result | null>(null);
+  const [busy, setBusy] = useState(false);
+  const p = s.proposals;
+  if (!p || (!p.calibration && p.scars.length === 0)) return null;
+  const decide = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    const res = await post<Result>("/api/settings/proposal", body);
+    setBusy(false);
+    setR(res);
+    if (res.ok) {
+      await waitForBrain();
+      reload();
+    }
+  };
+  return (
+    <section className="set-sec">
+      <h4>Governor proposals</h4>
+      <p className="cost">
+        Each week the Governor reviews how the robot's calls turned out and suggests changes. They only ever
+        make it more careful, and nothing changes until you approve it.
+      </p>
+      {p.calibration && (
+        <div className="set-grid">
+          <p className="note-line">
+            Confidence calibration from {p.calibration.n} resolved trades
+            {p.calibration.brierRaw !== null && p.calibration.brierCalibrated !== null
+              ? ` (forecast error ${p.calibration.brierRaw} → ${p.calibration.brierCalibrated}, lower is better)`
+              : ""}
+            . The court's win probabilities are scaled to match how often it was actually right.
+          </p>
+          <div className="set-actions">
+            <button
+              type="button"
+              className="chip go"
+              disabled={busy}
+              onClick={() => void decide({ which: "calibration", approve: true })}
+            >
+              APPROVE
+            </button>
+            <button
+              type="button"
+              className="chip"
+              disabled={busy}
+              onClick={() => void decide({ which: "calibration", approve: false })}
+            >
+              DISMISS
+            </button>
+          </div>
+        </div>
+      )}
+      {p.scars.map((x) => (
+        <div className="set-grid" key={x.id}>
+          <p className="note-line">
+            <b>{x.id}</b> · a new veto rule learned from losing trades: {x.rule}
+          </p>
+          <div className="set-actions">
+            <button
+              type="button"
+              className="chip go"
+              disabled={busy}
+              onClick={() => void decide({ which: "scar", id: x.id, approve: true })}
+            >
+              APPROVE
+            </button>
+            <button
+              type="button"
+              className="chip"
+              disabled={busy}
+              onClick={() => void decide({ which: "scar", id: x.id, approve: false })}
+            >
+              DISMISS
+            </button>
+          </div>
+        </div>
+      ))}
+      <Note r={r} />
+    </section>
+  );
+}
+
 /** The Whop licence key: paste it once; the app keeps the machine-bound licence fresh by itself. */
 export function LicenseSection({ s, reload }: { s: SettingsView; reload: () => void }) {
   const [key, setKey] = useState("");
@@ -1690,6 +1775,7 @@ export function SettingsPage({
     <div className="settings">
       {saving && <p className="note-line cyan">Applying…</p>}
       <LicenseSection s={s} reload={reload} />
+      <ProposalsSection s={s} reload={reload} />
       <TradingSection s={s} save={save} saving={saving} />
       <ModelsSection s={s} save={save} saving={saving} />
       <ClefSection s={s} save={save} saving={saving} />

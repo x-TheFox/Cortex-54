@@ -30,6 +30,23 @@ from . import exits as EX
 from . import metrics as M
 
 REPO = Path(__file__).resolve().parents[3]
+# ADR-091: on a customer's install the app runs the Governor with GOVERNOR_STATE_DIR = the Savant home. Proposals then go
+# to <home>/proposals/ (the app shows them for approval) instead of config/ (a pull request on the publisher's repo),
+# and the approved local calibration map (<home>/calibration.json) is the incumbent.
+STATE = Path(os.environ["GOVERNOR_STATE_DIR"]) if os.environ.get("GOVERNOR_STATE_DIR") else None
+
+
+def _calibration_path() -> Path:
+    if STATE and (STATE / "calibration.json").exists():
+        return STATE / "calibration.json"
+    return REPO / "config" / "calibration.json"
+
+
+def _local_scar_rules() -> list:
+    p = STATE / "scar-tissue.local.json" if STATE else None
+    if p and p.exists():
+        return (json.loads(p.read_text()) or {}).get("rules") or []
+    return []
 DATA = "https://data.alpaca.markets"
 MIN_OUTCOMES_FOR_MAP = 50  # mirrors doctrine.funnel.calibration.min_outcomes_before_trusting
 
@@ -379,7 +396,7 @@ def main() -> int:
     # audit F-B1-08: the LIVE gate asks for a *calibrated* Brier, so score the probabilities through the map the
     # brain actually applies (config/calibration.json); with no map yet the brain shrinks toward 0.5, so raw is the
     # honest stand-in and the criterion says so
-    live_map = (json.loads((REPO / "config" / "calibration.json").read_text()).get("maps", {}).get("court.win_prob")
+    live_map = (json.loads(_calibration_path().read_text()).get("maps", {}).get("court.win_prob")
                 or {}).get("points")
     b_gate = M.brier([(M.apply_map([tuple(x) for x in live_map], x), o) for x, o in pairs]) if live_map else b_raw
 
@@ -446,8 +463,17 @@ def main() -> int:
     facts = {r["ref_id"]: (jload(r["payload_json"], {}) or {}).get("facts", {}) for r in journal if r["kind"] == "ENTRY_FACTS" and r.get("ref_id")}
     scar_path = REPO / "config" / "scar-tissue.yaml"
     scar_doc = yaml.safe_load(scar_path.read_text()) or {}
-    new_scars = MEM.scar_proposals(trades, facts, scar_doc.get("rules") or [], datetime.now(timezone.utc).date())
-    if a.weekly and new_scars:
+    known = (scar_doc.get("rules") or []) + _local_scar_rules()
+    new_scars = MEM.scar_proposals(trades, facts, known, datetime.now(timezone.utc).date())
+    if a.weekly and new_scars and STATE:
+        (STATE / "proposals").mkdir(parents=True, exist_ok=True)
+        out = STATE / "proposals" / "scar-tissue.json"
+        pending = (json.loads(out.read_text()) if out.exists() else {}).get("rules") or []
+        ids = {r["id"] for r in pending}
+        pending += [r for r in new_scars if r["id"] not in ids]
+        out.write_text(json.dumps({"version": 1, "rules": pending, "proposed_at": now}, indent=2) + "\n")
+        print(f"scar proposals: {len(new_scars)} rule(s) waiting in the app")
+    elif a.weekly and new_scars:
         text = scar_path.read_text()
         header = "".join(line + "\n" for line in text.splitlines() if line.startswith("#") and not line.startswith("# -") and not line.startswith("#   "))
         scar_doc["rules"] = (scar_doc.get("rules") or []) + new_scars
@@ -472,7 +498,7 @@ def main() -> int:
         {"name": "Options shadow lab", "value": options_summary(options)},
         {"name": "Regime gate (ADR-039)", "value": gate_cost(rejections, graded_rows + new_grades)},
         {"name": "Memory", "value": ("reputation: " + ("; ".join(f"{r['source']} n={r['signals']} E[R] {r['expectancy_r_30d']:+.2f} w={r['weight']}" for r in rep) or "no attributed outcomes yet")
-                                    + f" · beliefs {len(bel)} · scar proposals {len(new_scars)}" + (" (PR)" if a.weekly and new_scars else ""))},
+                                    + f" · beliefs {len(bel)} · scar proposals {len(new_scars)}" + ((" (in the app)" if STATE else " (PR)") if a.weekly and new_scars else ""))},
         {"name": "Funnel", "value": f"Tier 1 items {sum(len(jload(x['candidate_ids'], [])) for x in t1)} · Tier 2 {len(t2)} · court sessions {sum(1 for r in journal if r['kind'] == 'COURT')} · contracts {len(contracts)}"},
         {"name": "LLM providers (ok/fail)", "value": "; ".join(f"{k} {v[0]}/{v[1]}" for k, v in sorted(llm_ok.items())) or "no calls yet"},
         {"name": "Shadow ledger (72h, new grades)", "value": "; ".join(f"{s}: n={len(v)} avg R {sum(v) / len(v):+.2f}" for s, v in ledger.items()) or f"{len(new_grades)} new grade(s); none at 72h yet"},
@@ -505,7 +531,7 @@ def main() -> int:
         # audit F-A2-03: maps only ever shrink confidence above a coin flip (the TS schema refuses anything else);
         # min of two non-decreasing curves stays non-decreasing
         pts = [(x, min(y, max(x, 0.5))) for x, y in pts]
-        cal_path = REPO / "config" / "calibration.json"
+        cal_path = _calibration_path()
         cal = json.loads(cal_path.read_text())
         incumbent = (cal.get("maps", {}).get("court.win_prob") or {}).get("points")
         check = M.map_beats_incumbent(pairs, M.calibration_map, [tuple(x) for x in incumbent] if incumbent else None)
@@ -516,8 +542,13 @@ def main() -> int:
             "brier_calibrated": round(M.brier([(M.apply_map(pts, x), o) for x, o in pairs]) or 0, 4),
         }
         cal["generated_at"] = now
-        cal_path.write_text(json.dumps(cal, indent=2) + "\n")
-        print("calibration.json updated")
+        if STATE:
+            (STATE / "proposals").mkdir(parents=True, exist_ok=True)
+            (STATE / "proposals" / "calibration.json").write_text(json.dumps(cal, indent=2) + "\n")
+            print("calibration proposal waiting in the app")
+        else:
+            cal_path.write_text(json.dumps(cal, indent=2) + "\n")
+            print("calibration.json updated")
 
     items = [
         P.item("rejection-ledger-grader", "gov-v1", now, P.dumps(new_grades).encode(), {"grades": new_grades}),

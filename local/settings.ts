@@ -26,6 +26,7 @@ import { KEY_NAMES, type KeyName, type LocalConfig, LocalConfigSchema, saveConfi
 import { configChecks, runtimeChecks } from "./health.ts";
 import { secretBackend } from "./keychain.ts";
 import { activateKey, installLicense, readLicense, releaseKey, STORE_URL } from "./license.ts";
+import { decideProposal, readProposals } from "./proposals.ts";
 
 /**
  * Settings for local mode (ADR-071/072/073): the web app's Settings page and first-run onboarding, and the CLI's
@@ -183,6 +184,7 @@ export class LocalSettings implements WebSettings {
       },
       lan: { enabled: c.lan.enabled, port: c.port },
       secretStore: { mode: c.secret_store, backend: keychainName(this.d.home) },
+      proposals: readProposals(this.d.home),
       terms: {
         current: TERMS_VERSION,
         accepted: c.terms?.version === TERMS_VERSION,
@@ -494,6 +496,13 @@ export class LocalSettings implements WebSettings {
     } catch (e) {
       return { ok: false, message: plain(e) };
     }
+  }
+
+  /** ADR-091: approve or dismiss a Governor proposal (the customer's version of merging its pull request). */
+  async proposal(q: { which: "calibration" | "scar"; approve: boolean; id?: string }) {
+    const r = decideProposal(this.d.home, q);
+    if (r.ok && q.approve) setTimeout(() => this.d.reload(), 250);
+    return r;
   }
 
   /** ADR-087: record that the user accepted the current legal set. */

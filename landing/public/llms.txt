@@ -1,0 +1,12 @@
+# Savant
+
+> Closed-source autonomous trading software customers run on their own computer (desktop app for macOS, Windows and
+> Linux). Its agent, Cortex, finds and argues over trade ideas with language models; deterministic code sizes every
+> trade; an eight-rule constitution that no model can change decides what is allowed; a kill switch sits outside it
+> all. Works at any account size: every limit is a share of the account and tightens as it grows.
+
+- Live demo (the real cockpit on synthetic data, no real money): https://getsavant.pro/demo/
+- Plans and checkout (Whop; 7-day trial, free demo download): https://getsavant.pro/#pricing
+- Terms, licence, privacy, refunds, risk: https://getsavant.pro/legal/terms.html
+
+Nothing here is financial advice. Trading can lose all of the money put in. Paper and backtest results are simulated.

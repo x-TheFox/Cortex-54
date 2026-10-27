@@ -18,7 +18,7 @@ research/.venv/
 research/.vendor/
 
 # web terminal build output (pnpm web:build)
-public/
+/public/
 # impeccable decision/review scratch
 .impeccable/decision/
 .impeccable/review/

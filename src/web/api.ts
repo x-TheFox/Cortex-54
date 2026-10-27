@@ -61,6 +61,12 @@ export interface WebSettings {
   cashOnly?(account: "PAPER" | "LIVE"): Promise<{ ok: boolean; message: string }>;
   /** ADR-077: install a licence file */
   license?(q: { file?: string; key?: string; release?: boolean }): Promise<{ ok: boolean; message: string }>;
+  /** ADR-091: approve or dismiss a Governor proposal */
+  proposal?(q: {
+    which: "calibration" | "scar";
+    approve: boolean;
+    id?: string;
+  }): Promise<{ ok: boolean; message: string }>;
   /** ADR-087: accept the current terms, EULA and risk disclosure (first launch, and again when they change) */
   terms?(q: { accept: boolean }): Promise<{ ok: boolean; message: string }>;
   /** ADR-076: stop the service and delete everything Savant keeps on this computer */
@@ -290,6 +296,16 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
                 ...(str("file") ? { file: str("file") } : {}),
                 ...(str("key") ? { key: str("key") } : {}),
                 ...(body.release === true ? { release: true } : {}),
+              })
+            : { ok: false, message: "Not available here." },
+        );
+      case "/api/settings/proposal":
+        return json(
+          b.settings.proposal
+            ? await b.settings.proposal({
+                which: body.which === "scar" ? "scar" : "calibration",
+                approve: body.approve === true,
+                ...(str("id") ? { id: str("id") } : {}),
               })
             : { ok: false, message: "Not available here." },
         );

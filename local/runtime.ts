@@ -42,6 +42,7 @@ import { runtimeChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
 import { entriesBlocked, readLicense } from "./license.ts";
 import { loadLocalScar, mergeScar } from "./memory.ts";
+import { loadLocalCalibration } from "./proposals.ts";
 import { SimBroker } from "./simbroker.ts";
 import { fileD1, fileSql, type LocalD1 } from "./store.ts";
 
@@ -267,7 +268,7 @@ export class LocalCortex {
       clef: o.overrides?.clef !== undefined ? o.overrides.clef : clef,
       clairic,
       llm: this.router,
-      calibration: CALIBRATION,
+      calibration: loadLocalCalibration(home) ?? CALIBRATION, // ADR-091: a map the user approved in the app
       scar: mergeScar(SCAR_TISSUE, loadLocalScar(home)), // + memory packs the operator applied (ADR-068)
       dispatcher: cfg.research.enabled ? this.jobs : null,
       http: o.overrides?.http ?? (o.overrides?.market ? null : (u, i) => fetch(u, i)),

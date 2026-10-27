@@ -90,13 +90,13 @@ export async function configChecks(
       : cfg.research.enabled
         ? "missing: research, forecasts and the weekly review can't run"
         : "research is off",
-    fix: "Install uv (https://docs.astral.sh/uv/). The app's installer does this for you.",
+    fix: "Install uv (one command, see https://getsavant.pro/docs/install/#research), then restart Savant.",
   });
   c.push({
-    name: "git (pinned research skills)",
-    ok: has("git") || !cfg.research.enabled,
-    detail: has("git") ? "found" : "missing",
-    fix: "Install git.",
+    name: "curl and tar (research packages)",
+    ok: (has("curl") && has("tar")) || !cfg.research.enabled,
+    detail: has("curl") && has("tar") ? "found" : "missing",
+    fix: "They ship with macOS, Windows 10+ and Linux; reinstall the system tools if they're missing.",
   });
   const killed = existsSync(join(home, "KILLED"));
   c.push({
