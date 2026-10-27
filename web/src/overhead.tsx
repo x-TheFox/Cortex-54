@@ -48,8 +48,21 @@ function Guarded(props: {
   );
 }
 
-export function AccountPanel({ a, run, busy }: { a: AccountView; run: Run; busy: boolean }) {
+type Gate = { at: number; rows: { criterion: string; status: string; value: string }[] } | null;
+
+export function AccountPanel({
+  a,
+  run,
+  busy,
+  gate = null,
+}: {
+  a: AccountView;
+  run: Run;
+  busy: boolean;
+  gate?: Gate;
+}) {
   const [pending, setPending] = useState<number | null>(null);
+  const [ratify, setRatify] = useState("");
   const [pm, setPm] = useState("");
   const paused = a.mode === "PAUSED";
   const stops = STOPS[a.account] ?? [];
@@ -96,9 +109,18 @@ export function AccountPanel({ a, run, busy }: { a: AccountView; run: Run; busy:
           Autonomy
         </div>
         {pending !== null && needsRatify && (
-          <p className="sub amber" style={{ maxWidth: 260 }}>
-            Real-money autonomy is ratified in Discord only: /dial LIVE {pending} confirm:RATIFY
-          </p>
+          <RatifyBox
+            stop={pending}
+            gate={gate}
+            value={ratify}
+            onChange={setRatify}
+            busy={busy}
+            onConfirm={() => {
+              void run("dial", { account: "LIVE", stop: pending, confirm: "RATIFY" });
+              setRatify("");
+              setPending(null);
+            }}
+          />
         )}
         {pending !== null && !needsRatify && (
           <div className="ctl">
@@ -184,5 +206,64 @@ export function CourtPanel({ run, busy }: { run: Run; busy: boolean }) {
         <b>restarts the 30-day autonomous clock</b> that gates real money. The safest input is usually none.
       </p>
     </section>
+  );
+}
+
+/**
+ * ADR-083: turning on real-money trading from the app. Typing RATIFY sends one confirmation; the brain asks for a
+ * second one 10 minutes to 24 hours later, and both need a sign-in younger than 10 minutes. The Governor's paper
+ * graduation gate is shown, and a gate that hasn't passed is a loud warning, not a block (operator decision).
+ */
+function RatifyBox(props: {
+  stop: number;
+  gate: Gate;
+  value: string;
+  onChange: (v: string) => void;
+  busy: boolean;
+  onConfirm: () => void;
+}) {
+  const data = (props.gate?.rows ?? []).filter((r) => r.criterion.startsWith("(b)") && r.status !== "INFO");
+  const failing = data.filter((r) => r.status !== "PASS");
+  const passed = props.gate !== null && data.length > 0 && failing.length === 0;
+  return (
+    <fieldset className="ratify" aria-label="Turn on real-money trading">
+      <p className={`sub ${passed ? "" : "red"}`}>
+        {props.gate === null
+          ? "⚠ The paper account has no graduation report yet. Real money before the paper run has proven itself is at your own risk."
+          : passed
+            ? "Paper graduation gate: passed."
+            : `⚠ The paper account has NOT passed its graduation gate (${failing.length} of ${data.length} checks open). Real money now is at your own risk.`}
+      </p>
+      {failing.length > 0 && (
+        <ul className="ratify-gate">
+          {failing.slice(0, 6).map((r) => (
+            <li key={r.criterion}>
+              {r.criterion.replace(/^\(b\)\s*/, "")}: {r.status === "WAIT" ? "not enough data" : r.value}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="sub">
+        Stop {props.stop} lets CORTEX trade your <b>real money</b> on its own, inside the same risk limits.
+        Type RATIFY to confirm. You'll confirm once more, 10 minutes to 24 hours from now, on a fresh sign-in.
+      </p>
+      <input
+        className="field"
+        aria-label="Type RATIFY"
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+        autoComplete="off"
+        placeholder="RATIFY"
+      />
+      <button
+        type="button"
+        className="pb"
+        disabled={props.busy || props.value !== "RATIFY"}
+        onClick={props.onConfirm}
+      >
+        <span className="on-amber">RATIFY</span>
+        <span className="on-white">{props.stop}</span>
+      </button>
+    </fieldset>
   );
 }

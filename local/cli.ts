@@ -209,7 +209,13 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
     spend: () => c.spend(),
     snapshot: () => c.snapshot(),
     pairLink: () => c.pairLink(),
-    cashOnly: () => c.makeCashOnly(),
+    cashOnly: (acct) => c.makeCashOnly(acct),
+    liveAccount: () => {
+      const a = c.brain.status().accounts.find((x) => x.account === "LIVE" && x.configured);
+      return a
+        ? { mode: a.mode, reason: a.modeReason ?? null, equityUsd: a.equityUsd, autonomyStop: a.autonomyStop }
+        : null;
+    },
     account: () => {
       const a = c.brain.status().accounts.find((x) => x.account === "PAPER");
       return a

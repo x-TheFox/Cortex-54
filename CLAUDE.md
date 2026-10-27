@@ -494,6 +494,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   GitHub Pages. ADR-080: v0.1.1's macOS app showed as "damaged" (no bundle signature); bundles are now sealed ad-hoc.
   ADR-081: accounts of any size measured from where they started, fresh start when the broker account changes,
   "Make it cash-only" for margin paper accounts, no Cloudflare free-tier meter in local mode. ADR-082: outside links
-  in the desktop app open in the system browser.
+  in the desktop app open in the system browser. ADR-083: the app can connect a live account (joins at Stop 0; the
+  user may ratify whenever they choose, with the paper gate shown as a warning); setup no longer offers the agent path.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

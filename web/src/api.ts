@@ -69,6 +69,8 @@ export interface StatusView {
     scope?: "cloudflare" | "workers_ai" | "none";
     neurons?: Record<string, number>;
   };
+  /** ADR-083: the Governor's LIVE graduation gate (null until it has run) */
+  liveGate?: { at: number; rows: { criterion: string; status: string; value: string }[] } | null;
   /** ADR-075: model calls today per provider (local mode's gauge) */
   modelUse?: {
     worst: { provider: string; fraction: number };
@@ -371,6 +373,8 @@ export interface SettingsView {
   /** ADR-076 */
   lan?: { enabled: boolean; port: number };
   secretStore?: { mode: "file" | "keychain"; backend: string | null };
+  /** ADR-083: the live account (null without live keys) */
+  live?: { mode: string; reason: string | null; equityUsd: number | null; autonomyStop: number } | null;
   /** ADR-081: the paper account's mode and why */
   account?: { mode: string; reason: string | null; startUsd: number; equityUsd: number | null } | null;
   /** ADR-077 */

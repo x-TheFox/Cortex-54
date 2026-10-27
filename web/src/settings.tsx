@@ -82,6 +82,126 @@ const Ext = ({ href, children }: { href: string; children: string }) => (
 
 // ------------------------------------------------------------------ trading account
 
+/** ADR-083: a live (real-money) Alpaca account. It connects dormant (Stop 0); turning it on is a ratification. */
+function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
+  const k = s.keys ?? {};
+  const connected = Boolean(k.ALPACA_LIVE_KEY_ID?.set && k.ALPACA_LIVE_SECRET?.set);
+  const [open, setOpen] = useState(connected);
+  const [keyId, setKeyId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [r, setR] = useState<Result | null>(null);
+  const live = s.live;
+  const margin = /margin/i.test(live?.reason ?? "");
+  return (
+    <div className="alert-opt live-acct">
+      <b>Live account (real money)</b>
+      {!open && !connected ? (
+        <p className="cost">
+          Optional. Connect your real Alpaca account when you're ready. It joins switched off: CORTEX trades
+          it only after you turn it on yourself.{" "}
+          <button type="button" className="chip" onClick={() => setOpen(true)}>
+            SET UP LIVE
+          </button>
+        </p>
+      ) : (
+        <>
+          {connected && live ? (
+            <p className="cost">
+              Connected: ${live.equityUsd?.toFixed(2) ?? "—"} ·{" "}
+              {live.autonomyStop === 0 ? (
+                <b>switched off (Stop 0)</b>
+              ) : (
+                <b className="red">TRADING REAL MONEY (Stop {live.autonomyStop})</b>
+              )}
+              . To turn it on, use the LIVE autonomy dial at the bottom of the cockpit and type RATIFY (twice,
+              10 minutes apart, on a fresh sign-in).
+            </p>
+          ) : (
+            <p className="cost">
+              In Alpaca, switch to your <b>live</b> account and generate API keys (Home → API keys). They
+              start switched off here: nothing is ever bought with real money until you ratify it in the
+              cockpit. Use a cash account: CORTEX never borrows, shorts or uses margin.{" "}
+              <Ext href="https://app.alpaca.markets/brokerage/dashboard/overview">Open Alpaca →</Ext>
+            </p>
+          )}
+          <div className="set-grid">
+            <Secret
+              label="LIVE KEY ID"
+              hint={k.ALPACA_LIVE_KEY_ID?.hint}
+              value={keyId}
+              onChange={setKeyId}
+              placeholder="AK…"
+            />
+            <Secret
+              label="LIVE SECRET"
+              hint={k.ALPACA_LIVE_SECRET?.hint}
+              value={secret}
+              onChange={setSecret}
+            />
+          </div>
+          <div className="set-actions">
+            <button
+              type="button"
+              className="chip"
+              onClick={async () =>
+                setR(await post<Result>("/api/settings/test", { kind: "alpaca_live", keyId, secret }))
+              }
+            >
+              TEST (READ ONLY)
+            </button>
+            <button
+              type="button"
+              className="chip go"
+              disabled={saving || (!keyId && !secret)}
+              onClick={async () =>
+                setR(
+                  await save({
+                    keys: {
+                      ...(keyId ? { ALPACA_LIVE_KEY_ID: keyId } : {}),
+                      ...(secret ? { ALPACA_LIVE_SECRET: secret } : {}),
+                    },
+                  }),
+                )
+              }
+            >
+              {connected ? "REPLACE KEYS" : "CONNECT (STAYS OFF)"}
+            </button>
+            {connected && (
+              <button
+                type="button"
+                className="chip"
+                onClick={async () => {
+                  if (
+                    confirm(
+                      "Disconnect the live account? CORTEX stops managing it; open positions stay at Alpaca.",
+                    )
+                  )
+                    setR(await save({ keys: { ALPACA_LIVE_KEY_ID: null, ALPACA_LIVE_SECRET: null } }));
+                }}
+              >
+                DISCONNECT
+              </button>
+            )}
+          </div>
+          {margin && (
+            <div className="set-actions">
+              <span className="cost">This live account allows margin, so CORTEX holds it.</span>
+              <button
+                type="button"
+                className="chip go"
+                onClick={async () => setR(await post<Result>("/api/settings/cash-only", { account: "LIVE" }))}
+              >
+                MAKE IT CASH-ONLY
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      <Note r={r} />
+    </div>
+  );
+}
+
 export function TradingSection({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
   const [mode, setMode] = useState(s.mode ?? "demo");
   const [keyId, setKeyId] = useState("");
@@ -186,6 +306,7 @@ export function TradingSection({ s, save, saving }: { s: SettingsView; save: Sav
         </button>
       </div>
       <Note r={r} />
+      <LiveAccount s={s} save={save} saving={saving} />
     </section>
   );
 }
@@ -1509,7 +1630,7 @@ export function SettingsPage({
       <HealthSection />
       <section className="set-sec">
         <h4>Setup</h4>
-        <p className="cost">Run the guided setup again, or hand it to an AI agent.</p>
+        <p className="cost">Run the guided setup again.</p>
         <button type="button" className="chip" onClick={restartOnboarding}>
           OPEN SETUP
         </button>

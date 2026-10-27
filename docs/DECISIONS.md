@@ -1095,3 +1095,19 @@ a new tab, and the app's window can't open windows.
 bundled page and the local brain on 127.0.0.1 / localhost) stays in the app; every other http(s) or mailto link opens
 in the user's default browser (tauri-plugin-opener, called from Rust, so the page gets no new permissions); anything
 else is ignored. A unit test pins which URLs count as local (`127.0.0.1.evil.example` doesn't).
+
+## ADR-083 — Live accounts in the app; ratify whenever the user chooses; setup without the agent path (2026-10-27)
+**Context:** operator: setup should let people connect a live Alpaca account, and the "let my AI agent do it" path
+should leave the app's setup. Asked when real money may start, the operator chose "whenever they ratify" over
+"after the paper graduation gate".
+**Decision:** SETTINGS → Trading account (and the wizard's first step) can connect a live account (`ALPACA_LIVE_KEY_ID`
+/ `ALPACA_LIVE_SECRET`; test is read-only; half a key pair is refused). Local mode then runs LIVE beside PAPER, and
+the cockpit shows the LIVE column once it is connected. LIVE joins at Stop 0 (orders are journaled as SHADOW, nothing
+is sent). Turning it on is the constitution's ratification, unchanged: the LIVE dial with RATIFY typed in the app,
+confirmed a second time 10 minutes to 24 hours later, both on a sign-in younger than 10 minutes. The Governor's LIVE
+gate is now kept by the brain (`liveGate` in status) and the ratify box shows it; a gate that hasn't passed is a red
+warning listing the open checks, not a block. Everything else still binds LIVE: cash only (a margin live account is
+held until it's made cash-only, the same button as paper), the sizer and caps, breakers (LIVE never self-unlocks from
+RED), the kill switch, and the licence check (a licence problem holds entries on live too). The first-launch screen
+now leads straight into the wizard; the agent prompt stays available outside the app (docs/SETUP_WITH_AN_AGENT.md,
+the `cortex` CLI). The operator's own cloud deployment is unchanged.

@@ -56,7 +56,7 @@ export interface WebSettings {
   /** ADR-076: a one-time login link for a phone on this Wi-Fi (shown as a QR code) */
   pair?(): Promise<{ ok: boolean; message: string; url?: string }>;
   /** ADR-081: cap the paper account's borrowing at 1x at the broker */
-  cashOnly?(): Promise<{ ok: boolean; message: string }>;
+  cashOnly?(account: "PAPER" | "LIVE"): Promise<{ ok: boolean; message: string }>;
   /** ADR-077: install a licence file */
   license?(q: { file: string }): Promise<{ ok: boolean; message: string }>;
   /** ADR-076: stop the service and delete everything CORTEX keeps on this computer */
@@ -271,7 +271,9 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
         );
       case "/api/settings/cash-only":
         return json(
-          b.settings.cashOnly ? await b.settings.cashOnly() : { ok: false, message: "Not available here." },
+          b.settings.cashOnly
+            ? await b.settings.cashOnly(body.account === "LIVE" ? "LIVE" : "PAPER")
+            : { ok: false, message: "Not available here." },
         );
       case "/api/settings/license":
         return json(

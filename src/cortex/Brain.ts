@@ -383,6 +383,8 @@ export interface StatusView {
   now: number;
   lastPulseAt: number | null;
   budget: ReturnType<FreeTierBudget["snapshot"]>;
+  /** ADR-083: the Governor's LIVE graduation gate, latest run (null until it has run) */
+  liveGate: { at: number; rows: { criterion: string; status: string; value: string }[] } | null;
   /** ADR-075: today's AI model calls per provider against its daily cap (what local mode's gauge shows) */
   modelUse: {
     worst: { provider: string; fraction: number };
@@ -4929,6 +4931,28 @@ ${postmortem}`,
         );
         counts.beliefs++;
       }
+      // ADR-083: the LIVE graduation gate (criteria + status) for the app's ratify warning
+      if (Array.isArray(p.gate))
+        setKV(
+          this.sql,
+          "live_gate",
+          JSON.stringify({
+            at: now,
+            rows: (p.gate as unknown[]).slice(0, 30).flatMap((g) => {
+              const r = g as { criterion?: unknown; status?: unknown; value?: unknown };
+              return typeof r.criterion === "string" && typeof r.status === "string"
+                ? [
+                    {
+                      criterion: r.criterion.slice(0, 120),
+                      status: r.status.slice(0, 10),
+                      value: String(r.value ?? "").slice(0, 120),
+                    },
+                  ]
+                : [];
+            }),
+          }),
+          now,
+        );
       for (const f of list(p, "fitness")) {
         const r = FitnessSchema.safeParse(f);
         if (!r.success) continue;
@@ -5754,6 +5778,13 @@ ${postmortem}`,
       lastPulseAt: last ? Number(last) : null,
       budget: this.budget.snapshot(now),
       modelUse: this.modelUse(now),
+      liveGate: (() => {
+        try {
+          return JSON.parse(getKV(this.sql, "live_gate") ?? "null");
+        } catch {
+          return null;
+        }
+      })(),
       journalHead: this.journal.head(),
       outboxPending: this.journal.pending(),
       equity: this.equityHistory(now - 7 * 86_400_000),

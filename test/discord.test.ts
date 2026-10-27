@@ -47,6 +47,7 @@ describe("interaction parsing", () => {
       now: 0,
       lastPulseAt: null,
       modelUse: { worst: { provider: "none", fraction: 0 }, providers: [] },
+      liveGate: null,
       equity: {},
       budget: { mode: "NORMAL" as const, worst: { resource: "x", fraction: 0 }, fractions: {} },
       journalHead: { seq: 1, sha: "0".repeat(64) },
@@ -88,6 +89,7 @@ describe("interaction parsing", () => {
       now: 0,
       lastPulseAt: null,
       modelUse: { worst: { provider: "none", fraction: 0 }, providers: [] },
+      liveGate: null,
       equity: {},
       budget: {
         mode: "NORMAL",
