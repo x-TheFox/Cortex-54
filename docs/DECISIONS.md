@@ -1111,3 +1111,30 @@ held until it's made cash-only, the same button as paper), the sizer and caps, b
 RED), the kill switch, and the licence check (a licence problem holds entries on live too). The first-launch screen
 now leads straight into the wizard; the agent prompt stays available outside the app (docs/SETUP_WITH_AN_AGENT.md,
 the `cortex` CLI). The operator's own cloud deployment is unchanged.
+
+## ADR-084 — The landing page: its own look, the real engine on the page, the demo one click away (2026-10-27)
+**Context:** operator: build a page whose job is to sell CORTEX-54, premium, scroll-driven (GSAP, smooth scrolling), with
+one hard requirement — a demo button — and every claim true to the code. The cockpit's ECAM look (ADR-036) belongs to
+the cockpit.
+**Decision:** `landing/` is a static, vanilla-TypeScript page built by its own Vite config (`pnpm landing:build` →
+`landing-dist/`, the demo cockpit built into `landing-dist/demo/`). Its identity is a public record on paper — warm
+paper and ink, Newsreader + IBM Plex (SIL OFL), with two dark chambers — and its story follows one idea through intake,
+the hearing, sizing, the constitution, the breakers, graduation and the record. It never restates engine numbers by
+hand: the constitution's eight rules and every limit, threshold and cap are printed at build time from
+`src/generated/config.ts` (an unknown `%%TOKEN%%` fails the build), the sizing exhibit runs the shipped
+`sizePosition()` with the shipped doctrine, and the journal exhibit hashes with the journal's own `rowHash()`. The demo
+button opens the real cockpit (ADR-077) in a full-screen dialog from the same origin, with scenario switches (normal,
+caution, day one) and DEMO labels on both the dialog and the cockpit. Motion is GSAP 3.15 (standard no-charge
+licence) + ScrollTrigger and Lenis (MIT), loaded after first paint and never for reduced-motion users; every scene's end
+state equals the static page. Strict CSP as a meta tag (self-hosted everything; `frame-src 'self'` for the demo). The
+release workflow now deploys this page to GitHub Pages, so the demo cockpit moved from the site root to `/demo/`. The
+page shows no prices (none exist), says LIVE is dormant until graduation, scopes "$0" to free tiers by default, frames
+backtests as our own research, and carries a full risk section near the end plus a link to it beside the hero buttons.
+**Revision (operator, same day):** the page sells any account size, not $54: $54 is the reference account where every
+cent of fees shows, and the page says so once ("Why 54?"). The sizing exhibit gains an account-size switch ($10 to $1B)
+and a crypto/stocks switch; the rung comes from `rungForEquity()` and the R1–R5 ladder is printed from the doctrine,
+with the top rung's "no ceiling" scoped honestly (at very large sizes market liquidity, not the software, sets the
+limit). CORTEX-54 is sold as closed-source software, so the page never links to the source repository or its releases:
+every buy button goes to the hosted checkout set in `landing/checkout.ts` (a non-https or GitHub link fails the
+build); until that link exists the buttons scroll to the download section, which says checkout opens soon.
+

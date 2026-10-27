@@ -290,6 +290,8 @@ research/                 Python (uv): cortex_research.run crypto|equity|world �
 local/                    cortexd local mode + `cortex` CLI (ADR-064/065): runtime, sandbox broker, jobs, service,
                           deploy, runner, memory packs, settings backend + live reload (settings.ts), agent-prompt.ts,
                           keychain, encrypted backups, licences (keychain.ts, backup.ts, license.ts — ADR-076/077)
+landing/                  the product's landing page (ADR-084): static vanilla TS + GSAP/Lenis, numbers printed from config/
+                          at build time, demo cockpit at /demo/; deployed to GitHub Pages by release.yml. Notes: landing/CLAUDE.md
 desktop/                  Tauri v2 app (ADR-066): src-tauri/ shell; bundles dist/cortexd + an official Node runtime
 hub/                      community hub Worker + D1 migrations (ADR-068), hosted by the publisher
 src/universe/ src/portfolio/ src/hub/   dynamic universe + scout (058), exits/lateness/book (059–061), hub protocol (068)
@@ -327,6 +329,7 @@ pnpm cortex llm add <key-or-url> [--models a,b]   # model pool (ADR-072): list |
 pnpm cortex support       # redacted support file (no secrets) for asking for help (ADR-074)
 pnpm cortex backup [--keys] | restore FILE | keychain on|off | license install FILE | reset --yes   # ADR-076/077
 pnpm web:demo             # static demo cockpit on synthetic data → demo-dist/ (ADR-077)
+pnpm landing:build        # landing page + demo cockpit → landing-dist/ (ADR-084); landing:dev / landing:preview to view
 gh workflow run release -f bump=minor   # desktop release for every platform (auto on merges to main; ADR-077)
 pnpm demo                 # keyless local demo on live crypto prices (simulated broker)
 pnpm cortexd:build        # dist/cortexd bundle (no TS source); pnpm desktop:runtime && pnpm desktop:build → the app
@@ -496,5 +499,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   "Make it cash-only" for margin paper accounts, no Cloudflare free-tier meter in local mode. ADR-082: outside links
   in the desktop app open in the system browser. ADR-083: the app can connect a live account (joins at Stop 0; the
   user may ratify whenever they choose, with the paper gate shown as a warning); setup no longer offers the agent path.
+- 2026-10-27: ADR-084: the landing page (`landing/`): its own paper-and-ink identity, the real sizer and journal hash
+  running on the page, constitution and limits printed from config/ at build time, the demo cockpit one click from
+  the hero. GitHub Pages now serves the page at the root and the demo cockpit at `/demo/`.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

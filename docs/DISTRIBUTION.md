@@ -52,6 +52,8 @@ runs it.** We host exactly one service, the community hub, and it never touches 
 - **Apple notarization (wired, ADR-079):** add the six `APPLE_*` secrets (Developer ID certificate + notarization
   login) and releases come out signed and notarized. Needs an Apple Developer account.
 - **Not planned: a Windows code-signing certificate** (operator decision); SmartScreen asks once on the installers.
-- **Demo cockpit:** https://x-thefox.github.io/Cortex-54/ (GitHub Pages, every release).
+- **Landing page + demo cockpit (ADR-084):** https://x-thefox.github.io/Cortex-54/ (the product page) with the demo
+  cockpit at https://x-thefox.github.io/Cortex-54/demo/ (GitHub Pages, every release). The page has no prices: pricing
+  is still an operator decision.
 - **The repo going private:** when it does, GitHub Actions minutes stop being free; the operator's own deployment
   should switch to `RUNNER_MODE=queue` with a desktop runner (ADR-065), which needs no Actions at all.

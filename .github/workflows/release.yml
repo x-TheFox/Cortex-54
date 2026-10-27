@@ -193,7 +193,8 @@ jobs:
           gh release upload "${{ needs.plan.outputs.tag }}" cortex54-demo-cockpit.zip --clobber
 
   pages:
-    # ADR-079: the demo cockpit on GitHub Pages (https://<owner>.github.io/<repo>/), updated with every release
+    # ADR-079/084: the landing page on GitHub Pages (https://<owner>.github.io/<repo>/) with the demo cockpit at /demo/,
+    # updated with every release
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -212,11 +213,10 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm config:build && pnpm web:demo
-      - run: rm -f demo-dist/_headers demo-dist/sw.js
+      - run: pnpm landing:build
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: demo-dist
+          path: landing-dist
       - id: deploy
         uses: actions/deploy-pages@v4
 
