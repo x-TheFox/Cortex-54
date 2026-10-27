@@ -191,6 +191,10 @@ export class AgentCortexDO extends DurableObject<Env> {
   async ensureAlarm(): Promise<number> {
     const existing = await this.ctx.storage.getAlarm();
     if (existing !== null) return existing;
+    // A running alarm handler has no alarm set (the runtime clears it while the handler runs); the pulse re-arms it
+    // when it finishes. Live data 2026-10-27: every "lost" alarm (40 PAPER, 112 LAB) had a ~61 s gap, i.e. the cron
+    // landed mid-pulse, logged a false loss and started a second, overlapping pulse.
+    if (this.pulsing) return Date.now() + 60_000;
     const at = Date.now() + 1_000;
     await this.ctx.storage.setAlarm(at);
     // Audit W1-15: a lost alarm was restored silently, so how often it happens was unknowable.
