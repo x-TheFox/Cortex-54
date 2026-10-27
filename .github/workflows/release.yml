@@ -130,6 +130,8 @@ jobs:
             if [ -n "${!v}" ]; then { echo "$v<<__C54__"; echo "${!v}"; echo "__C54__"; } >> "$GITHUB_ENV"; n=$((n+1)); fi
           done
           echo "$n of 6 Apple values set (6 = signed and notarized; 0 = unsigned)"
+      # ADR-089: uv compiles the research package to bytecode for the shipped build
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm cortexd:build
       - name: Bundled Node runtime

@@ -79,9 +79,30 @@ fn paths(app: &tauri::AppHandle) -> Paths {
     Paths { node, cortexd: root.join("cortexd.mjs"), root }
 }
 
+/// Protection (ADR-089): the brain bundle must be byte-for-byte the one this shell was built with. A patched copy
+/// (licence check removed, limits loosened) is refused. Empty hash = a dev build without the bundle.
+const CORTEXD_SHA256: &str = env!("CORTEXD_SHA256");
+
+fn integrity_ok(p: &Paths) -> bool {
+    use sha2::{Digest, Sha256};
+    if CORTEXD_SHA256.is_empty() {
+        return true;
+    }
+    match std::fs::read(&p.cortexd) {
+        Ok(b) => Sha256::digest(&b).iter().map(|x| format!("{x:02x}")).collect::<String>() == CORTEXD_SHA256,
+        Err(_) => false,
+    }
+}
+
+const TAMPERED_PAGE: &str = "data:text/html,<body style='font:16px system-ui;background:%230b0f14;color:%23e6edf3;padding:48px'><h2>Savant can't start</h2><p>Its files don't match this installation. They may have been changed or damaged.</p><p>Download Savant again from getsavant.pro and reinstall it. Your settings and journal are kept.</p></body>";
+
 fn cortex_cmd(p: &Paths, args: &[&str]) -> Command {
     let mut c = Command::new(&p.node);
-    c.arg(&p.cortexd).args(args).env("CORTEX_ROOT", &p.root);
+    if integrity_ok(p) {
+        c.arg(&p.cortexd).args(args).env("CORTEX_ROOT", &p.root);
+    } else {
+        c.args(["-e", "process.exit(3)"]); // never run a modified brain, not even for a tray command
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -169,12 +190,21 @@ pub fn run() {
                     .build()?;
             }
             let p = paths(&handle);
-            if !cortex_home().join("config.json").exists() {
+            let intact = integrity_ok(&p);
+            if !intact {
+                if let Some(w) = app.get_webview_window("main") {
+                    if let Ok(u) = Url::parse(TAMPERED_PAGE) {
+                        let _ = w.navigate(u);
+                    }
+                    let _ = w.show();
+                }
+            }
+            if intact && !cortex_home().join("config.json").exists() {
                 // first run: a keyless demo, so the app shows something real before any signup
                 let _ = cortex_cmd(&p, &["setup", "--mode", "demo", "--yes", "--json"]).output();
             }
             let (port, token) = read_config();
-            if local_get(port, "/health", None).is_none() {
+            if intact && local_get(port, "/health", None).is_none() {
                 let logs = cortex_home().join("logs");
                 let _ = std::fs::create_dir_all(&logs);
                 let log = std::fs::File::create(logs.join("desktop-daemon.log")).ok();

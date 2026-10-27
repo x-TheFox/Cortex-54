@@ -430,3 +430,19 @@ describe("live account in local mode (ADR-083)", () => {
     expect((await s.save({ keys: { ALPACA_LIVE_KEY_ID: "AKxxxx" } })).ok).toBe(false);
   });
 });
+
+describe("shipped-build protection (ADR-089)", () => {
+  it("obfuscates the bundle without changing what it does", async () => {
+    const { obfuscateBundle } = await import("../scripts/protect.ts");
+    const { execFileSync } = await import("node:child_process");
+    const { writeFileSync: w, readFileSync: r } = await import("node:fs");
+    const f = join(tmp(), "b.mjs");
+    w(
+      f,
+      "import{createRequire}from'node:module';const secretName='licence-check';console.log(secretName.length*6);",
+    );
+    obfuscateBundle(f);
+    expect(r(f, "utf8")).not.toContain("licence-check");
+    expect(execFileSync(process.execPath, [f], { encoding: "utf8" }).trim()).toBe("78");
+  });
+});

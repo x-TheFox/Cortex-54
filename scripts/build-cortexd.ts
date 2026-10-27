@@ -14,6 +14,7 @@ import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { build } from "esbuild";
+import { compileResearch, obfuscateBundle } from "./protect.ts";
 
 const out = "dist/cortexd";
 rmSync(out, { recursive: true, force: true });
@@ -26,6 +27,7 @@ await build({
   format: "esm",
   target: "node22",
   minify: true,
+  sourcemap: false,
   legalComments: "none",
   banner: {
     js: [
@@ -63,5 +65,14 @@ execFileSync("tsx", ["scripts/build-legal.ts", join(out, "legal")], { stdio: "in
 execFileSync("tsx", ["scripts/third-party.ts", join(out, "legal", "THIRD_PARTY_NOTICES.md")], {
   stdio: "inherit",
 });
+// ADR-089: shipped builds are obfuscated and carry research bytecode only (--no-protect for quick local builds)
+if (!process.argv.includes("--no-protect")) {
+  const t = Date.now();
+  obfuscateBundle(join(out, "cortexd.mjs"));
+  const pyc = compileResearch(join(out, "research"));
+  console.log(
+    `protected in ${((Date.now() - t) / 1000).toFixed(1)} s (research ${pyc ? "bytecode" : "source"})`,
+  );
+}
 writeFileSync(join(out, "VERSION"), `${process.env.CORTEX_VERSION ?? "dev"} ${new Date().toISOString()}\n`);
 console.log(`cortexd bundle → ${out}`);
