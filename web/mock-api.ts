@@ -19,6 +19,13 @@ function state(now: number, empty: boolean) {
   return {
     now,
     lastPulseAt: now - 37_000,
+    modelUse: {
+      worst: { provider: "gemini", fraction: 0.31 },
+      providers: [
+        { provider: "groq", calls: 64, cap: 900 },
+        { provider: "gemini", calls: 41, cap: 130 },
+      ],
+    },
     budget: {
       mode: "NORMAL",
       worst: { resource: "neurons_tier2", fraction: 0.42 },
@@ -33,6 +40,7 @@ function state(now: number, empty: boolean) {
     journalHead: { seq: 1184, sha: "9f2c4a81d0e3b7c6a5f41e2d9b8c7a6f5e4d3c2b1a0f9e8d7c6b5a4f3e2d1c0b" },
     outboxPending: 0,
     equity: empty ? {} : { PAPER: curve(now, 54, 96, 0.7) },
+    benchmark: empty ? {} : { PAPER: { btc: curve(now, 54, 96, 1.6), spy: curve(now, 54, 96, 0.4) } },
     regimes: [
       {
         arena: "CRYPTO",
@@ -396,6 +404,190 @@ function forecast(now: number, symbol: string, empty: boolean) {
   };
 }
 
+/** Synthetic /api/feed (ADR-071): one card per kind, newest first. */
+function feed(now: number, channel: string | null) {
+  const items = [
+    {
+      id: 6,
+      ts: now - 4 * 60_000,
+      channel: "executions",
+      msg: {
+        embeds: [
+          {
+            title: "🟢 BUY BTC/USD filled · PAPER",
+            color: 0x10b981,
+            description: "0.00016 @ **$62,410.50** · stop $61,180 · target $64,900",
+            fields: [
+              { name: "Strategy", value: "CRYPTO_BREAKOUT_BASELINE_V1", inline: true },
+              { name: "Risk", value: "$0.19 (0.4% of equity)", inline: true },
+            ],
+          },
+        ],
+      },
+    },
+    {
+      id: 5,
+      ts: now - 22 * 60_000,
+      channel: "court",
+      msg: {
+        embeds: [
+          {
+            title: "⚖️ Court · NVDA",
+            color: 0x38bdf8,
+            description:
+              "Bull (gemini-3.5-flash): earnings beat by 12%, guidance raised.\nBear (gpt-oss-120b): priced in; gap above the 20-day range.",
+            fields: [{ name: "Verdict", value: "Not traded: bear lethality 0.71 over the 0.6 bar" }],
+            footer: { text: "6 calls · 41 s" },
+          },
+        ],
+      },
+    },
+    {
+      id: 4,
+      ts: now - 50 * 60_000,
+      channel: "alarms",
+      msg: { content: "⚠️ Groq rate-limited for 10 minutes; the court rotated to the next model." },
+    },
+    {
+      id: 3,
+      ts: now - 2 * 3_600_000,
+      channel: "world_intel",
+      msg: {
+        embeds: [
+          {
+            title: "📰 SOL: network upgrade date set",
+            color: 0xf59e0b,
+            description: "Triage 0.62 material · priority 1.4",
+          },
+        ],
+      },
+    },
+  ];
+  return channel ? items.filter((i) => i.channel === channel) : items;
+}
+
+/**
+ * The synthetic API as a pure function: the dev server (`pnpm web:dev`) and the static demo cockpit (`pnpm web:demo`,
+ * ADR-077) both answer from here. Scenario: normal | empty | alert | live.
+ */
+export function mockRoute(
+  path: string,
+  params: URLSearchParams,
+  sc: string,
+  now: number,
+): { status: number; body: unknown } {
+  const empty = sc === "empty";
+  const alert = sc === "alert";
+  const live = sc === "live";
+  const ok = (body: unknown, status = 200) => ({ status, body });
+  if (path.startsWith("/api/settings/"))
+    return ok({ ok: true, message: "(demo) Nothing is saved here: this cockpit runs on synthetic data." });
+  switch (path) {
+    case "/api/state": {
+      const st = state(now, empty);
+      if (live) {
+        // synthetic: LIVE keys present but still dormant (Stop 0), to exercise the ratify guard
+        Object.assign(st.accounts[1] ?? {}, {
+          configured: true,
+          equityUsd: 54,
+          brokerEquityUsd: 54,
+          hwmUsd: 54,
+          mode: "NORMAL",
+          modeReason: null,
+          reconciledAt: now - 40_000,
+        });
+      }
+      if (alert) {
+        // synthetic caution scenario: YELLOW band, reduce-only, stale equity regime
+        Object.assign(st.accounts[0] ?? {}, {
+          breaker: "YELLOW",
+          equityUsd: 53.94,
+          mode: "REDUCE_ONLY",
+          modeReason: "equity regime stale (fail closed)",
+        });
+        Object.assign(st.regimes[1] ?? {}, { fresh: false, ageMinutes: 2100 });
+      }
+      return ok(st);
+    }
+    case "/api/court":
+      return ok(empty ? [] : court(now));
+    case "/api/rejections":
+      return ok(empty ? [] : rejections(now));
+    case "/api/memory":
+      return ok(memory(now, empty));
+    case "/api/options":
+      return ok(options(now, empty));
+    case "/api/forecast":
+      return ok(forecast(now, params.get("symbol") ?? "BTC/USD", empty));
+    case "/api/equity":
+      return ok(empty ? {} : { PAPER: curve(now, 54, 24 * 14, 0.7) });
+    case "/api/feed":
+      return ok(empty || params.get("before") ? [] : feed(now, params.get("channel")));
+    case "/api/models":
+      return ok(empty ? [] : scoreboard());
+    case "/api/settings":
+      return ok({
+        managed: "cloud",
+        message:
+          "Settings live in the app on your own computer. This cockpit runs on synthetic data; download CORTEX-54 to set yours up.",
+      });
+    case "/api/command":
+      return ok({
+        ok: true,
+        message: "(demo) Command accepted. Nothing was sent anywhere: this cockpit runs on synthetic data.",
+      });
+    case "/api/login":
+    case "/api/logout":
+      return ok({ ok: true });
+    default:
+      return ok({ error: "not found" }, 404);
+  }
+}
+
+function scoreboard() {
+  return [
+    {
+      provider: "groq",
+      model: "openai/gpt-oss-120b",
+      calls: 64,
+      ok: 61,
+      schema_fail: 1,
+      rate_limited: 2,
+      timeouts: 0,
+      errors: 0,
+      avg_ok_ms: 1300,
+      input_tokens: 210_000,
+      output_tokens: 38_000,
+    },
+    {
+      provider: "gemini",
+      model: "gemini-3.5-flash",
+      calls: 41,
+      ok: 33,
+      schema_fail: 0,
+      rate_limited: 7,
+      timeouts: 1,
+      errors: 0,
+      avg_ok_ms: 14_800,
+      input_tokens: 150_000,
+      output_tokens: 22_000,
+    },
+    {
+      provider: "nim",
+      model: "nvidia/nemotron-3-ultra-550b-a55b",
+      calls: 22,
+      ok: 21,
+      schema_fail: 1,
+      rate_limited: 0,
+      timeouts: 0,
+      errors: 0,
+      avg_ok_ms: 3100,
+      input_tokens: 80_000,
+      output_tokens: 41_000,
+    },
+  ];
+}
+
 export function mockApi(): Plugin {
   return {
     name: "cortex-mock-api",
@@ -416,64 +608,12 @@ export function mockApi(): Plugin {
           }
           return next();
         }
-        const now = Date.now();
         const sc = /(?:^|;\s*)mock=(\w+)/.exec(req.headers.cookie ?? "")?.[1] ?? "normal";
-        const empty = sc === "empty";
-        const alert = sc === "alert";
-        const live = sc === "live";
         const url = new URL(req.url, "http://dev");
-        const send = (body: unknown, status = 200) => {
-          res.statusCode = status;
-          res.setHeader("content-type", "application/json");
-          res.end(JSON.stringify(body));
-        };
-        switch (url.pathname) {
-          case "/api/state": {
-            const st = state(now, empty);
-            if (live) {
-              // synthetic: LIVE keys present but still dormant (Stop 0), to exercise the ratify guard
-              Object.assign(st.accounts[1] ?? {}, {
-                configured: true,
-                equityUsd: 54,
-                brokerEquityUsd: 54,
-                hwmUsd: 54,
-                mode: "NORMAL",
-                modeReason: null,
-                reconciledAt: now - 40_000,
-              });
-            }
-            if (alert) {
-              // synthetic caution scenario: YELLOW band, reduce-only, stale equity regime
-              Object.assign(st.accounts[0] ?? {}, {
-                breaker: "YELLOW",
-                equityUsd: 53.94,
-                mode: "REDUCE_ONLY",
-                modeReason: "equity regime stale (fail closed)",
-              });
-              Object.assign(st.regimes[1] ?? {}, { fresh: false, ageMinutes: 2100 });
-            }
-            return send(st);
-          }
-          case "/api/court":
-            return send(empty ? [] : court(now));
-          case "/api/rejections":
-            return send(empty ? [] : rejections(now));
-          case "/api/memory":
-            return send(memory(now, empty));
-          case "/api/options":
-            return send(options(now, empty));
-          case "/api/forecast":
-            return send(forecast(now, url.searchParams.get("symbol") ?? "BTC/USD", empty));
-          case "/api/equity":
-            return send(empty ? {} : { PAPER: curve(now, 54, 24 * 14, 0.7) });
-          case "/api/command":
-            return send({ ok: true, message: "(dev mock) command accepted; nothing was sent to the brain" });
-          case "/api/login":
-          case "/api/logout":
-            return send({ ok: true });
-          default:
-            return send({ error: "not found" }, 404);
-        }
+        const r = mockRoute(url.pathname, url.searchParams, sc, Date.now());
+        res.statusCode = r.status;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(r.body));
       });
     },
   };

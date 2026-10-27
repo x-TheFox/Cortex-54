@@ -24,3 +24,18 @@ WEB_SESSION_SECRET=
 # Research job keys (GitHub Actions secrets; locally for dry runs)
 FMP_API_KEY=
 FRED_API_KEY=
+# ADR-062 monitoring (optional): ntfy push topic (16–64 url-safe chars), optional self-hosted ntfy base, widget token
+NTFY_TOPIC=
+NTFY_URL=
+PILL_TOKEN=
+# ADR-072 model pool (optional): your own endpoints as JSON, e.g.
+# {"endpoints":[{"id":"claude","name":"Anthropic","format":"anthropic","url":"https://api.anthropic.com","key":"sk-ant-…",
+#   "models":["claude-opus-5-5"],"tier":"paid"}],"prefs":{"prefer":"free_first","round_robin":true}}
+LLM_POOL=
+RUNNER_MODE=
+# ADR-068 community hub (optional): cortex hub keygen prints a key
+HUB_URL=
+HUB_AGENT_KEY=
+HUB_AGENT_NAME=
+HUB_PUBLISH=
+HUB_FOLLOW=

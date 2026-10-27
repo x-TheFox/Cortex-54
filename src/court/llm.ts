@@ -92,16 +92,62 @@ export class GeminiProvider implements LlmProvider {
   }
 }
 
+interface CallShape {
+  json: boolean;
+  temperature: boolean;
+  completionTokens: boolean;
+}
+
 export class OpenAICompatProvider implements LlmProvider {
   constructor(
     private readonly name: string,
     private readonly baseUrl: string,
     private readonly key: string,
-    private readonly opts: { jsonMode: boolean; reasoningEffort?: "low" | "medium" } = { jsonMode: true },
+    private readonly opts: {
+      jsonMode: boolean;
+      reasoningEffort?: "low" | "medium";
+      /** reasoning models spend output tokens thinking before the JSON (canary 2026-10-26: Nemotron cut off at 1,500) */
+      minOutputTokens?: number;
+      /**
+       * BYOK endpoints are unknown servers: on a 400 that names a parameter they reject (response_format, temperature,
+       * max_tokens → max_completion_tokens), drop or rename it and retry, up to three times.
+       */
+      adaptive?: boolean;
+    } = { jsonMode: true },
     private readonly fetcher: Fetcher = (u, i) => fetch(u, i),
   ) {}
 
   async complete(model: string, req: LlmRequest, timeoutMs: number): Promise<LlmResponse> {
+    const shape: CallShape = { json: this.opts.jsonMode, temperature: true, completionTokens: false };
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.call(model, req, timeoutMs, shape);
+      } catch (e) {
+        if (!(e instanceof ProviderError) || e.status !== 400) throw e;
+        const msg = e.message;
+        // ADR-070 (canary 2026-10-26): Groq's JSON mode rejects some models' valid-looking replies with a 400
+        // ("Failed to validate JSON"). One retry without JSON mode; the court's own parser and schema decide.
+        if (shape.json && /validate JSON|json_validate/i.test(msg)) {
+          shape.json = false;
+          continue;
+        }
+        if (!this.opts.adaptive || attempt >= 3) throw e;
+        if (shape.json && /response_format|json_object|json mode/i.test(msg)) shape.json = false;
+        else if (shape.temperature && /temperature/i.test(msg)) shape.temperature = false;
+        else if (!shape.completionTokens && /max_tokens|max_completion_tokens/i.test(msg))
+          shape.completionTokens = true;
+        else throw e;
+      }
+    }
+  }
+
+  private async call(
+    model: string,
+    req: LlmRequest,
+    timeoutMs: number,
+    shape: CallShape,
+  ): Promise<LlmResponse> {
+    const maxOut = Math.max(req.maxOutputTokens, this.opts.minOutputTokens ?? 0);
     const d = (await post(
       this.fetcher,
       this.name,
@@ -109,8 +155,8 @@ export class OpenAICompatProvider implements LlmProvider {
       { authorization: `Bearer ${this.key}` },
       {
         model,
-        temperature: 0.2,
-        max_tokens: req.maxOutputTokens,
+        ...(shape.temperature ? { temperature: 0.2 } : {}),
+        ...(shape.completionTokens ? { max_completion_tokens: maxOut } : { max_tokens: maxOut }),
         messages: [
           {
             role: "system",
@@ -118,7 +164,7 @@ export class OpenAICompatProvider implements LlmProvider {
           },
           { role: "user", content: req.user },
         ],
-        ...(this.opts.jsonMode ? { response_format: { type: "json_object" } } : {}),
+        ...(shape.json ? { response_format: { type: "json_object" } } : {}),
         ...(this.opts.reasoningEffort ? { reasoning_effort: this.opts.reasoningEffort } : {}),
       },
       timeoutMs,
@@ -168,9 +214,66 @@ export interface ChainResult<T> {
  * Try each hop of a doctrine chain until one returns output that `parse` accepts. Hops whose family is excluded
  * (cross-family rule) or whose provider has no key are skipped. Returns null if every hop fails.
  */
+/** Rotate each run of same-tier hops by `n`, keeping the tier order. Pure. */
+export function rotateChain<T extends { provider: string; model: string }>(
+  chain: readonly T[],
+  n: number,
+  tierOf: (h: T) => string,
+): T[] {
+  const out: T[] = [];
+  let i = 0;
+  while (i < chain.length) {
+    let j = i;
+    const t = tierOf(chain[i] as T);
+    while (j < chain.length && tierOf(chain[j] as T) === t) j++;
+    const group = chain.slice(i, j);
+    const k = group.length ? n % group.length : 0;
+    out.push(...group.slice(k), ...group.slice(0, k));
+    i = j;
+  }
+  return out;
+}
+
 export class LlmRouter {
   /** Audit W2-06: optional per-provider quota gate (the brain plugs in its daily counters). */
-  gate: { allow(provider: string): boolean; used(provider: string): void } | null = null;
+  gate: {
+    allow(provider: string): boolean;
+    used(provider: string): void;
+    /** ADR-075: tokens a provider used (the brain keeps a per-day count, so the spend cap survives restarts) */
+    tokens?(provider: string, input: number, output: number): void;
+    tokensToday?(provider: string): { input: number; output: number };
+  } | null = null;
+  /** ADR-075 cost meter: USD per 1M tokens per provider, with an optional daily spend cap */
+  pricing: Record<string, { in: number; out: number; cap?: number }> = {};
+
+  /** USD a provider has spent today (0 when it has no price). The same-model bear alias counts with its endpoint. */
+  spentToday(provider: string): number {
+    const base = provider.replace(/~bear$/, "");
+    const p = this.pricing[base];
+    const t = this.gate?.tokensToday?.(base);
+    return p && t ? (t.input * p.in + t.output * p.out) / 1_000_000 : 0;
+  }
+
+  private overBudget(provider: string): boolean {
+    const cap = this.pricing[provider.replace(/~bear$/, "")]?.cap;
+    return cap !== undefined && this.spentToday(provider) >= cap;
+  }
+  /**
+   * ADR-072 round robin: these chains (by identity: the pool's bull and bear chains) start one model further round
+   * on every use, within each tier group, so free-tier quotas are shared across the whole pool. Other chains (the
+   * rebuttal pinned to the bull's own model, the panel's per-seat rotations) run as given.
+   */
+  rotation: {
+    chains: Set<readonly unknown[]>;
+    tierOf: (h: { provider: string; model: string }) => string;
+  } | null = null;
+  private readonly turns = new Map<readonly unknown[], number>();
+  /**
+   * ADR-072: a model that was rate-limited or timed out sits out for a few minutes, so the rotation stops landing on
+   * a free tier that is already exhausted (it is still tried if nothing else is left).
+   */
+  readonly cooldownMs = 5 * 60_000;
+  private readonly cooling = new Map<string, number>();
 
   constructor(
     private readonly providers: Partial<Record<string, LlmProvider>>,
@@ -192,6 +295,15 @@ export class LlmRouter {
     timeoutMs?: number,
   ): Promise<ChainResult<T> | null> {
     const r = this.d.llm_routing;
+    if (this.rotation?.chains.has(chain)) {
+      const n = this.turns.get(chain) ?? 0;
+      this.turns.set(chain, n + 1);
+      chain = rotateChain(chain, n, this.rotation.tierOf);
+    }
+    const t = this.now();
+    const hot = (h: { provider: string; model: string }) =>
+      (this.cooling.get(`${h.provider}/${h.model}`) ?? 0) > t;
+    chain = [...chain.filter((h) => !hot(h)), ...chain.filter(hot)];
     for (const hop of chain) {
       const family = this.familyOf(hop.provider, hop.model);
       const base = {
@@ -206,7 +318,7 @@ export class LlmRouter {
         continue;
       }
       const p = this.providers[hop.provider];
-      if (!p || (this.gate && !this.gate.allow(hop.provider))) {
+      if (!p || (this.gate && !this.gate.allow(hop.provider)) || this.overBudget(hop.provider)) {
         log({ ...base, latencyMs: 0, outcome: "UNAVAILABLE" });
         continue;
       }
@@ -215,6 +327,12 @@ export class LlmRouter {
         this.gate?.used(hop.provider);
         try {
           const res = await p.complete(hop.model, req, timeoutMs ?? r.timeout_ms);
+          // a provider that doesn't report usage is estimated at ~4 characters per token (prompt only)
+          this.gate?.tokens?.(
+            hop.provider.replace(/~bear$/, ""),
+            res.inputTokens ?? Math.ceil((req.system.length + req.user.length) / 4),
+            res.outputTokens ?? Math.ceil(res.text.length / 4),
+          );
           let value: T;
           try {
             value = parse(extractJson(res.text));
@@ -245,7 +363,10 @@ export class LlmRouter {
               ? "TIMEOUT"
               : "ERROR";
           log({ ...base, latencyMs: this.now() - t0, outcome, error: msg.slice(0, 200) });
-          if (outcome !== "ERROR") break; // rate limits / timeouts: don't hammer, go to the next hop
+          if (outcome !== "ERROR") {
+            this.cooling.set(`${hop.provider}/${hop.model}`, this.now() + this.cooldownMs);
+            break; // rate limits / timeouts: don't hammer, go to the next hop
+          }
         }
       }
     }

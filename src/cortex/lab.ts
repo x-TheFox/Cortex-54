@@ -12,6 +12,10 @@ export function labDoctrine(d: Doctrine): Doctrine {
   const lab = new Set(d.lab.strategies);
   return {
     ...d,
+    // LAB forward-tests strategies under the exit rules they were graded with (fixed stop/target/time), so the exit
+    // engine stays off there (ADR-059); it has no funnel, so whole-wire news intake would only cost writes (ADR-058).
+    exits: { ...d.exits, enabled: false },
+    universe: { ...d.universe, enabled: false },
     strategies: d.strategies.map((s) =>
       lab.has(s.id)
         ? { ...s, status: "ACTIVE" as const, accounts: ["PAPER"] }

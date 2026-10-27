@@ -77,6 +77,14 @@ export const DoctrineSchema = z.object({
     reservation_ttl_seconds: z.number().int().positive(),
     /** Venue minimum order cost per arena (Alpaca crypto: $10, verified 2026-10-24 from a 403). */
     min_order_notional_usd: z.record(Arena, z.number().nonnegative()),
+    /** ADR-067: stablecoin depeg, cross-venue price and exchange-halt vetoes on new entries. */
+    sanity: z
+      .object({
+        enabled: z.boolean(),
+        max_depeg_bps: z.number().positive(),
+        max_venue_gap_pct: z.number().positive(),
+      })
+      .default({ enabled: false, max_depeg_bps: 50, max_venue_gap_pct: 1 }),
   }),
   cadence: z.object({
     pulse_seconds_exposed: z.number().int().min(30),
@@ -114,11 +122,14 @@ export const DoctrineSchema = z.object({
       enabled: z.boolean(),
       fresh_hours: z.number().positive().max(72),
       wait_minutes: z.number().int().min(1).max(120),
+      /** operator 2026-10-26: with a fast dossier in hand, wait this long (from dispatch) for the deep one */
+      deep_wait_minutes: z.number().int().min(1).max(120).default(12),
       max_per_day: z.number().int().nonnegative().max(100),
     }),
     tier3: z.object({
       max_sprints_per_day: z.number().int().nonnegative(),
       min_structural_score: z.number().min(0).max(100),
+      // (the quality score has 5 levels → 0/25/50/75/100; a bar between levels behaves like the next level up)
       /** Audit W2-07: multiplier on win_prob for contested rulings; 1.0 = measured and journaled but not applied. */
       disagreement_tax: z.number().gt(0).max(1).default(1),
     }),
@@ -199,6 +210,111 @@ export const DoctrineSchema = z.object({
     }),
   ),
   watchlists: z.record(z.string(), z.array(z.string())),
+  /** ADR-060: entry timing. Lateness meter (Tier 0 veto on chased moves) and resting convictions. */
+  entry_timing: z
+    .object({
+      lateness: z.object({
+        enabled: z.boolean(),
+        late_atr: z.number().positive(),
+        mid_atr: z.number().positive(),
+      }),
+      resting: z.object({
+        enabled: z.boolean(),
+        max_hours: z
+          .number()
+          .positive()
+          .max(24 * 7),
+      }),
+    })
+    .default({
+      lateness: { enabled: false, late_atr: 0.8, mid_atr: 0.4 },
+      resting: { enabled: false, max_hours: 48 },
+    }),
+  /**
+   * ADR-059: exit intelligence. Stops only ever tighten; models choose HOLD/TIGHTEN/EXIT, code computes prices.
+   */
+  exits: z
+    .object({
+      enabled: z.boolean(),
+      breakeven_at_r: z.number().positive(),
+      trail_after_r: z.number().positive(),
+      trail_atr: z.object({ calm: z.number().positive(), stressed: z.number().positive() }),
+      harvest: z.object({
+        enabled: z.boolean(),
+        max_extra_hours: z
+          .number()
+          .nonnegative()
+          .max(24 * 7),
+        max_rsi: z.number().min(50).max(100),
+      }),
+      review: z.object({
+        enabled: z.boolean(),
+        max_per_day: z.number().int().nonnegative(),
+        cooldown_minutes: z.number().int().nonnegative(),
+        held_material_min: z.number().min(0).max(1),
+        exit_prob: z.number().min(0.5).max(1),
+        kill_prob: z.number().min(0.5).max(1),
+      }),
+      watch_research: z.object({ enabled: z.boolean(), every_hours: z.number().positive() }),
+      earnings_derisk: z.boolean(),
+      rotation: z.object({
+        enabled: z.boolean(),
+        min_horizon_fraction: z.number().min(0).max(1),
+        max_abs_r: z.number().positive(),
+        min_candidate_win: z.number().min(0).max(1),
+      }),
+    })
+    .default({
+      enabled: false,
+      breakeven_at_r: 1,
+      trail_after_r: 1.5,
+      trail_atr: { calm: 1.2, stressed: 0.8 },
+      harvest: { enabled: false, max_extra_hours: 0, max_rsi: 80 },
+      review: {
+        enabled: false,
+        max_per_day: 0,
+        cooldown_minutes: 120,
+        held_material_min: 0.5,
+        exit_prob: 0.6,
+        kill_prob: 0.7,
+      },
+      watch_research: { enabled: false, every_hours: 24 },
+      earnings_derisk: false,
+      rotation: { enabled: false, min_horizon_fraction: 0.5, max_abs_r: 0.25, min_candidate_win: 0.6 },
+    }),
+  /**
+   * ADR-058: dynamic universe. The scout hot-ports any Alpaca asset that passes the code screen when a catalyst about
+   * it reaches Tier 2; research-named related symbols are watched. The doctrine watchlists stay the permanent core.
+   */
+  universe: z
+    .object({
+      enabled: z.boolean(),
+      /** news intake: only watched symbols, or the whole Alpaca news stream behind the Tier 0.5 prefilter */
+      news_scope: z.enum(["watchlist", "all"]),
+      max_dynamic: z.number().int().min(0).max(200),
+      ttl_days: z.number().positive().max(60),
+      min_price_usd: z.number().nonnegative(),
+      min_dollar_volume_usd: z.record(z.enum(["CRYPTO", "EQUITIES"]), z.number().nonnegative()),
+      max_spread_bps: z.record(z.enum(["CRYPTO", "EQUITIES"]), z.number().positive()),
+      max_ports_per_day: z.number().int().nonnegative(),
+      max_watch: z.number().int().nonnegative(),
+      prefilter_min_score: z.number(),
+      /** headlines about non-priority symbols allowed into Tier 1 per UTC day (neuron guard) */
+      max_open_intake_per_day: z.number().int().nonnegative(),
+    })
+    .default({
+      enabled: false,
+      news_scope: "watchlist",
+      max_dynamic: 0,
+      ttl_days: 7,
+      min_price_usd: 5,
+      min_dollar_volume_usd: { CRYPTO: 1_000_000, EQUITIES: 20_000_000 },
+      max_spread_bps: { CRYPTO: 40, EQUITIES: 20 },
+      max_ports_per_day: 0,
+      max_watch: 0,
+      prefilter_min_score: 2,
+      max_open_intake_per_day: 0,
+    }),
 });
 
 export type Doctrine = z.infer<typeof DoctrineSchema>;

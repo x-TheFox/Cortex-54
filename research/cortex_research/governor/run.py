@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import sys
 import time
 from collections import defaultdict
@@ -25,6 +26,7 @@ import yaml
 
 from .. import payload as P
 from . import memory as MEM
+from . import exits as EX
 from . import metrics as M
 
 REPO = Path(__file__).resolve().parents[3]
@@ -100,6 +102,7 @@ def build_trades(journal: list[dict], contracts: dict[str, dict]) -> list[dict]:
     """Closed trades from EXIT rows + ENTRY fills (journal) + contract stop."""
     by8 = {cid.replace("-", "")[-8:]: cid for cid in contracts}
     entries: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
+    first_fill: dict[tuple[str, str], int] = {}
     for r in journal:
         if r["kind"] != "FILL":
             continue
@@ -110,6 +113,7 @@ def build_trades(journal: list[dict], contracts: dict[str, dict]) -> list[dict]:
         cid = by8.get(parts[2]) if len(parts) > 2 else None
         if cid:
             entries[(cid, r["account"])].append((float(p["qty"]), float(p["price"])))
+            first_fill.setdefault((cid, r["account"]), r["ts"])
     trades = []
     for r in journal:
         if r["kind"] != "EXIT":
@@ -128,6 +132,9 @@ def build_trades(journal: list[dict], contracts: dict[str, dict]) -> list[dict]:
             continue
         r_mult = (p["pnl_cents"] / 100) / risk
         probs = jload(k.get("clef_probabilities"), None) or {}
+        plan = jload(k.get("entry_plan"), {}) or {}
+        inval = jload(k["invalidation_criteria"], {}) or {}
+        target = float((plan.get("targets") or [0])[0] or 0)
         trades.append(
             {
                 "contract_id": cid,
@@ -141,9 +148,74 @@ def build_trades(journal: list[dict], contracts: dict[str, dict]) -> list[dict]:
                 "r": round(r_mult, 4),
                 "ts": r["ts"],
                 "win_prob_raw": (probs.get("raw") or {}).get("win_prob"),
+                "entry": avg,
+                "stop": stop,
+                "target": target,
+                "entry_ts": first_fill.get((cid or "", acct), r["ts"]),
+                "horizon_h": float(inval.get("max_hold_hours") or 48),
             }
         )
     return trades
+
+
+def daily_bars(symbols: list[str], days: int) -> dict[str, list[M.Bar]]:
+    h = {"APCA-API-KEY-ID": os.environ["ALPACA_KEY_ID"], "APCA-API-SECRET-KEY": os.environ["ALPACA_SECRET"]}
+    start = datetime.fromtimestamp(time.time() - days * 86_400, timezone.utc).strftime("%Y-%m-%d")
+    out: dict[str, list[M.Bar]] = {}
+    for crypto in (True, False):
+        syms = [s for s in symbols if ("/" in s) == crypto]
+        if not syms:
+            continue
+        url = f"{DATA}/v1beta3/crypto/us/bars" if crypto else f"{DATA}/v2/stocks/bars"
+        params = {"symbols": ",".join(syms), "timeframe": "1Day", "start": start, "limit": 10000, "sort": "asc"}
+        if not crypto:
+            params.update({"feed": "iex", "adjustment": "split"})
+        r = requests.get(url, params=params, headers=h, timeout=30)
+        r.raise_for_status()
+        for sym, rows in (r.json().get("bars") or {}).items():
+            out[sym] = [M.Bar(int(datetime.fromisoformat(b["t"].replace("Z", "+00:00")).timestamp() * 1000), b["h"], b["l"], b["c"])
+                        for b in rows]
+    return out
+
+
+def exit_and_monkey(trades: list[dict], journal: list[dict], now: int, seed: int = 54) -> tuple[dict, dict]:
+    """Exit scorecard + virtual monkey control over the last 20 closed trades (one hourly-bars fetch per trade)."""
+    exc = {(r.get("ref_id"), r["account"]): jload(r["payload_json"], {}) or {} for r in journal if r["kind"] == "EXCURSIONS"}
+    rng = random.Random(seed)
+    rows, real, r_ent, r_ex = [], [], [], []
+    for t in trades[-20:]:
+        risk = t["entry"] - t["stop"]
+        if risk <= 0:
+            continue
+        try:
+            bars = hourly_bars(t["symbol"], t["entry_ts"] - 30 * 86_400_000, min(now, t["ts"] + 72 * 3_600_000))
+        except Exception as e:  # noqa: BLE001
+            print(f"bars {t['symbol']}: {e}", file=sys.stderr)
+            continue
+        x = exc.get((t["contract_id"], t["account"]))
+        exit_px = t["entry"] + t["r"] * risk
+        rows.append({"r": t["r"], "reason": t["reason"], "mfe_r": (x or {}).get("mfe_r"),
+                     "post": EX.post_exit_excursion(bars, t["ts"], exit_px, risk)})
+        plan = EX.Plan(t["entry_ts"], t["entry"], risk / t["entry"],
+                       max(0.0, (t["target"] - t["entry"]) / t["entry"]) or 2 * risk / t["entry"], t["horizon_h"])
+        real.append(t["r"])
+        r_ent += EX.monkey_entries(bars, plan, 10, rng)
+        r_ex += EX.monkey_exits(bars, plan, 10, rng)
+    return EX.exit_scorecard(rows), EX.monkey_summary(real, r_ent, r_ex)
+
+
+def find_missed_moves(journal: list[dict], rejections: list[dict], contracts: dict[str, dict], now: int) -> list[dict]:
+    w = (yaml.safe_load((REPO / "config" / "doctrine.yaml").read_text()) or {}).get("watchlists", {})
+    symbols = sorted({s for v in w.values() for s in (v or [])})
+    try:
+        daily = daily_bars(symbols, 40)
+    except Exception as e:  # noqa: BLE001
+        print(f"missed moves: {e}", file=sys.stderr)
+        return []
+    day = lambda ms: datetime.fromtimestamp(ms / 1000, timezone.utc).date().isoformat()  # noqa: E731
+    seen = {(rj.get("symbol"), day(rj["ts"])) for rj in rejections if rj.get("symbol")}
+    seen |= {(k["symbol"], day(k["created_at"])) for k in contracts.values() if k.get("created_at")}
+    return EX.missed_moves(daily, seen, now - 3 * 86_400_000)
 
 
 def grade_rejections(rejections: list[dict], graded: set[tuple[int, str]], contracts: dict[str, dict], now: int) -> list[dict]:
@@ -379,6 +451,8 @@ def main() -> int:
     pvj = M.panel_vs_judge(court_rows)  # audit W2-01
     slip = M.slippage_summary([jload(r["payload_json"], {}) or {} for r in journal if r["kind"] == "FILL"])  # W2-36
     scar_cost = M.scar_veto_cost(rejections, graded_rows + new_grades)  # audit W2-14
+    exit_card, monkey = exit_and_monkey(trades, journal, now)  # ADR-059 / ADR-061
+    missed = find_missed_moves(journal, rejections, contracts, now)  # MLP4-014
     sections = [
         {"name": "Trades", "value": f"{len(trades)} closed · " + (", ".join(f"{s}: n={st['n']} E[R]={st['expectancy_r']} PF={st['profit_factor']}" for s, st in stats.items()) or "none yet")},
         {"name": "Options shadow lab", "value": options_summary(options)},
@@ -394,6 +468,16 @@ def main() -> int:
         {"name": "Panel vs judge (ADR-044 kill check)", "value": (f"n={pvj['n']}: panel majority right {pvj['panel_hit']:.0%}, judge right {pvj['judge_hit']:.0%}" if pvj["n"] else "no graded court trades yet")},
         {"name": "Realized slippage", "value": (f"{slip['n']} fills · mean {slip['mean_bps']} bps · p90 {slip['p90_bps']} · worst {slip['worst_bps']}" if slip["n"] else "no fills with an order price yet")},
         {"name": "Scar vetoes (72h)", "value": "; ".join(f"{k}: n={v['n']} avg R {v['avg_r']:+.2f}" for k, v in scar_cost.items()) or "no graded vetoes"},
+        {"name": "Exit scorecard (ADR-059)", "value": (
+            f"n={exit_card['n']} · capture {exit_card['capture']} of best R · give-back {exit_card['giveback_r']} R · "
+            f"left on table (72h) {exit_card['left_on_table_r']} R · saved by stops {exit_card['saved_r']} R · {exit_card['by_reason']}"
+            if exit_card.get("n") else "no closed trades yet")},
+        {"name": "Monkey control (virtual)", "value": (
+            f"real E[R] {monkey['real_r']} over {monkey['n_real']} · random entries {monkey['random_entries_r']} "
+            f"(entry edge {monkey['entry_edge_r']}) · random exits {monkey['random_exits_r']} (exit edge {monkey['exit_edge_r']})"
+            if monkey["n_real"] else "no closed trades yet")},
+        {"name": "Missed moves (≥ 3 ATR, nothing reached Tier 0)", "value": "; ".join(
+            f"{m['symbol']} {m['date']} {m['move_atr']:+} ATR" for m in missed[:8]) or "none in the last 3 days"},
         {"name": "Deflated Sharpe", "value": "; ".join(f"{s}: DSR {d['dsr']}" for s, d in dsr.items() if d) or "needs ≥ 10 trades per strategy"},
         {"name": "LIVE gate", "value": "\n".join(f"{'✅' if g['status'] == 'PASS' else '❌' if g['status'] == 'FAIL' else '⏳' if g['status'] == 'WAIT' else '•'} {g['criterion']}: {g['value']}" for g in gate)[:1000]},
     ]

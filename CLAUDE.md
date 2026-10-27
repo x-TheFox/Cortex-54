@@ -14,12 +14,18 @@ CORTEX-54 is a single, always-alive autonomous trading agent that runs **entirel
 Alpaca accounts in lockstep: a **$54 paper account** and a **$54 real-money account**. It reads the real
 world (news, filings, crypto microstructure, regime data), filters it through a four-tier cognitive funnel
 that spends thinking like money (math → Clef-flash → Clef → frontier LLM debate), and may only trade through
-a schema-valid `DecisionContract` that a deterministic risk engine sizes and can veto. A Discord bot is the
-command center (alerts, HUD, autonomy dial, kill-switch). Trading is fully autonomous: no human approves trades. The harness, not any model, is the product:
+a schema-valid `DecisionContract` that a deterministic risk engine sizes and can veto. The app (web panel,
+desktop shell) is the command center: feed, ask, settings, autonomy dial, kill-switch; Discord is an optional add-on
+(ADR-071). Trading is fully autonomous: no human approves trades. The harness, not any model, is the product:
 **models reason, code computes, the risk engine decides, the operator governs.**
 
 Hard constraint from the operator: **$0 operating cost. No paid plans, no credit cards on file, ever.**
 If a feature needs money, it does not ship; we find the free path or cut it.
+
+**Product direction (operator, 2026-10-26):** CORTEX-54 is being commercialised as closed-source software customers run
+themselves: a desktop app (local mode), a headless image, and a community hub we host (docs/DISTRIBUTION.md). The $0
+rule still binds the operator's own deployment and every default; paid options (BYOK frontier models, the customer's
+own cloud) are the customer's choice and always optional.
 
 ---
 
@@ -92,7 +98,7 @@ Full detail: `docs/ARCHITECTURE.md`. Budget math: `docs/FREE_TIER_BUDGET.md`.
 | 0 Reflex | TypeScript | DO pulse | free | stops, breakers, staleness, spread/fee gates, dedupe, watchlist relevance, ALL arithmetic |
 | 1 Triage | `@cf/cloudflare/clef-flash` | DO | ~3,000 neurons/day | one item per call (~1.2 neurons), ≤8 per pulse; promote P(material) ≥ 0.45 and priority ≥ 1.2 (ADR-037) |
 | 2 Structure | `@cf/cloudflare/clef` (27B) | DO | ~4,000 neurons/day | Tier 0 evidence (code) → long_favored, regime fit, bear-lethality, setup, quality; ≤1/pulse, ≤40/day |
-| 3 Court | free LLM chains + Clef 27B synth | DO pulse (ADR-028) | free-tier RPD | bull → **cross-family** bear → bull rebuttal → expert panel (quant, risk, macro) → Clef synth → calibrated COURT contract; ≤1/pulse, ≤12/day (ADR-044) |
+| 3 Court | model pool (free chains + the user's endpoints, round robin, ADR-072) + Clef 27B synth | DO pulse (ADR-028) | free-tier RPD / endpoint caps | bull → **cross-family** bear → bull rebuttal → expert panel (quant, risk, macro) → Clef synth → calibrated COURT contract; ≤1/pulse, ≤12/day (ADR-044) |
 
 Clef probabilities are **not** win rates. They pass through our own calibration map
 (`config/calibration.json`, produced by the Governor from logged outcomes) before the sizer sees them.
@@ -162,6 +168,13 @@ neurons/M, no output billing (ADR-043). **Jev** (TypeSafe AI) is not in our Work
 - **Re-verified 2026-10-26 (bull prompt, live BTC):** Gemini 3.5/3.8 returned 503 "high demand" at peak (3.5 answered ~14–20 s
   later); qwen and gpt-oss-20b answer in ~2 s; nemotron (NIM and OpenRouter) answers in prose, not JSON; deepseek-v4.1-flash
   times out at 60 s (out of the court chains, ADR-056).
+- **Canary 2026-10-26 (ADR-070):** Gemini 3.5/3.8 both 503 "high demand"; Groq `qwen/qwen3.8-27b` fails Groq's JSON
+  validation (400) and its TPM cap on a 3–4K prompt; gpt-oss-20b/120b answer valid JSON in ~1.2 s; NIM Nemotron is
+  valid 4/4 only with a ≥ 4,096-token output budget (it reasons first; at 1,500 it was cut off). Groq on this key also
+  lists allam-2-7b, whisper and prompt-guard only. NIM kimi-k2.6, mistral-large-2, gemma-3 return 404 ("Function not
+  found") and glm-5.3 times out at 60 s.
+- Alpaca crypto quotes and bars work **without keys**; news needs keys (local demo mode relies on this, 2026-10-26).
+- Chronos-2 (`amazon/chronos-2`, Apache-2.0) loads on CPU in ~65 s (first download) and forecasts in ~0.2 s per series.
 - NVIDIA NIM: enabled for this key — `deepseek-ai/deepseek-v4.1-flash`, `nvidia/nemotron-3-ultra-550b-a55b`
   (`nemotron-3-super` is *not* enabled). OpenRouter `:free` errored on every test (left out of chains).
 - **Verified 2026-10-24 (ADR-051):** Gemini Google Search grounding has no free quota; Groq `compound` is not on our key
@@ -252,24 +265,34 @@ src/
   cortex/hot-schema.ts    DO SQLite schema (applied in constructor via blockConcurrencyWhile)
   contracts/              zod schemas: DecisionContract, constitution, doctrine (validated at boot)
   cortex/Brain.ts          ALL trading logic (pulse, reconcile, fills, stops, exits, entries, operator RPC)
+  cortex/cards.ts          the cards and terminal lines the brain posts (pure rendering, split out by ADR-078)
   cortex/store.ts          SqlLike: the narrow SQL surface Brain depends on (DO storage or node:sqlite)
   risk/                    PositionSizer, PreTradeValidator, CircuitBreakerLadder, fees, rungs (pure)
-  broker/                  Alpaca client + zod schemas + BrokerApi/MarketDataApi interfaces
+  broker/                  Alpaca client + zod schemas + BrokerApi/MarketDataApi interfaces + registry (ADR-078)
   budget/FreeTierBudget.ts free-tier meter + per-invocation subrequest guard
   journal/Journal.ts       hash chain + D1 outbox
   strategy/                indicators + CRYPTO_BREAKOUT_BASELINE_V1 (deterministic, RULE contracts)
-  discord/                 signature verify, commands, interactions, notifier (REST)
+  discord/                 signature verify, commands, interactions, notifier (REST), token-only auto-setup (setup.ts)
   lib/                     sync sha256, uuidv7, client_order_id, money helpers
   clef/                    Clef client (real response format), Tier 1 triage, Tier 2 structure (pure)
-  court/                   Tier 0 evidence, LLM router + providers, versioned prompts, bull/bear/synth/contract (pure)
+  court/                   Tier 0 evidence, LLM router + providers, model pool (pool.ts, models.ts: endpoints, round
+                           robin, discovery, presets — ADR-072), versioned prompts, bull/bear/synth/contract (pure)
+  notify/                  ntfy push, the app's feed inbox (inbox.ts, ADR-071)
   data/ workflows/         (later)
-web/                      web terminal: React 19 + Vite (dark cockpit, ADR-036); builds into public/ (gitignored);
-                          mock-api.ts serves synthetic data for `pnpm web:dev` only. PRODUCT.md / DESIGN.md at root
+web/                      the app's panel: React 19 + Vite (dark cockpit, ADR-036; FEED / ASK / SETTINGS / TODAY and
+                          first-launch onboarding, ADR-071/073); builds into public/ (gitignored); mock-api.ts serves
+                          synthetic data for `pnpm web:dev` only. PRODUCT.md / DESIGN.md at root
 workers/sentinel/         independent watchdog + kill-switch worker (own wrangler.jsonc, vendored verify.ts,
                           writes the KV kill flag the brain reads — ADR-015)
 research/                 Python (uv): cortex_research.run crypto|equity|world — runs pinned upstream skills, signs,
                           POSTs /ingest/batch (research.yml); governor/ (ADR-030); options/ shadow lab (ADR-031);
                           pytest in CI. ADR-026
+local/                    cortexd local mode + `cortex` CLI (ADR-064/065): runtime, sandbox broker, jobs, service,
+                          deploy, runner, memory packs, settings backend + live reload (settings.ts), agent-prompt.ts,
+                          keychain, encrypted backups, licences (keychain.ts, backup.ts, license.ts — ADR-076/077)
+desktop/                  Tauri v2 app (ADR-066): src-tauri/ shell; bundles dist/cortexd + an official Node runtime
+hub/                      community hub Worker + D1 migrations (ADR-068), hosted by the publisher
+src/universe/ src/portfolio/ src/hub/   dynamic universe + scout (058), exits/lateness/book (059–061), hub protocol (068)
 test/                     vitest in Node: pure risk tests + full pulses against test/sim (FakeBroker + node:sqlite
                           with the real D1 migrations) — ADR-019
 .github/workflows/        ci.yml (+ research.yml, governor.yml added in later phases)
@@ -299,6 +322,15 @@ pnpm discord:register     # (global) slash commands for both Discord apps (needs
 gh workflow run governor -f weekly=true                     # governor now (report card + calibration proposal)
 # Discord /terminal → single-use link to the web terminal (https://cortex.samplayz2ks.workers.dev)
 gh workflow run kill-switch -f action=kill -f reason="…"   # independent FLATTEN ALL (ADR-022); action=rearm to clear
+pnpm cortex <setup|doctor|start|demo|link|llm|service|kill|rearm|deploy|runner|hub|memory> [--json]   # local mode (ADR-064)
+pnpm cortex llm add <key-or-url> [--models a,b]   # model pool (ADR-072): list | add | remove | models | prefs
+pnpm cortex support       # redacted support file (no secrets) for asking for help (ADR-074)
+pnpm cortex backup [--keys] | restore FILE | keychain on|off | license install FILE | reset --yes   # ADR-076/077
+pnpm web:demo             # static demo cockpit on synthetic data → demo-dist/ (ADR-077)
+gh workflow run release -f bump=minor   # desktop release for every platform (auto on merges to main; ADR-077)
+pnpm demo                 # keyless local demo on live crypto prices (simulated broker)
+pnpm cortexd:build        # dist/cortexd bundle (no TS source); pnpm desktop:runtime && pnpm desktop:build → the app
+pnpm canary               # model drift canary against every court model (weekly in canary.yml, ADR-070)
 ```
 
 A doctrine value looser than the constitution fails `config:build`, which fails CI, which blocks deploy.
@@ -324,8 +356,10 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - **CPU discipline:** fetch/cron handlers do routing only (<10 ms CPU). Real work happens in the DO.
   Workflow steps are I/O-only. Anything heavy (backtests, Monte Carlo over large sets, screeners) goes to
   GitHub Actions.
-- **Budget discipline:** every call to Workers AI, an LLM provider, D1, or an external API goes through
-  `FreeTierBudget.charge()` first. If it says no, degrade (skip tier, widen cadence, REDUCE_ONLY).
+- **Budget discipline:** every outbound call goes through the per-invocation subrequest guard (`InvocationMeter`, the
+  `guard` passed to every client); Workers AI calls check `FreeTierBudget.canSpendNeurons()` first and record usage
+  with `budget.add()`; daily DO/D1 usage is metered per pulse. If the budget says no, degrade (skip tier, widen
+  cadence, REDUCE_ONLY).
 - **Determinism:** risk/sizing/fee/indicator code is pure (no I/O, no Date.now inside). Tested with fixtures
   and property tests (fast-check, `test/properties.test.ts`). Python↔TS twins (ATR, apply_map, the chain hash) are
   pinned by tests on each side; strategy params are zod-checked at `config:build` (`src/strategy/params.ts`).
@@ -437,5 +471,23 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-26: first exits — LAB closed BTC/USD and AAVE/USD on TIME_STOP (+$0.08, +$0.10). ADR-056 gate review: REDUCE_ONLY
   admits court stock entries at half size under the coach's ceiling, transitional macro input, warm-up floor 0.5, court
   bull-decline fix and deepseek out of the chains.
+- 2026-10-26: ideas round (docs/IDEAS_WORKLOG.md, ADR-057…070): research desk v2, dynamic universe + scout, exit
+  intelligence, lateness meter + resting convictions, sanity vetoes, /why /roast /book /universe, ntfy + widgets, BYOK
+  models + portable Clef, cortexd local mode, desktop app, job queue + cortex deploy, community hub, Chronos-2 companion,
+  drift canary + chaos test. Product direction: closed-source desktop/headless software + a hosted hub
+  (docs/DISTRIBUTION.md).
+- 2026-10-26 (evening): app-first round (operator; docs/IDEAS_WORKLOG.md §E). ADR-071: the app is the dashboard (FEED
+  from a hot-store inbox, ASK, SETTINGS; Discord optional, connects from a bot token; LIVE ratification from the app on a
+  fresh sign-in). ADR-072: the model pool (unlimited OpenAI/Anthropic-compatible endpoints, discovery, round robin with
+  cooldowns and caps, one-model warning); Clef/Clairic only on Cloudflare AI, else a structured stand-in (marginally
+  lower, and the user is told). ADR-073: first-launch onboarding (wizard or agent prompt), live settings reload,
+  TODAY summary. Hot schema v9. ADR-074: the court waits for the deep dossier (fast one after 12 min); the research
+  desk uses the user's pool; support file + HEALTH in the app; `cortex deploy` verifies and rolls back; model
+  scoreboard. Every idea re-reviewed for the app-first objective (IDEAS_WORKLOG §F).
+- 2026-10-27: final pass on the ideas worklog (§G): ADR-075 paid-model cost meter, daily spend caps, demote switch,
+  court capacity slider, AI USE gauge in local mode; ADR-076 keys in the OS keychain, encrypted backup/restore, phone
+  access over Wi-Fi with QR pairing, ntfy QR, reset, tray health; ADR-077 release workflow for every desktop platform
+  with generated changelogs, signed auto-update and licences, static demo cockpit; ADR-078 broker conformance suite
+  (fixed the sandbox selling what it didn't hold) and the first Brain.ts split (`src/cortex/cards.ts`).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

@@ -1,5 +1,5 @@
 import { MAX_BATCH_BYTES } from "./contracts/batch.ts";
-import { hudMessage } from "./cortex/Brain.ts";
+import { hudMessage, type StatusView } from "./cortex/Brain.ts";
 import {
   APPLICATION_COMMAND,
   accountOption,
@@ -18,6 +18,7 @@ import type { Env } from "./env.ts";
 import { verifySignedBody } from "./lib/hmac.ts";
 import { handleWeb, loginLink } from "./web/api.ts";
 import { runCommand } from "./web/commands.ts";
+import { pill, pillAuthorized, swiftbar } from "./web/pill.ts";
 
 export { AgentCortexDO, LabCortexDO } from "./cortex/AgentCortexDO.ts";
 
@@ -70,6 +71,7 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
     confirm: option(i, "confirm") === undefined ? undefined : String(option(i, "confirm")),
     postmortem: option(i, "postmortem") === undefined ? undefined : String(option(i, "postmortem")),
     symbol: option(i, "symbol") === undefined ? undefined : String(option(i, "symbol")),
+    thesis: option(i, "thesis") === undefined ? undefined : String(option(i, "thesis")),
   };
 
   switch (name) {
@@ -84,6 +86,8 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
       );
     }
     case "court":
+    case "roast":
+    case "book":
     case "flatten": {
       // Slow paths: answer within 3 s, finish in the background, follow up (ADR-008).
       if (!i.token || !env.DISCORD_APP_ID) return ephemeral("Discord app not configured.");
@@ -278,8 +282,39 @@ export default {
       return governorExport(request, env);
     }
 
+    // ADR-065: a linked desktop runner claims the next research job (HMAC like ingest)
+    if (request.method === "POST" && url.pathname === "/runner/claim") {
+      if (!env.INGEST_HMAC_SECRET) return new Response("not configured", { status: 503 });
+      const body = await request.text();
+      if (body.length > 500) return new Response("too large", { status: 413 });
+      const ok = await verifySignedBody(
+        env.INGEST_HMAC_SECRET,
+        request.headers.get("x-cortex-signature"),
+        request.headers.get("x-cortex-timestamp"),
+        body,
+      );
+      if (!ok) return new Response("bad signature", { status: 401 });
+      const runner = String((JSON.parse(body) as { runner?: unknown }).runner ?? "runner").slice(0, 60);
+      return Response.json({ job: await brain(env).claimJob(runner) });
+    }
+
     if (request.method === "POST" && url.pathname === "/discord/interactions") {
       return handleInteraction(request, env, ctx);
+    }
+
+    // ADR-062: read-only status for desktop widgets (bearer PILL_TOKEN; never in a URL)
+    if (request.method === "GET" && url.pathname === "/pill") {
+      if (!env.PILL_TOKEN) return new Response("pill not configured", { status: 503 });
+      if (!pillAuthorized(request.headers.get("authorization"), env.PILL_TOKEN))
+        return new Response("unauthorized", { status: 401 });
+      const p = pill((await brain(env).status()) as StatusView);
+      const fmt = url.searchParams.get("format");
+      const headers = { "cache-control": "no-store" };
+      if (fmt === "swiftbar")
+        return new Response(swiftbar(p, `${url.origin}/`), {
+          headers: { ...headers, "content-type": "text/plain; charset=utf-8" },
+        });
+      return Response.json(p, { headers });
     }
 
     if (url.pathname.startsWith("/api/")) return handleWeb(request, env, brain(env));

@@ -94,23 +94,34 @@ export function Dial(props: {
 }
 
 /** Equity over time, drawn from the brain's hourly samples (no smoothing, no fill). */
-export function Trend(props: { points: number[][] | undefined; hwm: number | null; label: string }) {
+export function Trend(props: {
+  points: number[][] | undefined;
+  hwm: number | null;
+  label: string;
+  bench?: { btc: number[][]; spy: number[][] } | undefined;
+}) {
   const pts = (props.points ?? []).filter((p) => p.length === 2 && Number.isFinite(p[1]));
+  const btc = (props.bench?.btc ?? []).filter((p) => Number.isFinite(p[1]));
+  const spy = (props.bench?.spy ?? []).filter((p) => Number.isFinite(p[1]));
   if (pts.length < 2) {
     return <p className="sub">{props.label}: first hourly samples arrive after the next pulses.</p>;
   }
   const xs = pts.map((p) => p[0] as number);
   const ys = pts.map((p) => p[1] as number);
-  const lo = Math.min(...ys, props.hwm ?? Number.POSITIVE_INFINITY);
-  const hi = Math.max(...ys, props.hwm ?? Number.NEGATIVE_INFINITY);
+  const all = [...ys, ...btc.map((p) => p[1] as number), ...spy.map((p) => p[1] as number)];
+  const lo = Math.min(...all, props.hwm ?? Number.POSITIVE_INFINITY);
+  const hi = Math.max(...all, props.hwm ?? Number.NEGATIVE_INFINITY);
   const span = hi - lo || 1;
   const x0 = xs[0] as number;
   const xspan = (xs[xs.length - 1] as number) - x0 || 1;
   const xOf = (t: number) => ((t - x0) / xspan) * 400;
   const yOf = (v: number) => 50 - ((v - lo) / span) * 44;
-  const d = pts
-    .map((p, i) => `${i ? "L" : "M"}${xOf(p[0] as number).toFixed(1)} ${yOf(p[1] as number).toFixed(1)}`)
-    .join(" ");
+  const path = (series: number[][]) =>
+    series
+      .filter((p) => (p[0] as number) >= x0)
+      .map((p, i) => `${i ? "L" : "M"}${xOf(p[0] as number).toFixed(1)} ${yOf(p[1] as number).toFixed(1)}`)
+      .join(" ");
+  const d = path(pts);
   const hours = Math.round(xspan / 3_600_000);
   return (
     <figure className="trend-fig">
@@ -133,10 +144,42 @@ export function Trend(props: { points: number[][] | undefined; hwm: number | nul
             vectorEffect="non-scaling-stroke"
           />
         )}
+        {btc.length > 1 && (
+          <path
+            d={path(btc)}
+            fill="none"
+            stroke="var(--amber)"
+            strokeWidth="1"
+            strokeDasharray="2 3"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {spy.length > 1 && (
+          <path
+            d={path(spy)}
+            fill="none"
+            stroke="var(--cyan)"
+            strokeWidth="1"
+            strokeDasharray="2 3"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
         <path d={d} fill="none" stroke="var(--green)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
       </svg>
       <figcaption className="sub">
         EQUITY · LAST {hours >= 48 ? `${Math.round(hours / 24)} D` : `${hours} H`}, HOURLY
+        {btc.length > 1 && (
+          <>
+            {" · "}
+            <span className="amber">- - BTC HOLD {usd(btc[btc.length - 1]?.[1] ?? 0)}</span>
+          </>
+        )}
+        {spy.length > 1 && (
+          <>
+            {" · "}
+            <span className="cyan">- - SPY HOLD {usd(spy[spy.length - 1]?.[1] ?? 0)}</span>
+          </>
+        )}
         {props.hwm !== null && (
           <>
             {" · "}

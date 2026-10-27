@@ -31,6 +31,19 @@ export const KronosForecastSchema = z.object({
   horizon_label: z.string().max(40).optional(),
   /** ADR-047 panel: recent candle closes and the 10/50/90% band of sampled future closes. */
   hist: z.array(z.number().positive()).max(120).optional(),
+  /** ADR-069: SHADOW second opinions (Chronos-2): logged and shown, never used to trade */
+  companions: z
+    .array(
+      z.object({
+        model: z.string().max(60),
+        p_up: z.number().min(0).max(1),
+        q10_ret: z.number().nullable().optional(),
+        q50_ret: z.number().nullable().optional(),
+        q90_ret: z.number().nullable().optional(),
+      }),
+    )
+    .max(3)
+    .optional(),
   fan: z
     .object({
       p10: z.array(z.number()).max(48),

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CORTEX_COMMANDS as DISCORD_COMMANDS } from "../src/discord/commands.ts";
 import { handleWeb, loginLink, type WebBrain, type WebEnv } from "../src/web/api.ts";
 import { OPERATOR_COMMANDS, runCommand } from "../src/web/commands.ts";
-import { cookieValue, SESSION_COOKIE, signToken, verifyToken } from "../src/web/session.ts";
+import { cookieValue, SESSION_COOKIE, SESSION_TTL_MS, signToken, verifyToken } from "../src/web/session.ts";
 
 const SECRET = "test-secret-0123456789";
 
@@ -26,6 +26,7 @@ function fakeBrain() {
   const calls: string[] = [];
   const b: WebBrain = {
     status: async () => ({ ok: true }),
+    feed: async () => [],
     memory: async () => ({ beliefs: [], reputation: {}, scars: [] }),
     equity: async () => ({}),
     forecast: async (sym) => ({ symbol: sym }),
@@ -44,6 +45,10 @@ function fakeBrain() {
     unlock: () => "unlocked",
     flatten: async () => "flattened",
     court: async (s) => `court ${s}`,
+    why: (s) => `why ${s}`,
+    roast: async (s, th) => `roast ${s} ${th}`,
+    book: async () => "book",
+    universe: () => "universe",
   };
   return { b, calls };
 }
@@ -72,9 +77,23 @@ describe("web API", () => {
     const ok = await cmd({ name: "pause", account: "PAPER" });
     expect(ok.status).toBe(200);
     expect(calls).toEqual(["pause PAPER web:42"]);
-    // audit 2026-10-24: LIVE autonomy is Discord-only; flatten needs an explicit confirm
-    expect((await cmd({ name: "dial", account: "LIVE", stop: 3, confirm: "RATIFY" })).status).toBe(403);
-    expect((await cmd({ name: "unlock", account: "LIVE", postmortem: "x".repeat(60) })).status).toBe(403);
+    // ADR-071: LIVE autonomy and unlocks work from the app, but only on a fresh sign-in (≤ 10 min)
+    const live = await cmd({ name: "dial", account: "LIVE", stop: 3, confirm: "RATIFY" });
+    expect(live.status).toBe(200);
+    expect(((await live.json()) as { message: string }).message).toBe("dial LIVE 3 true");
+    const old = await signToken(SECRET, {
+      k: "session",
+      exp: Date.now() + SESSION_TTL_MS - 11 * 60_000, // signed in 11 minutes ago
+      n: "old-session",
+    });
+    const stale = { cookie: `c54s=${old}`, "x-cortex-web": "1" };
+    expect((await cmd({ name: "dial", account: "LIVE", stop: 3, confirm: "RATIFY" }, stale)).status).toBe(
+      403,
+    );
+    expect((await cmd({ name: "unlock", account: "LIVE", postmortem: "x".repeat(60) }, stale)).status).toBe(
+      403,
+    );
+    expect((await cmd({ name: "pause", account: "PAPER" }, stale)).status).toBe(200); // everything else still works
     expect((await cmd({ name: "flatten", account: "PAPER" })).status).toBe(400);
     expect((await cmd({ name: "flatten", account: "PAPER", confirm: "FLATTEN" })).status).toBe(200);
     expect((await cmd({ name: "rm", account: "PAPER" })).status).toBe(400);

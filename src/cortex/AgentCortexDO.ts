@@ -4,8 +4,9 @@ import type { BrokerApi } from "../broker/types.ts";
 import { InvocationMeter } from "../budget/FreeTierBudget.ts";
 import { WorkersAiClef } from "../clef/ClefClient.ts";
 import { WorkersAiClairic } from "../clef/clairic.ts";
-import { GeminiProvider, type LlmProvider, LlmRouter, OpenAICompatProvider } from "../court/llm.ts";
-import { DiscordNotifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
+import { buildPool, parsePool, poolRouter } from "../court/pool.ts";
+import { buildProviders } from "../court/providers.ts";
+import { DiscordNotifier, type Notifier, NullNotifier, parseChannels } from "../discord/notifier.ts";
 import type { Env } from "../env.ts";
 import {
   CALIBRATION,
@@ -15,11 +16,15 @@ import {
   DOCTRINE_SHA256,
   SCAR_TISSUE,
 } from "../generated/config.ts";
+import { hubFromEnv } from "../hub/client.ts";
 import type { AccountId } from "../lib/ids.ts";
+import { InboxNotifier, readFeed } from "../notify/inbox.ts";
+import { ntfyUrl, PushNotifier } from "../notify/push.ts";
 import { Brain, parseKillFlag, type SloView, type StatusView } from "./Brain.ts";
 import { GitHubDispatcher } from "./dispatch.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "./hot-schema.ts";
 import { LabNotifier, labDoctrine } from "./lab.ts";
+import { QueueDispatcher } from "./queue.ts";
 import { getKV, type Row, type SqlLike, type SqlValue, setKV } from "./store.ts";
 
 export interface Health {
@@ -47,6 +52,8 @@ export class AgentCortexDO extends DurableObject<Env> {
   private readonly sql: SqlLike;
   private readonly meter = { current: new InvocationMeter(DOCTRINE.budgets.per_invocation.subrequests - 5) };
   private readonly brain: Brain;
+  /** ADR-065: research jobs for linked desktop runners (RUNNER_MODE=queue). */
+  private readonly queue: QueueDispatcher;
 
   /** LabCortexDO sets this (ADR-045): a second brain on the LAB paper account, journal and doctrine view. */
   static readonly lab: boolean = false;
@@ -54,6 +61,7 @@ export class AgentCortexDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = fromDurable(ctx.storage.sql);
+    this.queue = new QueueDispatcher(this.sql, () => Date.now());
     const guard = () => this.meter.current.guard();
     const lab = (this.constructor as typeof AgentCortexDO).lab;
     if (lab) {
@@ -86,32 +94,53 @@ export class AgentCortexDO extends DurableObject<Env> {
           ? { keyId: env.ALPACA_LIVE_KEY_ID, secret: env.ALPACA_LIVE_SECRET }
           : null;
 
+    // ADR-072: the model pool = built-in free providers + the user's own endpoints (LLM_POOL), in round robin
+    const pool = parsePool(env.LLM_POOL);
+    const built = buildPool(DOCTRINE, buildProviders(env), pool);
+    const d = built.d;
     this.brain = new Brain({
       sql: this.sql,
-      d: DOCTRINE,
+      d,
       c: CONSTITUTION,
       brokers,
       market: dataKey ? new AlpacaMarketData(dataKey, guard) : null,
-      notifier: env.DISCORD_BOT_TOKEN
-        ? new DiscordNotifier(
-            env.DISCORD_BOT_TOKEN,
-            parseChannels(env.DISCORD_CHANNELS),
-            guard,
-            undefined,
-            discordReport(this.sql),
-          )
-        : new NullNotifier(),
+      // ADR-071: every card lands in the app's feed first; Discord and phone pushes are optional extras
+      notifier: new InboxNotifier(
+        this.sql,
+        withPush(
+          env.DISCORD_BOT_TOKEN
+            ? new DiscordNotifier(
+                env.DISCORD_BOT_TOKEN,
+                parseChannels(env.DISCORD_CHANNELS),
+                guard,
+                undefined,
+                discordReport(this.sql),
+              )
+            : new NullNotifier(),
+          env,
+          guard,
+        ),
+        () => Date.now(),
+      ),
       d1: env.DB,
       readKillFlag: async () => parseKillFlag(await env.FLAGS.get("killed")),
       clef: new WorkersAiClef(env.AI),
       clairic: new WorkersAiClairic(env.AI),
-      llm: new LlmRouter(llmProviders(env), DOCTRINE),
+      llm: poolRouter(built, pool.prefs),
       calibration: CALIBRATION,
       scar: SCAR_TISSUE,
+      // ADR-065: RUNNER_MODE=queue hands jobs to a linked desktop runner; otherwise GitHub Actions when configured
       dispatcher:
-        env.GITHUB_REPO && env.GH_DISPATCH_TOKEN
-          ? new GitHubDispatcher(env.GITHUB_REPO, env.GH_DISPATCH_TOKEN, guard)
-          : null,
+        env.RUNNER_MODE === "queue"
+          ? this.queue
+          : env.GITHUB_REPO && env.GH_DISPATCH_TOKEN
+            ? new GitHubDispatcher(env.GITHUB_REPO, env.GH_DISPATCH_TOKEN, guard)
+            : null,
+      http: (u, i) => {
+        guard();
+        return fetch(u, i);
+      },
+      hub: hubFromEnv(env as unknown as Record<string, string | undefined>),
       now: () => Date.now(),
     });
 
@@ -162,6 +191,10 @@ export class AgentCortexDO extends DurableObject<Env> {
   async ensureAlarm(): Promise<number> {
     const existing = await this.ctx.storage.getAlarm();
     if (existing !== null) return existing;
+    // A running alarm handler has no alarm set (the runtime clears it while the handler runs); the pulse re-arms it
+    // when it finishes. Live data 2026-10-27: every "lost" alarm (40 PAPER, 112 LAB) had a ~61 s gap, i.e. the cron
+    // landed mid-pulse, logged a false loss and started a second, overlapping pulse.
+    if (this.pulsing) return Date.now() + 60_000;
     const at = Date.now() + 1_000;
     await this.ctx.storage.setAlarm(at);
     // Audit W1-15: a lost alarm was restored silently, so how often it happens was unknowable.
@@ -285,6 +318,45 @@ export class AgentCortexDO extends DurableObject<Env> {
     return this.brain.requestCourt(symbol, by);
   }
 
+  why(symbol: string): string {
+    this.begin();
+    return this.brain.why(symbol);
+  }
+
+  async roast(symbol: string, thesis: string, by: string): Promise<string> {
+    this.begin();
+    return this.brain.requestRoast(symbol, thesis, by);
+  }
+
+  async feed(q: {
+    channel: string | null;
+    before: number | null;
+    limit: number;
+    exclude?: string[];
+  }): Promise<unknown> {
+    return readFeed(this.sql, q);
+  }
+
+  async book(): Promise<string> {
+    this.begin();
+    const b = await this.brain.bookReview(true);
+    await this.brain.flushJournal();
+    return b
+      ? `📒 Book review posted to the feed (REPORTS) (${b.lines.length} position(s)).`
+      : "Book review unavailable (no market data).";
+  }
+
+  universe(): string {
+    this.begin();
+    return this.brain.universeView();
+  }
+
+  /** ADR-065: a linked desktop runner asks for its next job (the router has verified the HMAC). */
+  claimJob(runner: string): { id: number; workflow: string; inputs: Record<string, string> } | null {
+    this.begin();
+    return this.queue.claim(runner);
+  }
+
   async resetAccount(account: AccountId, by: string): Promise<{ ok: boolean; message: string }> {
     this.begin();
     return this.brain.resetAccount(account, by);
@@ -333,32 +405,10 @@ function fromDurable(sql: SqlStorage): SqlLike {
   };
 }
 
-/** Court providers from secrets; a missing key just removes that hop (verified endpoints — ADR-028). */
-function llmProviders(env: Env): Partial<Record<string, LlmProvider>> {
-  const p: Partial<Record<string, LlmProvider>> = {};
-  if (env.GEMINI_API_KEY) p.gemini = new GeminiProvider(env.GEMINI_API_KEY);
-  if (env.GROQ_API_KEY) {
-    p.groq = new OpenAICompatProvider("groq", "https://api.groq.com/openai/v1", env.GROQ_API_KEY, {
-      jsonMode: true,
-      reasoningEffort: "low",
-    });
-  }
-  if (env.NVIDIA_API_KEY) {
-    p.nim = new OpenAICompatProvider("nim", "https://integrate.api.nvidia.com/v1", env.NVIDIA_API_KEY, {
-      jsonMode: false,
-    });
-  }
-  if (env.OPENROUTER_API_KEY) {
-    p.openrouter = new OpenAICompatProvider(
-      "openrouter",
-      "https://openrouter.ai/api/v1",
-      env.OPENROUTER_API_KEY,
-      {
-        jsonMode: true,
-      },
-    );
-  }
-  return p;
+/** ADR-062: phone pushes via ntfy when NTFY_TOPIC is set (PAPER/LIVE brain only; LAB stays in #agent-terminal). */
+function withPush(inner: Notifier, env: Env, guard: () => void): Notifier {
+  const url = ntfyUrl(env.NTFY_TOPIC, env.NTFY_URL);
+  return url ? new PushNotifier(inner, url, guard) : inner;
 }
 
 /** ADR-045: LAB brain wiring — LAB paper keys, LAB journal, LAB doctrine view, no AI and no dispatching. */

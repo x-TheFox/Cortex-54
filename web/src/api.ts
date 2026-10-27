@@ -60,9 +60,16 @@ export interface StatusView {
   now: number;
   lastPulseAt: number | null;
   budget: { mode: string; worst: { resource: string; fraction: number }; fractions: Record<string, number> };
+  /** ADR-075: model calls today per provider (local mode's gauge) */
+  modelUse?: {
+    worst: { provider: string; fraction: number };
+    providers: { provider: string; calls: number; cap: number | null }[];
+  };
   journalHead: { seq: number; sha: string };
   outboxPending: number;
   equity: Partial<Record<AccountId, number[][]>>;
+  /** buy-and-hold BTC / SPY with the same starting equity (MLP0-024) */
+  benchmark?: Partial<Record<AccountId, { btc: number[][]; spy: number[][] }>>;
   regimes: RegimeView[];
   accounts: AccountView[];
 }
@@ -255,4 +262,142 @@ export interface ForecastView {
     } | null;
     regime: { posture: string; score: number | null } | null;
   };
+}
+
+/** POST JSON to an /api route with the CSRF header (mutations). */
+export async function post<T>(path: string, body: unknown): Promise<T> {
+  return api<T>(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-cortex-web": "1" },
+    body: JSON.stringify(body),
+  });
+}
+
+// ------------------------------------------------------------------ feed (ADR-071)
+
+export interface Embed {
+  title?: string;
+  description?: string;
+  color?: number;
+  fields?: { name: string; value: string; inline?: boolean }[];
+  footer?: { text: string };
+  timestamp?: string;
+  image?: { url: string };
+}
+export interface FeedItem {
+  id: number;
+  ts: number;
+  channel: string;
+  msg: { content?: string; embeds?: Embed[] };
+}
+
+// ------------------------------------------------------------------ settings (ADR-071/072/073)
+
+export type ApiFormat = "openai" | "anthropic";
+export type Tier = "free" | "paid" | "local";
+
+export interface Preset {
+  id: string;
+  name: string;
+  format: ApiFormat;
+  url: string;
+  tier: Tier;
+  keyUrl: string | null;
+  keyPattern: string | null;
+  note: string;
+  builtinKey?: string;
+}
+
+export interface EndpointView {
+  id: string;
+  name: string;
+  format: ApiFormat;
+  url: string;
+  key: string;
+  keySet: boolean;
+  keyHint: string;
+  models: string[];
+  tier: Tier;
+  daily_cap?: number;
+  /** ADR-075: USD per 1M tokens, and a daily spend cap */
+  price_in?: number;
+  price_out?: number;
+  daily_spend_cap?: number;
+  enabled: boolean;
+}
+
+export interface PoolPrefs {
+  prefer: "free_first" | "paid_first" | "mixed";
+  round_robin: boolean;
+  allow_same_model: boolean;
+  /** ADR-075: `provider/model` the user demoted from the scoreboard */
+  demoted?: string[];
+}
+
+export interface PoolReport {
+  entries: { provider: string; model: string; tier: Tier; family: string; source: string }[];
+  models: number;
+  lineages: string[];
+  notes: { level: "ok" | "warn" | "block"; text: string }[];
+}
+
+export interface SettingsView {
+  managed: "local" | "cloud";
+  message?: string;
+  mode?: "demo" | "paper";
+  onboarded?: boolean;
+  clefMode?: "auto" | "cloudflare" | "llm" | "off";
+  keys?: Record<string, { set: boolean; hint: string }>;
+  llm?: { prefs: PoolPrefs; endpoints: EndpointView[] };
+  pool?: PoolReport | null;
+  clef?: { ok: boolean; level: "ok" | "degraded" | "off"; text: string };
+  discord?: { connected: boolean; channels: string[] };
+  push?: { topic: boolean; url: string | null };
+  presets?: Preset[];
+  freeChains?: Record<string, string[]>;
+  agentPrompt?: string;
+  /** ADR-075: today's tokens and cost per priced endpoint */
+  spend?: { provider: string; input: number; output: number; usd: number; cap: number | null }[];
+  court?: { max_per_day: number | null; default_per_day: number };
+  /** ADR-076 */
+  lan?: { enabled: boolean; port: number };
+  secretStore?: { mode: "file" | "keychain"; backend: string | null };
+  /** ADR-077 */
+  license?:
+    | { required: false }
+    | {
+        required: true;
+        ok: true;
+        license: { licensee: string; plan: string; expires_at: string | null };
+        daysLeft: number | null;
+      }
+    | { required: true; ok: false; reason: string };
+}
+
+export type ModelList =
+  | { ok: true; url: string; models: string[] }
+  | { ok: false; url: string; error: string };
+export type Result = { ok: boolean; message: string };
+
+/** Recognize a pasted key from the presets' patterns (sk-ant-…, gsk_…, AIza…). */
+export function presetFor(key: string, presets: Preset[]): Preset | null {
+  const k = key.trim();
+  for (const p of presets) if (p.keyPattern && new RegExp(p.keyPattern).test(k)) return p;
+  return null;
+}
+
+/** After a save the local brain reloads for a moment; wait until it answers again. */
+export async function waitForBrain(ms = 15_000): Promise<boolean> {
+  const t0 = Date.now();
+  await new Promise((r) => setTimeout(r, 900));
+  while (Date.now() - t0 < ms) {
+    try {
+      const r = await fetch("/api/settings", { credentials: "same-origin" });
+      if (r.ok) return true;
+    } catch {
+      /* reloading */
+    }
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  return false;
 }

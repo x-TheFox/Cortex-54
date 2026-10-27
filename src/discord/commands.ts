@@ -48,5 +48,20 @@ export const CORTEX_COMMANDS = [
     description: "Convene the bull-vs-bear court on a symbol now (all risk gates still apply; PAPER only)",
     options: [{ type: 3, name: "symbol", description: "e.g. BTC/USD, ETH/USD, NVDA, SPY", required: true }],
   },
+  {
+    name: "why",
+    description: "What the robot did about a symbol and why (positions, contracts, refusals, exits)",
+    options: [{ type: 3, name: "symbol", description: "e.g. BTC/USD, NVDA", required: true }],
+  },
+  {
+    name: "roast",
+    description: "Co-pilot: the court judges YOUR trade idea (never places an order)",
+    options: [
+      { type: 3, name: "symbol", description: "e.g. NVDA, SOL/USD", required: true },
+      { type: 3, name: "thesis", description: "Your idea in a sentence", required: true },
+    ],
+  },
+  { name: "book", description: "Book review now: R, age, correlation, beta, crash replay" },
+  { name: "universe", description: "Hot-ported, watched and refused symbols in the dynamic universe" },
   { name: "terminal", description: "Get a single-use link to the web terminal (expires in 10 minutes)" },
 ] as const;

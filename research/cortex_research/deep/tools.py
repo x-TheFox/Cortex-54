@@ -12,6 +12,7 @@ import html
 import json
 import os
 import re
+import threading
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -23,7 +24,8 @@ from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 import requests
 
 BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
-BOT_UA = "CORTEX-54 research agent (github.com/x-TheFox/Cortex-54)"
+# identifies the agent to the sites it reads; installs can add a contact via CORTEX_USER_AGENT (never a repo URL)
+BOT_UA = os.environ.get("CORTEX_USER_AGENT") or "CORTEX-54 research agent"
 TIMEOUT = 20
 MAX_PAGE_CHARS = 7000
 ALPACA_DATA = "https://data.alpaca.markets"
@@ -67,6 +69,8 @@ class Toolbox:
     seen: dict[str, dict[str, Any]] = field(default_factory=dict)
     read_urls: set[str] = field(default_factory=set)
     calls: int = 0
+    filings: list[dict[str, Any]] = field(default_factory=list)  # every SEC filing row a tool returned
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     # ---- registry -------------------------------------------------------------------------------------------------
     def specs(self) -> list[dict[str, str]]:
@@ -75,6 +79,8 @@ class Toolbox:
              "does": "General web search (DuckDuckGo). Use for company facts, earnings dates, guidance, analyst views, protocol news."},
             {"name": "news_search", "args": '{"query": str, "days": int (1-30, default 7)}',
              "does": "Recent news headlines with dates (Google News + Bing News). Use first to learn what happened lately."},
+            {"name": "headlines", "args": '{"section": "business|world|technology|crypto|markets"}',
+             "does": "Today's top general headlines for a section (no query). Use for the MARKET scope: what everyone is trading on."},
             {"name": "read_url", "args": '{"url": str}',
              "does": f"Fetch a page and return its text (≤{MAX_PAGE_CHARS} chars). Only pages you read count as verified sources."},
             {"name": "wikipedia", "args": '{"topic": str}', "does": "Wikipedia summary for background (company, protocol, person)."},
@@ -86,8 +92,10 @@ class Toolbox:
         ]
 
     def run(self, tool: str, args: dict[str, Any]) -> dict[str, Any]:
-        self.calls += 1
+        with self._lock:
+            self.calls += 1
         fn = {
+            "headlines": lambda a: self.headlines(str(a.get("section", "business"))),
             "web_search": lambda a: self.web_search(str(a.get("query", ""))),
             "news_search": lambda a: self.news_search(str(a.get("query", "")), int(a.get("days", 7) or 7)),
             "read_url": lambda a: self.read_url(str(a.get("url", ""))),
@@ -104,8 +112,13 @@ class Toolbox:
             return {"error": f"{type(e).__name__}: {str(e)[:200]}"}
 
     def _note(self, url: str, title: str, published: str | None, via: str) -> None:
-        if url and url.startswith("http") and url not in self.seen:
-            self.seen[url] = {"title": title[:160], "published": published, "via": via}
+        with self._lock:
+            if url and url.startswith("http") and url not in self.seen:
+                self.seen[url] = {"title": title[:160], "published": published, "via": via}
+
+    def _mark_read(self, url: str) -> None:
+        with self._lock:
+            self.read_urls.add(url)
 
     # ---- search ---------------------------------------------------------------------------------------------------
     def web_search(self, query: str) -> dict[str, Any]:
@@ -166,6 +179,28 @@ class Toolbox:
         return {"query": query, "days": days, "results": hits,
                 "tip": "google-news links are redirects; to read one, web_search its title or read the bing/publisher URL"}
 
+    SECTIONS = {"business": "BUSINESS", "world": "WORLD", "technology": "TECHNOLOGY"}
+
+    def headlines(self, section: str) -> dict[str, Any]:
+        """Top headlines without a query (Google News section feeds). crypto/markets use a broad search instead."""
+        sec = section.lower().strip()
+        if sec in ("crypto", "markets"):
+            res = self.news_search("cryptocurrency market" if sec == "crypto" else "stock market wall street", 1)
+            return {"section": sec, "results": res.get("results", [])}
+        topic = self.SECTIONS.get(sec, "BUSINESS")
+        r = self.http(f"https://news.google.com/rss/headlines/section/topic/{topic}",
+                      params={"hl": "en-US", "gl": "US", "ceid": "US:en"}, headers={"user-agent": BOT_UA},
+                      timeout=TIMEOUT)
+        hits = []
+        for it in ET.fromstring(r.content).iter("item"):
+            h = {"title": _clean(it.findtext("title"), 200), "source": _clean(it.findtext("source"), 60),
+                 "published": _rfc822(it.findtext("pubDate")), "url": it.findtext("link") or ""}
+            hits.append(h)
+            self._note(h["url"], h["title"], h["published"], "headlines")
+            if len(hits) >= 15:
+                break
+        return {"section": sec, "results": hits}
+
     # ---- reading --------------------------------------------------------------------------------------------------
     def read_url(self, url: str) -> dict[str, Any]:
         p = urlparse(url)
@@ -201,7 +236,7 @@ class Toolbox:
         if m:
             published = m.group(1)
         self._note(url, title, published, "read_url")
-        self.read_urls.add(url)
+        self._mark_read(url)
         return {"url": url, "title": title, "published_hint": published, "chars": len(text),
                 "text": text[:MAX_PAGE_CHARS] + ("…[truncated]" if len(text) > MAX_PAGE_CHARS else "")}
 
@@ -213,7 +248,7 @@ class Toolbox:
         d = r.json()
         url = (d.get("content_urls") or {}).get("desktop", {}).get("page", "")
         self._note(url, d.get("title", topic), None, "wikipedia")
-        self.read_urls.add(url)
+        self._mark_read(url)
         return {"title": d.get("title"), "url": url, "summary": _clean(d.get("extract"), 1800),
                 "note": "Wikipedia is background only; it can be months stale."}
 
@@ -238,6 +273,8 @@ class Toolbox:
             url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc.replace('-', '')}/{doc}"
             rows.append({"form": form, "date": date, "description": _clean(desc, 120), "url": url})
             self._note(url, f"{t} {form} {date}", date, "sec_filings")
+            with self._lock:
+                self.filings.append({"form": form, "date": date})
             if len(rows) >= 12:
                 break
         return {"company": sub.get("name"), "cik": cik, "filings": rows,

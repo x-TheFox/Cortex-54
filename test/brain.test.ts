@@ -1066,7 +1066,75 @@ describe("court end-to-end (Phase 3)", () => {
     expect(await t.brain.requestCourt("BTC/USD", "test")).toMatch(/ended without a contract/);
     const card = t.notifier.sent.find((m) => m.channel === "court");
     expect(card?.msg.embeds?.at(-1)?.fields?.at(-1)?.value).toContain("No cross-family bear");
-    expect(await t.brain.requestCourt("PLTR", "test")).toMatch(/isn't in the tradeable universe/);
+    // ADR-058: an unknown symbol is screened by the scout; with no market data for it, the screen refuses
+    expect(await t.brain.requestCourt("PLTR", "test")).toMatch(/PLTR can't be traded: .*only 0 daily bars/);
+  });
+
+  it("/roast: the operator's own idea gets the full hearing and never becomes a contract or an order", async () => {
+    const calls: string[] = [];
+    const llm = new LlmRouter(
+      { gemini: provider(bullJson, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => T0,
+    );
+    const t = setup({ clef: new ScriptedClef(answers), llm });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    expect(await t.brain.requestRoast("BTC/USD", "short", "test")).toMatch(/Give the idea/);
+    const msg = await t.brain.requestRoast("BTC/USD", "ETF inflows keep coming, buying the breakout", "test");
+    expect(msg).toMatch(/Roast of BTC\/USD/);
+    expect(calls.length).toBeGreaterThanOrEqual(3); // bull, bear, rebuttal (+ panel)
+    expect([...t.paper.orders.values()]).toHaveLength(0);
+    await t.brain.flushJournal();
+    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM decision_contracts").get()).toEqual({ n: 0 });
+    const card = t.notifier.sent.filter((m) => m.channel === "court").at(-1);
+    expect(card?.msg.embeds?.at(-1)?.fields?.at(-1)?.value).toMatch(/Roast only — no order/);
+    // and /why shows the trail
+    expect(t.brain.why("BTC/USD")).toMatch(/ROAST/);
+  });
+
+  it("web sessions are not revoked until logout revokes them (regression: every command said 'signed out')", () => {
+    const t = setup();
+    expect(t.brain.isRevoked("revoked:abc")).toBe(false);
+    expect(t.brain.consumeOnce("revoked:abc")).toBe(true);
+    expect(t.brain.isRevoked("revoked:abc")).toBe(true);
+  });
+
+  it("/why answers from the position, the contract and the journal trail", async () => {
+    const t = setup();
+    breakout(t);
+    await t.brain.pulse();
+    t.advance(60_000);
+    t.market.set("SOL/USD", 101.99, 102);
+    t.paper.tick();
+    await t.brain.pulse();
+    const w = t.brain.why("SOLUSD");
+    expect(w).toMatch(/\*\*SOL\/USD\*\*/);
+    expect(w).toMatch(/PAPER holds it: entry/);
+    expect(w).toMatch(/why bought: /);
+    expect(w).toMatch(/CONTRACT/);
+    expect(t.brain.why("ZZZZ")).toMatch(/Nothing on record/);
+  });
+
+  it("/book posts a book review with betas and a crash replay", async () => {
+    const t = setup();
+    breakout(t);
+    await t.brain.pulse();
+    t.advance(60_000);
+    t.market.set("SOL/USD", 101.99, 102);
+    t.paper.tick();
+    await t.brain.pulse();
+    t.market.bars.SPY = rising(30, 400);
+    const b = await t.brain.bookReview(true);
+    expect(b?.lines[0]?.symbol).toBe("SOL/USD");
+    expect(b?.lines[0]?.notionalUsd).toBeGreaterThan(0);
+    expect(b?.stressLossUsd).not.toBeUndefined();
+    expect(
+      t.notifier.sent.some(
+        (m) => m.channel === "governor" && m.msg.embeds?.[0]?.title === "📒 Book review — PAPER",
+      ),
+    ).toBe(true);
+    expect(await t.brain.bookReview(false)).toBeNull(); // Thursday: the weekly slot isn't due
   });
 
   const dossierBatch = (symbol: string, asOf: number) => ({
@@ -1150,7 +1218,9 @@ describe("court end-to-end (Phase 3)", () => {
 
     const ing = await t.brain.ingestBatch(dossierBatch("BTC/USD", T0 + 120_000));
     expect(ing).toEqual({ ok: true, message: "stored dossier for BTC/USD (1 findings)" });
-    expect(t.notifier.sent.some((m) => m.msg.embeds?.[0]?.title === "📚 Research desk — BTC/USD")).toBe(true);
+    expect(
+      t.notifier.sent.some((m) => m.msg.embeds?.[0]?.title === "⚡ Research desk (fast) — BTC/USD"),
+    ).toBe(true);
     t.advance(60_000);
     const r3 = await t.brain.pulse();
     expect(r3.courtContracts).toBe(1);
@@ -1163,6 +1233,40 @@ describe("court end-to-end (Phase 3)", () => {
     expect(card?.msg.embeds?.[2]?.title).toMatch(/^🐂 Opening statement/);
     expect(card?.msg.embeds?.length).toBeLessThanOrEqual(10);
     expect(dispatched).toHaveLength(1); // the fresh dossier is reused, not re-researched
+  });
+
+  it("operator 2026-10-26: a partial fast dossier keeps the court waiting for the deep one, up to deep_wait_minutes", async () => {
+    const calls: string[] = [];
+    const llm = new LlmRouter(
+      { gemini: provider(bullJson, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => T0,
+    );
+    const t = setup({ clef: new ScriptedClef(answers), llm, dispatcher: { async dispatch() {} } });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    expect((await t.brain.pulse()).courtContracts).toBe(0); // dispatched, waiting
+    const fast = dossierBatch("BTC/USD", T0 + 120_000);
+    (fast.items[0] as { payload: Record<string, unknown> }).payload.complete = false;
+    t.advance(2 * 60_000);
+    expect((await t.brain.ingestBatch(fast)).ok).toBe(true);
+    t.advance(60_000);
+    expect((await t.brain.pulse()).courtContracts).toBe(0); // fast is in, but the deep run is still going
+    t.advance((doctrine.funnel.research.deep_wait_minutes - 3) * 60_000 + 30_000);
+    expect((await t.brain.pulse()).courtContracts).toBe(1); // deep too slow: convene on the fast one
+    expect(doctrine.funnel.research.deep_wait_minutes).toBeLessThan(doctrine.funnel.research.wait_minutes);
+
+    // a complete dossier releases at once
+    const t2 = setup({ clef: new ScriptedClef(answers), llm, dispatcher: { async dispatch() {} } });
+    await t2.brain.ingestBatch(cryptoBatch);
+    t2.market.set("BTC/USD", 130, 130.02);
+    t2.market.news.push(btcNews);
+    expect((await t2.brain.pulse()).courtContracts).toBe(0);
+    t2.advance(60_000);
+    await t2.brain.ingestBatch(dossierBatch("BTC/USD", T0 + 60_000));
+    t2.advance(60_000);
+    expect((await t2.brain.pulse()).courtContracts).toBe(1);
   });
 
   it("ADR-051: the court convenes without a dossier once the wait expires", async () => {

@@ -122,3 +122,27 @@ separate D1 `cortex-lab` (its own 500 MB; the D1 daily row limits are account-wi
 PRIMARY's). Measured cost is about the same as the PRIMARY brain without the funnel: it roughly doubles DO requests,
 duration and rows written, all still under a third of the free allowance.
 
+
+## Ideas round additions (ADR-057 … ADR-070, 2026-10-26)
+
+| Feature | Extra use per day | Inside which limit |
+|---|---|---|
+| Whole-wire news intake (058) | same 1–2 Alpaca news calls per pulse; prefilter is code; ≤ 150 extra Tier 1 items ≈ 180 clef-flash neurons | Tier 1 allocation 3,000 |
+| Scout screens (058) | ≤ 12 × 3 data calls | Alpaca 200/min |
+| Lateness meter (060) | 1 hourly-bars call per Tier 2 / court evidence build (≤ 52) | Alpaca 200/min; ≤ 1 subrequest per evidence |
+| Re-underwriting (059) | ≤ 20 Clef 27B calls ≈ 500–600 neurons | Tier 2 allocation 4,000 (shared with Tier 2 + judge) |
+| Watch dossiers (059) | ≤ 1 per held position per day | research `max_per_day` 16 (shared) |
+| Sanity vetoes (067) | Coinbase ticker ≤ 1/min per symbol, Nasdaq halts ≤ 1 / 5 min, only on entry attempts | subrequests per pulse |
+| Earnings calendar, whole market (058) | ≤ 5,000 rows deleted + written twice per weekday (≈ 10–20K row writes) | DO rows written 100K |
+| Universe / position_watch / resting / hub_outbox tables | a few hundred row writes | DO rows written |
+| App feed inbox (071): one row per card the brain posts, pruned to 3,000 rows / 30 days | ~100–300 row writes/day | DO rows written |
+| Model pool round robin (072): spreads the same court calls across more providers; no extra calls | 0 | — |
+| Hub sync (068, off by default) | 1 POST + 1 GET per followed agent every 30 min | subrequests; Worker requests on the hub |
+| Book review (061) | weekly: 2 bars calls | — |
+| ntfy pushes (062, off by default) | 1 subrequest per alarm/fill/ruling | subrequests per pulse |
+| Research desk deep ring (057) | GitHub minutes: fast ~15 min + deep ≤ 2 h per dossier | free on a public repo; **billed on a private repo** — use `RUNNER_MODE=queue` (065) |
+| Chronos-2 companion (069) | +~2 min CPU per Kronos run (model load) | GitHub minutes (same caveat) |
+| Drift canary (070) | 1 weekly run, ~6 model calls | provider RPD (well under caps) |
+
+Local mode (064) has no Cloudflare limits: the same meter runs but nothing hard-fails; free LLM provider caps still
+apply to the free chains.

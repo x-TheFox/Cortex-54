@@ -53,8 +53,8 @@ async function call<T>(
       res = await fetcher(url, {
         ...init,
         headers: {
-          "APCA-API-KEY-ID": creds.keyId,
-          "APCA-API-SECRET-KEY": creds.secret,
+          // keyless (crypto market data only): local demo mode sends no credential headers at all
+          ...(creds.keyId ? { "APCA-API-KEY-ID": creds.keyId, "APCA-API-SECRET-KEY": creds.secret } : {}),
           accept: "application/json",
           ...(init.body ? { "content-type": "application/json" } : {}),
         },
@@ -195,11 +195,13 @@ export class AlpacaMarketData implements MarketDataApi {
     private readonly fetcher: Fetcher = (u, i) => fetch(u, i),
   ) {}
 
+  /** `symbols` = ["*"] reads the whole news stream (ADR-058: the scout's universe-wide intake). */
   async news(symbols: string[], sinceIso: string): Promise<NewsItem[]> {
     if (symbols.length === 0) return [];
+    const all = symbols.length === 1 && symbols[0] === "*";
     const url =
       `${DATA_BASE}/v1beta1/news?sort=asc&limit=50&include_content=false` +
-      `&start=${encodeURIComponent(sinceIso)}&symbols=${encodeURIComponent(symbols.join(","))}`;
+      `&start=${encodeURIComponent(sinceIso)}${all ? "" : `&symbols=${encodeURIComponent(symbols.join(","))}`}`;
     const body = await call(this.fetcher, this.guard, this.creds, url, z.object({ news: z.array(NewsRow) }));
     return body.news.map((n) => ({
       id: String(n.id),
@@ -262,6 +264,15 @@ export class AlpacaMarketData implements MarketDataApi {
       `${DATA_BASE}/v1beta3/crypto/us/bars?timeframe=1Day&limit=1000&sort=asc` +
         `&start=${encodeURIComponent(start)}&symbols=${encodeURIComponent(symbols.join(","))}`,
     );
+  }
+
+  async hourlyBars(symbol: string, sinceMs: number): Promise<Bar[]> {
+    const start = encodeURIComponent(new Date(sinceMs).toISOString());
+    const sym = encodeURIComponent(symbol);
+    const url = symbol.includes("/")
+      ? `${DATA_BASE}/v1beta3/crypto/us/bars?timeframe=1Hour&limit=200&sort=asc&start=${start}&symbols=${sym}`
+      : `${DATA_BASE}/v2/stocks/bars?timeframe=1Hour&feed=iex&adjustment=split&limit=200&sort=asc&start=${start}&symbols=${sym}`;
+    return (await this.pagedBars(url))[symbol] ?? [];
   }
 
   /**

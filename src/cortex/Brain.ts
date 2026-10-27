@@ -61,7 +61,6 @@ import {
   evidenceForModels,
   KRONOS_ABOUT,
   researchView,
-  resolveTradeable,
 } from "../court/evidence.ts";
 import type { HopAttempt, LlmRouter } from "../court/llm.ts";
 import {
@@ -80,7 +79,9 @@ import {
   REBUTTAL_SCHEMA,
   REBUTTAL_SYSTEM,
 } from "../court/prompts.ts";
-import { COLORS, type DiscordMessage, type Notifier } from "../discord/notifier.ts";
+import { COLORS, type Notifier } from "../discord/notifier.ts";
+import { fetchFeed, type HubConfig, publishBatch } from "../hub/client.ts";
+import { PUBLIC_KINDS } from "../hub/protocol.ts";
 import { type D1Like, Journal } from "../journal/Journal.ts";
 import {
   type AccountId,
@@ -93,11 +94,27 @@ import {
 import { dec, defaultTick, roundPrice, toCents } from "../lib/num.ts";
 import { sha256Hex } from "../lib/sha256.ts";
 import { weekdayMsBetween } from "../lib/time.ts";
+import { type BookLine, type BookSummary, beta, summarizeBook, worstWindow } from "../portfolio/book.ts";
+import {
+  buildReview,
+  type ExitState,
+  excursions,
+  holdOrHarvest,
+  interpretReview,
+  REVIEW_PROMPT_VERSION,
+  ratchetStop,
+  rMultiple,
+  stagnant,
+  tightenedStop,
+  tripwires,
+} from "../portfolio/exits.ts";
+import { lateness } from "../portfolio/lateness.ts";
 import { type Band, evaluateBreaker, withHysteresis } from "../risk/CircuitBreakerLadder.ts";
 import { correlation, correlationVeto } from "../risk/correlation.ts";
 import { type Arena, modeledPaperCostCents, roundTripFeeRate } from "../risk/fees.ts";
 import { type AccountView, type AssetView, validateEntry } from "../risk/PreTradeValidator.ts";
 import { effectiveRung, type RungName } from "../risk/rungs.ts";
+import { coinbaseProduct, depegBps, haltedSymbols, venueGapPct } from "../risk/sanity.ts";
 import { type Facts, type ScarTissue, scarLessons, scarVetoes } from "../risk/scar.ts";
 import {
   BOUNCE_ID,
@@ -124,7 +141,7 @@ import {
   baselineSignal,
   regimeProxyRiskOn,
 } from "../strategy/CryptoBreakoutBaseline.ts";
-import { atr, type Bar } from "../strategy/indicators.ts";
+import { atr, type Bar, ema, rsi } from "../strategy/indicators.ts";
 import {
   KRONOS_ID,
   type KronosForecast,
@@ -132,8 +149,43 @@ import {
   kronosParams,
   kronosSignal,
 } from "../strategy/KronosForecast.ts";
+import { prefilter } from "../universe/prefilter.ts";
+import { normalizeSymbol, screenAsset } from "../universe/screen.ts";
+import { Universe } from "../universe/Universe.ts";
+import {
+  addBusinessDays,
+  benchmarkLines,
+  bookCard,
+  type CourtSession,
+  contractCard,
+  courtSessionCard,
+  dossierCard,
+  errText,
+  hudMessage,
+  intelCard,
+  postureCard,
+  reviewCard,
+  terminalLine,
+} from "./cards.ts";
 import { dueJobs, type WorkflowDispatcher } from "./dispatch.ts";
 import { getKV, one, type SqlLike, type SqlValue, setKV } from "./store.ts";
+
+// the cards used to live here; existing importers keep working
+export {
+  addBusinessDays,
+  benchmarkLines,
+  bookCard,
+  type CourtSession,
+  contractCard,
+  courtSessionCard,
+  dossierCard,
+  equityChartUrl,
+  hudMessage,
+  intelCard,
+  postureCard,
+  reviewCard,
+  terminalLine,
+} from "./cards.ts";
 
 export const ACCOUNTS: AccountId[] = ["PAPER", "LIVE"];
 /** Triage queue cap (news + future screener candidates) — keeps DO storage and row writes bounded. */
@@ -189,6 +241,22 @@ type PositionRow = {
   broker_stop_coid: string | null;
   state: "OPEN" | "EXITING";
   exit_reason: string | null;
+};
+
+type WatchRow = {
+  account: AccountId;
+  symbol: string;
+  contract_id: string;
+  initial_stop: number;
+  mfe: number;
+  mae: number;
+  trailing: number;
+  regime_open_at_entry: number | null;
+  extended_until: number | null;
+  last_review_at: number | null;
+  reviews: number;
+  last_tripwires: string | null;
+  pending_headline: string | null;
 };
 
 type OrderRow = {
@@ -275,6 +343,10 @@ export interface BrainDeps {
   dispatcher?: WorkflowDispatcher | null;
   /** Operator-merged scar tissue (config/scar-tissue.yaml). Hard filters veto entries; context rules are lessons. */
   scar?: ScarTissue | null;
+  /** ADR-067: plain HTTP for the public sanity sources (Coinbase ticker, Nasdaq halts). Null skips those checks. */
+  http?: ((url: string, init?: RequestInit) => Promise<Response>) | null;
+  /** ADR-068: community hub (publish a signed track record, follow other agents). Null = off. */
+  hub?: HubConfig | null;
 }
 
 export interface PulseReport {
@@ -298,10 +370,17 @@ export interface StatusView {
   now: number;
   lastPulseAt: number | null;
   budget: ReturnType<FreeTierBudget["snapshot"]>;
+  /** ADR-075: today's AI model calls per provider against its daily cap (what local mode's gauge shows) */
+  modelUse: {
+    worst: { provider: string; fraction: number };
+    providers: { provider: string; calls: number; cap: number | null }[];
+  };
   journalHead: { seq: number; sha: string };
   outboxPending: number;
   /** Hourly equity samples (last 7 days) per account: [epoch ms, USD]. */
   equity: Partial<Record<AccountId, number[][]>>;
+  /** MLP0-024: buy-and-hold BTC / SPY with the same starting equity, per account. */
+  benchmark?: Partial<Record<AccountId, { btc: number[][]; spy: number[][] }>>;
   regimes: {
     arena: string;
     posture: string;
@@ -347,6 +426,8 @@ export interface StatusView {
 export class Brain {
   readonly journal: Journal;
   readonly budget: FreeTierBudget;
+  /** ADR-058: dynamic universe (scout-ported and research-watched symbols beyond the doctrine watchlists) */
+  readonly universe: Universe;
   /** Most recent risk-engine rejection reasons per contract (for the courtroom card). */
   private readonly lastRejections = new Map<string, string[]>();
   /** Notable journal events waiting for the #agent-terminal stream (posted once per pulse). */
@@ -361,12 +442,33 @@ export class Brain {
     this.c = deps.c;
     this.journal = new Journal(deps.sql);
     this.journal.onAppend = (r) => {
+      try {
+        this.noteWhy(r);
+        if (deps.hub?.publish && PUBLIC_KINDS.has(r.kind) && r.rowSha256 && r.prevRowSha256)
+          deps.sql.exec(
+            "INSERT OR IGNORE INTO hub_outbox (seq, row_json) VALUES (?, ?)",
+            r.seq,
+            JSON.stringify({
+              seq: r.seq,
+              ts: r.ts,
+              account: r.account,
+              kind: r.kind,
+              ref_id: r.refId,
+              payload_json: r.payloadJson,
+              prev_row_sha256: r.prevRowSha256,
+              row_sha256: r.rowSha256,
+            }),
+          );
+      } catch {
+        /* never break an append */
+      }
       const line = terminalLine(r);
       if (!line) return;
       this.termBuffer.push(line);
       if (this.termBuffer.length > 40) this.termBuffer.shift();
     };
     this.budget = new FreeTierBudget(deps.sql, deps.d);
+    this.universe = new Universe(deps.sql, deps.d, deps.c);
     // Audit W2-06: court providers respect per-provider daily call caps (free-tier RPD with margin).
     if (deps.llm) {
       const key = (p: string) => `llm_calls:${p}:${utcDay(deps.now())}`;
@@ -376,8 +478,113 @@ export class Brain {
           return cap === undefined || Number(getKV(deps.sql, key(p)) ?? 0) < cap;
         },
         used: (p) => setKV(deps.sql, key(p), String(Number(getKV(deps.sql, key(p)) ?? 0) + 1), deps.now()),
+        // ADR-075: per-provider tokens per UTC day, for the paid-model cost meter and its daily spend cap
+        tokens: (p, input, output) => {
+          const k = `llm_tokens:${p}:${utcDay(deps.now())}`;
+          const [i, o] = (getKV(deps.sql, k) ?? "0,0").split(",").map(Number);
+          setKV(deps.sql, k, `${(i || 0) + input},${(o || 0) + output}`, deps.now());
+        },
+        tokensToday: (p) => {
+          const [i, o] = (getKV(deps.sql, `llm_tokens:${p}:${utcDay(deps.now())}`) ?? "0,0")
+            .split(",")
+            .map(Number);
+          return { input: i || 0, output: o || 0 };
+        },
       };
     }
+  }
+
+  // ------------------------------------------------------------------ /why memory (MLP0-011)
+
+  /** Per-symbol decision trail for `/why`, captured from the journal itself (no model, nothing invented). */
+  private noteWhy(r: { ts: number; account: string; kind: string; payloadJson: string }): void {
+    if (!WHY_KINDS.has(r.kind)) return;
+    const p = JSON.parse(r.payloadJson) as Record<string, unknown>;
+    const facts = (p.facts ?? {}) as Record<string, unknown>;
+    const symbol = String(p.symbol ?? facts.symbol ?? p.out ?? "");
+    if (!symbol) return;
+    const reasons = Array.isArray(p.reasons) ? (p.reasons as unknown[]).join("; ") : "";
+    const detail = [
+      p.stage,
+      p.reason,
+      p.action,
+      p.why,
+      reasons,
+      p.strategy,
+      p.from !== undefined ? `${p.from}→${p.to}` : null,
+      p.in ? `for ${p.in}` : null,
+      typeof p.pnl_cents === "number" ? `P&L $${(p.pnl_cents / 100).toFixed(2)}` : null,
+      typeof p.win_cal === "number" ? `win ${Math.round(p.win_cal * 100)}%` : null,
+    ]
+      .filter((x) => x !== null && x !== undefined && x !== "")
+      .map(String)
+      .join(" · ")
+      .slice(0, 220);
+    const key = `why:${symbol}`;
+    let list: { at: number; acct: string; kind: string; detail: string }[] = [];
+    try {
+      list = JSON.parse(getKV(this.sql, key) ?? "[]");
+    } catch {
+      list = [];
+    }
+    list.push({ at: r.ts, acct: r.account, kind: r.kind, detail });
+    setKV(this.sql, key, JSON.stringify(list.slice(-8)), r.ts);
+  }
+
+  /** `/why SYMBOL`: what the system did about a symbol and why, straight from the hot state and the journal trail. */
+  why(symbolInput: string): string {
+    const now = this.deps.now();
+    const sym =
+      this.universe.resolve([symbolInput], now)?.symbol ??
+      normalizeSymbol(symbolInput)?.symbol ??
+      symbolInput.toUpperCase();
+    const lines: string[] = [`**${sym}**`];
+    for (const a of ACCOUNTS) {
+      const pos = this.positions(a).find((x) => x.symbol === sym);
+      if (!pos) continue;
+      const k = this.contract(pos.contract_id);
+      const w = one<WatchRow>(
+        this.sql,
+        "SELECT * FROM position_watch WHERE account = ? AND symbol = ?",
+        a,
+        sym,
+      );
+      const st = w ? this.exitState(pos, w) : null;
+      lines.push(
+        `📌 ${a} holds it: entry ${pos.avg_entry}, stop ${pos.stop_price}${st ? ` (initial ${st.initialStop})` : ""}, target ${pos.target_price}, opened ${new Date(pos.opened_at).toISOString().slice(0, 16)}Z${w?.trailing ? ", trailing past target" : ""}${w?.reviews ? `, ${w.reviews} review(s)` : ""}`,
+      );
+      if (k)
+        lines.push(
+          `   why bought: ${k.thesis_summary} (${k.strategy_id}, win used ${Math.round(k.win_prob_used * 100)}%)`,
+        );
+    }
+    const resting = this.sql.exec<{ account: string; until_at: number; why: string }>(
+      "SELECT account, until_at, why FROM resting WHERE symbol = ?",
+      sym,
+    );
+    for (const r of resting)
+      lines.push(
+        `⏳ ${r.account} resting until ${new Date(r.until_at).toISOString().slice(5, 16)}Z (${r.why})`,
+      );
+    const u = this.universe.row(sym);
+    if (u && u.expires_at > now)
+      lines.push(`🌐 universe: ${u.status} via ${u.source} (${u.reason.slice(0, 120)})`);
+    let trail: { at: number; acct: string; kind: string; detail: string }[] = [];
+    try {
+      trail = JSON.parse(getKV(this.sql, `why:${sym}`) ?? "[]");
+    } catch {
+      trail = [];
+    }
+    if (trail.length) {
+      lines.push("Recent decisions:");
+      for (const t of trail.slice(-8))
+        lines.push(
+          `• ${new Date(t.at).toISOString().slice(5, 16)}Z ${t.kind}${t.acct === "SYSTEM" ? "" : ` ${t.acct}`}: ${t.detail}`,
+        );
+    }
+    if (lines.length === 1)
+      lines.push("Nothing on record in the last two weeks: no position, no contract, no refusal.");
+    return lines.join("\n").slice(0, 1900);
   }
 
   // ------------------------------------------------------------------ setup
@@ -462,6 +669,8 @@ export class Brain {
       if (!broker) continue;
       try {
         await this.syncAccount(account, broker);
+        if (getKV(this.sql, `sync_fail_streak:${account}`) !== "0")
+          setKV(this.sql, `sync_fail_streak:${account}`, "0", started);
         const row = this.account(account);
         report.accounts[account] = {
           ok: true,
@@ -472,7 +681,14 @@ export class Brain {
         const msg = errText(e);
         this.sql.exec("UPDATE accounts SET last_error = ? WHERE account = ?", msg.slice(0, 500), account);
         report.accounts[account] = { ok: false, error: msg };
-        await this.alertOnce(`sync:${account}`, `⚠️ ${account} broker sync failed: ${msg.slice(0, 300)}`);
+        // Chaos test 2026-10-26: one 503 is routine (reads already retry); alert from the third failed pulse in a row
+        const streak = Number(getKV(this.sql, `sync_fail_streak:${account}`) ?? 0) + 1;
+        setKV(this.sql, `sync_fail_streak:${account}`, String(streak), started);
+        if (streak >= 3)
+          await this.alertOnce(
+            `sync:${account}`,
+            `⚠️ ${account} broker sync failed ${streak} pulses in a row: ${msg.slice(0, 300)}`,
+          );
       }
     }
 
@@ -529,6 +745,16 @@ export class Brain {
       }
     }
 
+    // 2d'. ADR-059: re-underwrite open positions that hit a tripwire; daily surveillance dossiers. Never blocks trading.
+    try {
+      await this.reviewPositions(started);
+      await this.dispatchWatches(started);
+    } catch (e) {
+      if (!(e instanceof SubrequestBudgetExceeded)) {
+        await this.alertOnce("reviews", `⚠️ position review failed: ${errText(e).slice(0, 200)}`);
+      }
+    }
+
     // 2e. Court (Tier 3): one sprint per pulse, only when new entries are possible at all.
     if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
       try {
@@ -544,6 +770,7 @@ export class Brain {
     if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
       try {
         for (const run of [
+          () => this.runResting(),
           () => this.runBaseline(quotes),
           () => this.runBounce(quotes),
           () => this.runInverse(),
@@ -565,10 +792,12 @@ export class Brain {
 
     await this.checkBatchStaleness(started).catch(() => undefined);
     await this.dispatchDue(started).catch(() => undefined);
+    await this.bookReview().catch(() => undefined);
+    await this.hubSync(started).catch(() => undefined);
     await this.checkDispatchReceipts(started).catch(() => undefined);
 
     // 4. Persist, report, schedule.
-    this.sampleEquity(started);
+    await this.sampleEquity(started).catch(() => undefined);
     report.flushed = await this.flushJournal();
     await this.updateHud().catch(() => undefined);
     await this.flushTerminal().catch(() => undefined);
@@ -773,7 +1002,8 @@ export class Brain {
     this.sql.exec(
       `DELETE FROM settings WHERE updated_at < ? AND (
          key LIKE 'count:%' OR key LIKE 'alert:%' OR key LIKE 'court_seen:%' OR key LIKE 'spreads:%'
-         OR key LIKE 't1_fail:%' OR key LIKE 'dispatch_stale:%' OR key LIKE 'ratify_request:%'
+         OR key LIKE 't1_fail:%' OR key LIKE 'dispatch_stale:%' OR key LIKE 'ratify_request:%' OR key LIKE 'why:%'
+         OR key LIKE 'watch_dispatched:%' OR key LIKE 'venue:%' OR key LIKE 'review_failed:%'
          OR key GLOB '*:20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' OR key GLOB '*:month:20[0-9][0-9]-[0-9][0-9]')`,
       now - 14 * day,
     );
@@ -792,6 +1022,7 @@ export class Brain {
     this.sql.exec("DELETE FROM dossiers WHERE received_at < ?", now - 7 * day);
     this.sql.exec("DELETE FROM court_waits WHERE until_at < ?", now - day);
     this.sql.exec("DELETE FROM settings WHERE key LIKE 'research_pending:%' AND updated_at < ?", now - day);
+    this.universe.compact(now);
   }
 
   // ------------------------------------------------------------------ broker sync / reconcile
@@ -1287,6 +1518,37 @@ export class Brain {
     now: number,
     pnlCents: number | null = null,
   ): void {
+    // ADR-059: what the position could have made and how deep it went, in R (the Governor grades exits from these)
+    const w = one<WatchRow>(
+      this.sql,
+      "SELECT * FROM position_watch WHERE account = ? AND symbol = ? AND contract_id = ?",
+      account,
+      pos.symbol,
+      pos.contract_id,
+    );
+    if (w) {
+      const s = { entry: Number(pos.avg_entry), initialStop: w.initial_stop };
+      this.journal.append(
+        account,
+        "EXCURSIONS",
+        pos.contract_id,
+        {
+          symbol: pos.symbol,
+          mfe: w.mfe,
+          mae: w.mae,
+          mfe_r: Math.round(rMultiple(s, w.mfe) * 100) / 100,
+          mae_r: Math.round(rMultiple(s, w.mae) * 100) / 100,
+          initial_stop: w.initial_stop,
+          final_stop: Number(pos.stop_price),
+          trailed: w.trailing === 1,
+          reviews: w.reviews,
+          held_hours: Math.round(((now - pos.opened_at) / 3_600_000) * 10) / 10,
+          reason,
+        },
+        now,
+      );
+    }
+    this.sql.exec("DELETE FROM position_watch WHERE account = ? AND symbol = ?", account, pos.symbol);
     this.sql.exec("DELETE FROM positions WHERE account = ? AND symbol = ?", account, pos.symbol);
     this.sql.exec(
       "INSERT INTO exits (account, symbol, contract_id, reason, pnl_cents, at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -1326,16 +1588,529 @@ export class Brain {
     let exits = 0;
     for (const pos of this.positions(account)) {
       const q = quotes[pos.symbol];
+      const w = this.watchRow(account, pos, now);
+      const fresh = q && now - q.at <= this.d.staleness.quote_seconds * 1000;
       let reason: string | null = pos.state === "EXITING" ? (pos.exit_reason ?? "EXIT") : null;
-      if (!reason && q && now - q.at <= this.d.staleness.quote_seconds * 1000) {
-        if (q.bid <= Number(pos.stop_price)) reason = "STOP_SYNTHETIC";
-        else if (q.bid >= Number(pos.target_price)) reason = "TARGET";
+      if (fresh && w) {
+        const ex = excursions(w, q.bid);
+        if (ex.mfe !== w.mfe || ex.mae !== w.mae) {
+          this.sql.exec(
+            "UPDATE position_watch SET mfe = ?, mae = ? WHERE account = ? AND symbol = ?",
+            ex.mfe,
+            ex.mae,
+            account,
+            pos.symbol,
+          );
+          w.mfe = ex.mfe;
+          w.mae = ex.mae;
+        }
       }
-      if (!reason && now >= pos.max_hold_until) reason = "TIME_STOP";
+      if (!reason && fresh) {
+        if (q.bid <= Number(pos.stop_price)) reason = "STOP_SYNTHETIC";
+        else if (q.bid >= Number(pos.target_price) && !(w?.trailing === 1)) {
+          // ADR-059 hold-or-harvest: momentum intact → the target becomes a trailing stop instead of a sale
+          const h = w
+            ? await this.harvestCheck(pos, now)
+            : { action: "HARVEST" as const, why: "no exit state" };
+          if (h.action === "TRAIL" && w) {
+            const extra = this.d.exits.harvest.max_extra_hours * 3_600_000;
+            this.sql.exec(
+              "UPDATE position_watch SET trailing = 1, extended_until = ? WHERE account = ? AND symbol = ?",
+              pos.max_hold_until + extra,
+              account,
+              pos.symbol,
+            );
+            w.trailing = 1;
+            w.extended_until = pos.max_hold_until + extra;
+            this.journal.append(
+              account,
+              "HARVEST_TRAIL",
+              pos.contract_id,
+              { symbol: pos.symbol, bid: q.bid, target: pos.target_price, why: h.why },
+              now,
+            );
+          } else reason = "TARGET";
+        }
+      }
+      if (!reason && pos.state === "OPEN" && this.d.exits.earnings_derisk && pos.arena === "EQUITIES") {
+        const horizon = utcDay(now + this.d.execution.earnings_blackout_hours * 3_600_000);
+        const e = one<{ date: string }>(
+          this.sql,
+          "SELECT date FROM earnings WHERE symbol = ? AND date >= ? AND date <= ?",
+          pos.symbol,
+          utcDay(now),
+          horizon,
+        );
+        if (e) reason = "EARNINGS_DERISK";
+      }
+      const holdUntil = w?.trailing === 1 && w.extended_until ? w.extended_until : pos.max_hold_until;
+      if (!reason && now >= holdUntil) reason = "TIME_STOP";
+      if (!reason && fresh && w && pos.state === "OPEN") {
+        const st = this.exitState(pos, w);
+        const move = ratchetStop(st, q.bid, this.d.exits, !this.regimeGate(pos.arena, null, now).open);
+        if (move) await this.moveStop(account, broker, pos, move.stop, move.why, now);
+        continue;
+      }
       if (!reason) continue;
       if (await this.exitPosition(account, broker, pos, reason, q ?? null)) exits++;
     }
     return exits;
+  }
+
+  /** ADR-059 exit state for a position (initial stop from the watch row, ATR from its contract). */
+  private exitState(pos: PositionRow, w: WatchRow): ExitState {
+    const k = this.contract(pos.contract_id);
+    const entry = Number(pos.avg_entry);
+    return {
+      entry,
+      initialStop: w.initial_stop,
+      stop: Number(pos.stop_price),
+      target: Number(pos.target_price),
+      atr: k?.atr ?? Math.max(entry - w.initial_stop, entry * 0.01),
+      feeRt: pos.fee_rt,
+      openedAt: pos.opened_at,
+      maxHoldUntil: pos.max_hold_until,
+      mfe: w.mfe,
+      mae: w.mae,
+      trailing: w.trailing === 1,
+    };
+  }
+
+  /** The watch row for an open position, created on first sight (initial stop = the contract's stop). */
+  private watchRow(account: AccountId, pos: PositionRow, now: number): WatchRow | null {
+    if (!this.d.exits.enabled) return null;
+    const w = one<WatchRow>(
+      this.sql,
+      "SELECT * FROM position_watch WHERE account = ? AND symbol = ?",
+      account,
+      pos.symbol,
+    );
+    if (w && w.contract_id === pos.contract_id) return w;
+    const k = this.contract(pos.contract_id);
+    const initial = Number(k?.invalidation_criteria.stop_price ?? pos.stop_price);
+    const entry = Number(pos.avg_entry);
+    const open =
+      pos.arena === "CRYPTO" || pos.arena === "EQUITIES" ? this.regimeGate(pos.arena, null, now).open : null;
+    this.sql.exec(
+      `INSERT OR REPLACE INTO position_watch (account, symbol, contract_id, initial_stop, mfe, mae, trailing,
+         regime_open_at_entry, reviews) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0)`,
+      account,
+      pos.symbol,
+      pos.contract_id,
+      initial < entry ? initial : Number(pos.stop_price),
+      entry,
+      entry,
+      open === null ? null : open ? 1 : 0,
+    );
+    return one<WatchRow>(
+      this.sql,
+      "SELECT * FROM position_watch WHERE account = ? AND symbol = ?",
+      account,
+      pos.symbol,
+    );
+  }
+
+  /**
+   * Move the stop up (never down): synthetic stop now, broker stop replaced on the next ensureProtectiveStops
+   * (the old one is cancelled first; in between the synthetic stop protects every pulse, as before ADR-059).
+   */
+  private async moveStop(
+    account: AccountId,
+    broker: BrokerApi,
+    pos: PositionRow,
+    stop: number,
+    why: string,
+    now: number,
+  ): Promise<void> {
+    const old = Number(pos.stop_price);
+    const tick = defaultTick(stop, pos.arena);
+    const rounded = Number(roundPrice(stop, tick, "down"));
+    if (!(rounded > old)) return;
+    this.sql.exec(
+      "UPDATE positions SET stop_price = ? WHERE account = ? AND symbol = ?",
+      String(rounded),
+      account,
+      pos.symbol,
+    );
+    if (pos.broker_stop_coid) {
+      const live = one<OrderRow>(
+        this.sql,
+        `SELECT * FROM orders WHERE client_order_id = ? AND state IN (${OPEN_SQL})`,
+        pos.broker_stop_coid,
+      );
+      // Review finding: replacing the broker stop on every small trail step churns orders, and Alpaca refuses the new
+      // sell while the old one is still cancelling. Small steps move only the synthetic stop (checked every pulse);
+      // the broker stop follows in steps of ≥ 0.25 ATR, at breakeven, and when a review tightens.
+      const atrNow = this.contract(pos.contract_id)?.atr ?? 0;
+      const brokerStop = Number(live?.stop_price ?? 0);
+      const bigStep = !live || rounded - brokerStop >= 0.25 * atrNow || why !== "TRAIL";
+      if (!bigStep) {
+        this.journal.append(
+          account,
+          "STOP_MOVE",
+          pos.contract_id,
+          { symbol: pos.symbol, from: old, to: rounded, why, broker: "kept" },
+          now,
+        );
+        return;
+      }
+      if (live?.broker_order_id) {
+        await broker.cancelOrder(live.broker_order_id).catch(() => undefined);
+        this.sql.exec(
+          "UPDATE orders SET state = 'pending_cancel', updated_at = ? WHERE client_order_id = ?",
+          now,
+          live.client_order_id,
+        );
+      }
+      this.sql.exec(
+        "UPDATE positions SET broker_stop_coid = NULL WHERE account = ? AND symbol = ?",
+        account,
+        pos.symbol,
+      );
+    }
+    this.journal.append(
+      account,
+      "STOP_MOVE",
+      pos.contract_id,
+      { symbol: pos.symbol, from: old, to: rounded, why },
+      now,
+    );
+  }
+
+  /** Momentum checks for hold-or-harvest: regime, close vs EMA20 and RSI14 on daily bars, Kronos lean. */
+  private async harvestCheck(
+    pos: PositionRow,
+    now: number,
+  ): Promise<{ action: "HARVEST" | "TRAIL"; why: string }> {
+    const cfg = this.d.exits;
+    if (!cfg.enabled || !cfg.harvest.enabled) return { action: "HARVEST", why: "harvest mode off" };
+    const m = this.deps.market;
+    const bars = m
+      ? await (pos.arena === "CRYPTO"
+          ? m.cryptoDailyBars([pos.symbol], 40, now)
+          : m.stockDailyBars([pos.symbol], 40, now)
+        )
+          .then((b) => b[pos.symbol])
+          .catch(() => undefined)
+      : undefined;
+    const closes = bars?.map((b) => b.c) ?? [];
+    const e20 = closes.length >= 20 ? ema(closes, 20) : null;
+    const last = closes.at(-1);
+    const k = this.kronosFor(pos.symbol, now);
+    return holdOrHarvest(cfg, {
+      regimeOpen: this.regimeGate(pos.arena, null, now).open,
+      aboveEma20: e20 !== null && last !== undefined ? last > e20 : null,
+      rsi14: closes.length >= 15 ? rsi(closes, 14) : null,
+      kronosPUp: k ? k.p_up : null,
+    });
+  }
+
+  /**
+   * ADR-060 resting convictions: when the only things stopping a court contract are timing (price ran past the zone)
+   * or a full book (max positions), it waits instead of being thrown away, up to `max_hours` and half its horizon.
+   * Every gate runs again when it fires. With a full book, a stagnant position may be released for it (rotation).
+   * Returns a short status, or null when the contract can't rest.
+   */
+  private async maybeRest(
+    account: AccountId,
+    contract: DecisionContract,
+    reasons: string[],
+    now: number,
+  ): Promise<string | null> {
+    const cfg = this.d.entry_timing.resting;
+    if (!cfg.enabled || contract.origin !== "COURT") return null;
+    const restable = (r: string) =>
+      r === "price ran past the entry zone" || /^max positions \(\d+\) reached$/.test(r);
+    if (!reasons.every(restable)) return null;
+    const until = Math.min(
+      now + cfg.max_hours * 3_600_000,
+      now + (contract.invalidation_criteria.max_hold_hours * 3_600_000) / 2,
+    );
+    this.sql.exec(
+      `INSERT OR REPLACE INTO resting (contract_id, account, symbol, until_at, created_at, checks, why)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
+      contract.contract_id,
+      account,
+      contract.symbol,
+      until,
+      now,
+      reasons.join("; ").slice(0, 200),
+    );
+    let rotated: string | null = null;
+    if (reasons.some((r) => r.startsWith("max positions")))
+      rotated = await this.rotateFor(account, contract, now);
+    this.journal.append(
+      account,
+      "RESTING",
+      contract.contract_id,
+      { symbol: contract.symbol, until, why: reasons, rotated },
+      now,
+    );
+    return `${reasons[0]}; waits until ${new Date(until).toISOString().slice(5, 16)}Z${rotated ? `, releasing stagnant ${rotated}` : ""}`;
+  }
+
+  /** Rotation (MLP4-004): release the most stagnant position for a stronger waiting court contract. */
+  private async rotateFor(
+    account: AccountId,
+    contract: DecisionContract,
+    now: number,
+  ): Promise<string | null> {
+    const cfg = this.d.exits;
+    const broker = this.deps.brokers[account];
+    if (!cfg.enabled || !cfg.rotation.enabled || !broker) return null;
+    if (contract.win_prob_used < cfg.rotation.min_candidate_win) return null;
+    const positions = this.positions(account).filter((p) => p.state === "OPEN");
+    const quotes = await this.quotesFor(positions.map((p) => p.symbol)).catch(
+      () => ({}) as Record<string, Quote>,
+    );
+    let pick: { pos: PositionRow; r: number; q: Quote } | null = null;
+    for (const pos of positions) {
+      const q = quotes[pos.symbol];
+      const w = this.watchRow(account, pos, now);
+      if (!q || !w) continue;
+      const s = this.exitState(pos, w);
+      if (!stagnant(s, q.bid, now, cfg)) continue;
+      const r = rMultiple(s, q.bid);
+      if (!pick || r < pick.r) pick = { pos, r, q };
+    }
+    if (!pick) return null;
+    const qty = Number(pick.pos.qty);
+    const freed = {
+      notionalUsd: qty * pick.q.bid,
+      riskUsd: Math.max(0, qty * (Number(pick.pos.avg_entry) - Number(pick.pos.stop_price))),
+    };
+    if (!(await this.wouldEnterAfterFreeing(account, contract, freed, now))) return null;
+    this.journal.append(
+      account,
+      "ROTATE",
+      pick.pos.contract_id,
+      {
+        out: pick.pos.symbol,
+        r: Math.round(pick.r * 100) / 100,
+        in: contract.symbol,
+        in_win: contract.win_prob_used,
+      },
+      now,
+    );
+    await this.exitPosition(account, broker, pick.pos, "ROTATE", pick.q);
+    return pick.pos.symbol;
+  }
+
+  /** Each pulse: resting contracts whose zone came back (and a slot is free) go through every gate again. */
+  private async runResting(): Promise<{ contracts: number; entries: number }> {
+    const now = this.deps.now();
+    if (!this.d.entry_timing.resting.enabled) return { contracts: 0, entries: 0 };
+    this.sql.exec("DELETE FROM resting WHERE until_at < ?", now);
+    const rows = this.sql.exec<{ contract_id: string; account: AccountId; symbol: string }>(
+      "SELECT contract_id, account, symbol FROM resting ORDER BY created_at LIMIT 6",
+    );
+    let entries = 0;
+    for (const row of rows) {
+      const k = this.contract(row.contract_id);
+      const view = this.accountView(row.account, now);
+      if (!k || !view) {
+        this.sql.exec(
+          "DELETE FROM resting WHERE contract_id = ? AND account = ?",
+          row.contract_id,
+          row.account,
+        );
+        continue;
+      }
+      if (view.heldOrPendingSymbols.includes(row.symbol)) continue;
+      const rung = this.d.rungs[view.rung];
+      if (view.openSlots >= rung.max_positions) continue; // still full: keep waiting quietly
+      const q = (await this.quotesFor([row.symbol]).catch(() => ({}) as Record<string, Quote>))[row.symbol];
+      if (!q) continue;
+      const low = Number(k.entry_plan.zone_low);
+      const high = Number(k.entry_plan.zone_high);
+      this.sql.exec(
+        "UPDATE resting SET checks = checks + 1 WHERE contract_id = ? AND account = ?",
+        row.contract_id,
+        row.account,
+      );
+      if (q.bid > high || q.bid < low) continue; // not in the zone yet: no rejection spam
+      this.lastRejections.delete(k.contract_id);
+      const ok = await this.route(row.account, k, { [row.symbol]: q });
+      const why = this.lastRejections.get(k.contract_id) ?? [];
+      if (ok || !why.every((r) => r === "price ran past the entry zone" || r.startsWith("max positions"))) {
+        this.sql.exec(
+          "DELETE FROM resting WHERE contract_id = ? AND account = ?",
+          row.contract_id,
+          row.account,
+        );
+        this.journal.append(
+          row.account,
+          ok ? "RESTING_FILLED" : "RESTING_DROPPED",
+          k.contract_id,
+          { symbol: row.symbol, why: ok ? "zone came back" : why.slice(0, 3) },
+          now,
+        );
+      }
+      if (ok) entries++;
+    }
+    return { contracts: 0, entries };
+  }
+
+  /**
+   * ADR-059 re-underwriting: positions with a new tripwire (regime flip, Kronos p10 breach, funding stress, a watch
+   * dossier saying the thesis broke, or a material headline) get one Clef review: HOLD / TIGHTEN / EXIT. Models pick
+   * the class only; code moves the stop or starts the exit. Never blocks trading; budgeted from the Tier 2 pool.
+   */
+  private async reviewPositions(now: number): Promise<number> {
+    const cfg = this.d.exits;
+    const clef = this.deps.clef;
+    if (!cfg.enabled || !cfg.review.enabled || !clef) return 0;
+    let done = 0;
+    const seen = new Set<string>();
+    for (const account of ACCOUNTS) {
+      const broker = this.deps.brokers[account];
+      if (!broker) continue;
+      for (const pos of this.positions(account)) {
+        if (pos.state !== "OPEN" || seen.has(pos.symbol)) continue;
+        const w = this.watchRow(account, pos, now);
+        if (!w) continue;
+        const q = (await this.quotesFor([pos.symbol]).catch(() => ({}) as Record<string, Quote>))[pos.symbol];
+        if (!q || now - q.at > this.d.staleness.quote_seconds * 1000) continue;
+        const dz = this.dossierFor(pos.symbol, now);
+        const k = this.kronosFor(pos.symbol, now);
+        const wires = tripwires({
+          arena: pos.arena,
+          regimeOpenNow: pos.arena === "OPTIONS" ? null : this.regimeGate(pos.arena, null, now).open,
+          regimeOpenAtEntry: w.regime_open_at_entry === null ? null : w.regime_open_at_entry === 1,
+          kronos: k?.fan
+            ? { p10: k.fan.p10, produced_at: k.produced_at, candle_hours: k.candle_hours ?? 4 }
+            : null,
+          fundingMultiplier: this.fundingMultiplier(pos.symbol, now),
+          thesis: dz?.stage === "watch" && dz.as_of > pos.opened_at ? (dz.thesis?.status ?? null) : null,
+          materialHeadline: w.pending_headline,
+          bid: q.bid,
+          now,
+        });
+        const key = JSON.stringify(wires);
+        const cooled = !w.last_review_at || now - w.last_review_at >= cfg.review.cooldown_minutes * 60_000;
+        const urgent = wires.some((x) => x.startsWith("headline:") || x.endsWith("thesis BROKEN"));
+        // a review needs something new; within the cooldown only a headline or a broken thesis counts
+        if (wires.length === 0 || key === w.last_tripwires || (!cooled && !urgent)) continue;
+        if (this.daily("reviews", now) >= cfg.review.max_per_day) return done;
+        // a review that failed (Clef down) is retried after 15 min with the same tripwires, not forgotten
+        if (now - Number(getKV(this.sql, `review_failed:${pos.symbol}`) ?? 0) < 15 * 60_000) continue;
+        const contract = this.contract(pos.contract_id);
+        const st = this.exitState(pos, w);
+        const req = buildReview({
+          symbol: pos.symbol,
+          arena: pos.arena,
+          thesis: contract?.thesis_summary ?? "(rule strategy)",
+          killCriteria: contract?.kill_criteria ?? [],
+          entry: st.entry,
+          stop: st.stop,
+          target: st.target,
+          bid: q.bid,
+          r: rMultiple(st, q.bid),
+          heldHours: (now - pos.opened_at) / 3_600_000,
+          horizonHours: Math.round((pos.max_hold_until - pos.opened_at) / 3_600_000),
+          tripwires: wires,
+          regime: this.regimeContext(now),
+          research: dz ? { summary: dz.summary, thesis: dz.thesis ?? null } : null,
+          kronos: k
+            ? { p_up: k.p_up, exp_ret: k.exp_ret, age_minutes: Math.round((now - k.produced_at) / 60_000) }
+            : null,
+        });
+        const est = estimateTokens(req.state, req.questions);
+        if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) return done;
+        this.bumpDaily("reviews", now);
+        seen.add(pos.symbol);
+        let res: ClefResult;
+        try {
+          res = await clef.run("clef", req.state, req.questions);
+        } catch (e) {
+          setKV(this.sql, `review_failed:${pos.symbol}`, String(now), now);
+          this.journal.append(
+            "SYSTEM",
+            "REVIEW_FAILED",
+            pos.contract_id,
+            { symbol: pos.symbol, error: errText(e).slice(0, 160) },
+            now,
+          );
+          continue;
+        }
+        this.sql.exec(
+          `UPDATE position_watch SET last_review_at = ?, reviews = reviews + 1, last_tripwires = ?,
+             pending_headline = NULL WHERE symbol = ?`,
+          now,
+          key,
+          pos.symbol,
+        );
+        this.budget.add("neurons_tier2", neuronsFor("clef", res.usage.input_tokens ?? est, this.d), now);
+        const dec = interpretReview(res, cfg);
+        done++;
+        this.journal.append(
+          "SYSTEM",
+          "REVIEW",
+          pos.contract_id,
+          { symbol: pos.symbol, prompt: REVIEW_PROMPT_VERSION, tripwires: wires, ...dec },
+          now,
+        );
+        for (const a of ACCOUNTS) {
+          const b = this.deps.brokers[a];
+          const p = this.positions(a).find((x) => x.symbol === pos.symbol && x.state === "OPEN");
+          if (!b || !p) continue;
+          if (dec.action === "EXIT") await this.exitPosition(a, b, p, "REVIEW_EXIT", q);
+          if (dec.action === "TIGHTEN") {
+            const wa = this.watchRow(a, p, now);
+            const ns = wa ? tightenedStop(this.exitState(p, wa), q.bid) : null;
+            if (ns !== null) await this.moveStop(a, b, p, ns, "REVIEW_TIGHTEN", now);
+          }
+        }
+        await this.deps.notifier.post("court", reviewCard(pos.symbol, wires, dec, rMultiple(st, q.bid)));
+      }
+    }
+    return done;
+  }
+
+  /**
+   * ADR-059 / MLP3-003: a daily surveillance dossier per held position. The research desk checks the bear's kill
+   * criteria against fresh news; a WEAKENED/BROKEN thesis becomes a review tripwire.
+   */
+  private async dispatchWatches(now: number): Promise<void> {
+    const cfg = this.d.exits;
+    const dispatcher = this.deps.dispatcher;
+    if (!cfg.enabled || !cfg.watch_research.enabled || !dispatcher || !this.d.funnel.research.enabled) return;
+    const seen = new Set<string>();
+    for (const account of ACCOUNTS) {
+      for (const pos of this.positions(account)) {
+        if (pos.state !== "OPEN" || seen.has(pos.symbol) || pos.arena === "OPTIONS") continue;
+        seen.add(pos.symbol);
+        if (now - pos.opened_at < 2 * 3_600_000) continue; // the case dossier is still fresh
+        const key = `watch_dispatched:${pos.symbol}`;
+        if (now - Number(getKV(this.sql, key) ?? 0) < cfg.watch_research.every_hours * 3_600_000) continue;
+        if (this.daily("research", now) >= this.d.funnel.research.max_per_day) return;
+        const k = this.contract(pos.contract_id);
+        try {
+          await dispatcher.dispatch("research.yml", {
+            job: "dossier",
+            symbol: pos.symbol,
+            context:
+              `Held since ${new Date(pos.opened_at).toISOString().slice(0, 16)}Z. Thesis: ${k?.thesis_summary ?? "rule strategy entry"}`
+                .replace(/\s+/g, " ")
+                .slice(0, 280),
+            arena: pos.arena,
+            mode: "watch",
+            depth: "quick",
+            catalyst: "",
+            kill: (k?.kill_criteria ?? []).join(" | ").slice(0, 280),
+          });
+        } catch (e) {
+          await this.alertOnce(
+            "watch-dispatch",
+            `⚠️ watch research dispatch failed: ${errText(e).slice(0, 160)}`,
+          );
+          return;
+        }
+        this.bumpDaily("research", now);
+        setKV(this.sql, key, String(now), now);
+        this.journal.append("SYSTEM", "WATCH_REQUEST", pos.contract_id, { symbol: pos.symbol }, now);
+      }
+    }
   }
 
   /** Cancel the protective stop, then sell with a marketable limit inside a price collar. Retried each pulse. */
@@ -1428,6 +2203,13 @@ export class Brain {
         : null;
       if (live) continue;
       if (this.openOrders(account).some((o) => o.symbol === pos.symbol && o.role === "ENTRY")) continue; // wait for entry to finish
+      // a replaced stop is still cancelling: a second full-size sell would be refused (qty held for orders)
+      if (
+        this.openOrders(account).some(
+          (o) => o.symbol === pos.symbol && o.role === "STOP" && o.state === "pending_cancel",
+        )
+      )
+        continue;
       const crypto = pos.arena === "CRYPTO";
       if (!crypto && !(await broker.clock()).is_open) continue; // equity fractional stops: regular hours, TIF day
       const stop = Number(pos.stop_price);
@@ -1800,19 +2582,44 @@ ${postmortem}`,
     const r = DossierPayloadSchema.safeParse(b.items.find((x) => x.skill_id === "deep-research")?.payload);
     if (!r.success) return { ok: false, message: "dossier payload failed the schema" };
     const dz = r.data;
-    const target = resolveTradeable([dz.symbol], this.d);
+    const target = this.universe.resolve([dz.symbol], now);
     if (!target || target.symbol !== dz.symbol)
       return { ok: false, message: `${dz.symbol} is not tradeable` };
-    this.sql.exec(
-      "INSERT OR REPLACE INTO dossiers (symbol, as_of, json, received_at) VALUES (?, ?, ?, ?)",
-      dz.symbol,
-      Math.min(dz.as_of, now),
-      JSON.stringify(dz),
+    // ADR-058: symbols the research named as related are watched (their news always reaches Tier 1)
+    const watched = this.universe.watch(
+      dz.related.map((x) => x.symbol),
+      `related:${dz.symbol}`,
       now,
     );
-    // release the cases waiting for it: the next pulse's court hears them with the dossier attached
-    this.sql.exec("DELETE FROM court_waits WHERE symbol = ?", dz.symbol);
-    this.sql.exec("DELETE FROM settings WHERE key = ?", `research_pending:${dz.symbol}`);
+    // a late partial (fast ring) never replaces a complete dossier of the same run or newer
+    const have = one<{ json: string; as_of: number }>(
+      this.sql,
+      "SELECT json, as_of FROM dossiers WHERE symbol = ?",
+      dz.symbol,
+    );
+    const haveComplete = have ? (JSON.parse(have.json) as { complete?: boolean }).complete !== false : false;
+    if (!(dz.complete === false && have && haveComplete && have.as_of >= dz.as_of - 30 * 60_000))
+      this.sql.exec(
+        "INSERT OR REPLACE INTO dossiers (symbol, as_of, json, received_at) VALUES (?, ?, ?, ?)",
+        dz.symbol,
+        Math.min(dz.as_of, now),
+        JSON.stringify(dz),
+        now,
+      );
+    const cfg = this.d.funnel.research;
+    if (dz.complete) {
+      // release the cases waiting for it: the next pulse's court hears them with the full dossier attached
+      this.sql.exec("DELETE FROM court_waits WHERE symbol = ?", dz.symbol);
+      this.sql.exec("DELETE FROM settings WHERE key = ?", `research_pending:${dz.symbol}`);
+    } else {
+      // operator 2026-10-26: keep waiting for the deep dossier, but no longer than deep_wait_minutes after dispatch;
+      // then the court convenes on this fast one
+      this.sql.exec(
+        "UPDATE court_waits SET until_at = MIN(until_at, until_at - ?) WHERE symbol = ?",
+        Math.max(0, cfg.wait_minutes - cfg.deep_wait_minutes) * 60_000,
+        dz.symbol,
+      );
+    }
     this.journal.append(
       "SYSTEM",
       "DOSSIER",
@@ -1822,6 +2629,9 @@ ${postmortem}`,
         findings: dz.findings.length,
         read: dz.findings.filter((f) => f.verified).length,
         sources: dz.sources.length,
+        stage: dz.stage,
+        complete: dz.complete,
+        watched,
         ...dz.agent,
       },
       now,
@@ -2195,15 +3005,35 @@ ${postmortem}`,
     return [...s].map((x) => x.replace("/", "")).slice(0, 40);
   }
 
-  /** Pull new headlines into triage_queue (deduped, capped at TRIAGE_QUEUE_MAX). Returns how many were queued. */
+  /**
+   * Pull new headlines into triage_queue (deduped, capped at TRIAGE_QUEUE_MAX). Returns how many were queued.
+   * ADR-058: with `universe.news_scope: all` the whole Alpaca news stream comes in, and the zero-neuron prefilter
+   * keeps Tier 1 spend flat: core/held/watched symbols always pass, other headlines need catalyst words and a daily
+   * slot, and near-duplicates of the last 4 h are dropped.
+   */
   private async intakeNews(): Promise<number> {
     const m = this.deps.market;
     if (!m) return 0;
     const now = this.deps.now();
+    const u = this.d.universe;
+    const open = u.enabled && u.news_scope === "all";
     const cursor = one<{ value: string }>(this.sql, "SELECT value FROM cursors WHERE name = 'news'")?.value;
     const since = cursor ?? new Date(now - 3_600_000).toISOString();
-    const items = await m.news(this.newsSymbols(), since);
+    let items = await m.news(open ? ["*"] : this.newsSymbols(), since);
+    if (open && items.length >= 50) {
+      // a busy hour: one more page so the cursor keeps up with the wire
+      const next = new Date((items.at(-1)?.createdAt ?? now) + 1000).toISOString();
+      items = [...items, ...(await m.news(["*"], next))];
+    }
+    const priority = new Set<string>([
+      ...this.newsSymbols(),
+      ...this.universe.watched(now),
+      ...this.symbolsInPlay(),
+    ]);
+    for (const s of [...priority]) priority.add(s.replace("/", ""));
+    const recent = open ? this.universe.recentTokens(now) : [];
     let queued = 0;
+    let dropped = 0;
     let last = since;
     for (const n of items) {
       // Alpaca's `start` is inclusive: step 1 s past the newest item, and remember ids so a dropped item
@@ -2211,6 +3041,21 @@ ${postmortem}`,
       last = new Date(Math.max(Date.parse(last), n.createdAt + 1000)).toISOString();
       const id = `news:${n.id}`;
       if (!this.markSeen(id, now)) continue;
+      if (open) {
+        const v = prefilter(
+          { headline: n.headline, summary: n.summary, symbols: n.symbols, source: n.source },
+          { priority, recent, minScore: u.prefilter_min_score },
+        );
+        const isPriority = v.why === "core/held/watched symbol";
+        const slot = isPriority || this.daily("open_intake", now) < u.max_open_intake_per_day;
+        if (!v.pass || !slot) {
+          dropped++;
+          continue;
+        }
+        if (!isPriority) this.bumpDaily("open_intake", now);
+        recent.push(v.tokens);
+        this.universe.rememberHeadline(id, v.tokens, now);
+      }
       this.sql.exec(
         "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 1, ?, ?, ?)",
         id,
@@ -2228,8 +3073,80 @@ ${postmortem}`,
     this.sql.exec(
       `DELETE FROM triage_queue WHERE candidate_id NOT IN (SELECT candidate_id FROM triage_queue ORDER BY enqueued_at DESC LIMIT ${TRIAGE_QUEUE_MAX})`,
     );
-    if (queued > 0) this.journal.append("SYSTEM", "NEWS_INTAKE", null, { queued, since }, now);
+    if (queued > 0 || dropped > 0)
+      this.journal.append("SYSTEM", "NEWS_INTAKE", null, { queued, prefiltered: dropped, since }, now);
     return queued;
+  }
+
+  /**
+   * ADR-058 scout: a symbol outside the universe got a promoted catalyst. Screen it in code (asset record, 30+ daily
+   * bars, dollar volume, spread, no leveraged/inverse product, no stablecoin) and, if it passes, hot-port it as a
+   * TRADE symbol for `ttl_days`. Cached rejections stop re-screening for a day. Never trades by itself.
+   */
+  private async scoutPort(
+    symbols: string[],
+    why: string,
+    now: number,
+    source = "scout",
+  ): Promise<{ symbol: string; arena: "CRYPTO" | "EQUITIES" } | { reason: string }> {
+    const u = this.d.universe;
+    if (!u.enabled) return { reason: "no tradeable symbol" };
+    const m = this.deps.market;
+    const via = (["PAPER", "LIVE"] as AccountId[]).find((a) => this.deps.brokers[a]);
+    if (!m || !via) return { reason: "no tradeable symbol (no market data to screen it)" };
+    const cands = [
+      ...new Map(
+        symbols
+          .map(normalizeSymbol)
+          .filter((x): x is NonNullable<typeof x> => x !== null)
+          .map((x) => [x.symbol, x]),
+      ).values(),
+    ].slice(0, 3);
+    if (cands.length === 0) return { reason: "no tradeable symbol" };
+    let reason = "no tradeable symbol";
+    for (const c of cands) {
+      const prev = this.universe.row(c.symbol);
+      if (prev?.status === "REJECTED" && prev.expires_at > now) {
+        reason = `${c.symbol} failed the universe screen: ${prev.reason}`;
+        continue;
+      }
+      if (this.daily("ports", now) >= u.max_ports_per_day)
+        return { reason: "scout port cap reached for today" };
+      this.bumpDaily("ports", now);
+      const [asset, bars, quotes] = await Promise.all([
+        this.assetMeta(c.symbol, via).catch(() => null),
+        (c.arena === "CRYPTO"
+          ? m.cryptoDailyBars([c.symbol], 45, now)
+          : m.stockDailyBars([c.symbol], 45, now)
+        )
+          .then((b) => b[c.symbol])
+          .catch(() => undefined),
+        this.quotesFor([c.symbol]).catch(() => ({}) as Record<string, Quote>),
+      ]);
+      const res = screenAsset(
+        { symbol: c.symbol, arena: c.arena, asset, bars, quote: quotes[c.symbol] },
+        this.d,
+        this.c,
+      );
+      this.universe.record(c.symbol, c.arena, res, source, why, now);
+      this.journal.append(
+        "SYSTEM",
+        res.ok ? "UNIVERSE_PORT" : "UNIVERSE_REJECT",
+        null,
+        {
+          symbol: c.symbol,
+          arena: c.arena,
+          source,
+          why: why.slice(0, 160),
+          reasons: res.reasons,
+          ...res.metrics,
+        },
+        now,
+      );
+      if (res.ok) return { symbol: c.symbol, arena: c.arena };
+      reason = `${c.symbol} failed the universe screen: ${res.reasons.slice(0, 2).join("; ")}`;
+    }
+    return { reason };
   }
 
   /** True the first time an intake id is seen (then remembered for 3 days). */
@@ -2312,6 +3229,9 @@ ${postmortem}`,
     if (contract.arena === "EQUITIES") {
       const asOf = Number(getKV(this.sql, "earnings_as_of") ?? 0);
       if (now - asOf > EARNINGS_CALENDAR_MAX_AGE_MS) return "earnings calendar stale (fail closed)";
+      // ADR-058: a hot-ported stock needs a calendar that covers the whole market, not just the watchlists
+      if (this.universe.isDynamic(contract.symbol, now) && getKV(this.sql, "earnings_coverage") !== "all")
+        return "earnings calendar doesn't cover hot-ported stocks (fail closed)";
       const today = utcDay(now);
       const horizon = utcDay(now + this.d.execution.earnings_blackout_hours * 3_600_000);
       const e = one<{ date: string }>(
@@ -2324,6 +3244,8 @@ ${postmortem}`,
       if (e)
         return `earnings on ${e.date} (inside the ${this.d.execution.earnings_blackout_hours} h blackout)`;
     }
+    const insane = await this.sanityVeto(contract, now);
+    if (insane) return insane;
     const held = this.positions(account)
       .map((p) => p.symbol)
       .filter((s) => s !== contract.symbol);
@@ -2352,6 +3274,72 @@ ${postmortem}`,
     const heldBars = Object.fromEntries(held.filter((h) => bars[h]).map((h) => [h, bars[h] as Bar[]]));
     const hit = correlationVeto(cand, heldBars, g.max_corr, since);
     return hit ? `correlated with ${hit.symbol} (ρ=${hit.corr} > ${g.max_corr})` : null;
+  }
+
+  /**
+   * ADR-067 sanity vetoes: a depegged stablecoin or a cross-venue price gap blocks crypto entries; a Nasdaq halt blocks
+   * a stock entry. Sources are cached (venue 60 s, halts 5 min). An unreachable source is counted as a policy vacuum
+   * and doesn't block: the validator's own quote, spread and staleness gates still fail closed.
+   */
+  private async sanityVeto(contract: DecisionContract, now: number): Promise<string | null> {
+    const cfg = this.d.execution.sanity;
+    if (!cfg.enabled) return null;
+    const http = this.deps.http;
+    const cached = async (key: string, ttl: number, load: () => Promise<string>): Promise<string | null> => {
+      const hit = getKV(this.sql, key);
+      const at = Number(getKV(this.sql, `${key}:at`) ?? 0);
+      if (hit !== null && now - at < ttl) return hit;
+      try {
+        const v = await load();
+        setKV(this.sql, key, v, now);
+        setKV(this.sql, `${key}:at`, String(now), now);
+        return v;
+      } catch {
+        this.vacuum(`sanity:${key.split(":")[0]}`, now);
+        return null;
+      }
+    };
+    if (contract.arena === "CRYPTO") {
+      const q = await this.quotesFor(["USDT/USD", "USDC/USD", contract.symbol]).catch(
+        () => ({}) as Record<string, Quote>,
+      );
+      for (const st of ["USDT/USD", "USDC/USD"]) {
+        const x = q[st];
+        const bps = x ? depegBps((x.bid + x.ask) / 2) : null;
+        if (bps !== null && bps > cfg.max_depeg_bps)
+          return `${st.slice(0, 4)} is ${bps} bps off its $1 peg (sanity veto)`;
+      }
+      const own = q[contract.symbol];
+      if (http && own) {
+        const raw = await cached(`venue:${contract.symbol}`, 60_000, async () => {
+          const r = await http(
+            `https://api.exchange.coinbase.com/products/${coinbaseProduct(contract.symbol)}/ticker`,
+            {
+              headers: { "user-agent": "cortex-54" },
+              signal: AbortSignal.timeout(4_000),
+            },
+          );
+          if (!r.ok) throw new Error(String(r.status));
+          const t = (await r.json()) as { bid?: string; ask?: string };
+          return String((Number(t.bid) + Number(t.ask)) / 2);
+        });
+        const gap = venueGapPct((own.bid + own.ask) / 2, raw === null ? null : Number(raw));
+        if (gap !== null && gap > cfg.max_venue_gap_pct)
+          return `Alpaca and Coinbase disagree by ${gap}% on ${contract.symbol} (sanity veto)`;
+      }
+    }
+    if (contract.arena === "EQUITIES" && http) {
+      const raw = await cached("halts:nasdaq", 5 * 60_000, async () => {
+        const r = await http("https://www.nasdaqtrader.com/rss.aspx?feed=tradehalts", {
+          headers: { "user-agent": "Mozilla/5.0 (cortex-54)" },
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (!r.ok) throw new Error(String(r.status));
+        return [...haltedSymbols(await r.text())].join(",");
+      });
+      if (raw?.split(",").includes(contract.symbol)) return `${contract.symbol} is halted (Nasdaq halt feed)`;
+    }
+    return null;
   }
 
   /** What a scar rule can see about an entry (ADR-033). Unknown facts never match a rule. */
@@ -2564,7 +3552,14 @@ ${postmortem}`,
     const p = JSON.parse(row.payload_json) as Record<string, unknown>;
     const t1 = (p.tier1 ?? null) as { material: number; direction: string; escalate: number } | null;
     const symbols = Array.isArray(p.symbols) ? (p.symbols as string[]) : [];
-    const target = resolveTradeable(symbols, this.d);
+    let target: { symbol: string; arena: "CRYPTO" | "EQUITIES" } | null = this.universe.resolve(symbols, now);
+    if (target && this.universe.isDynamic(target.symbol, now)) this.universe.touch(target.symbol, now);
+    if (!target && t1?.direction !== "down") {
+      const ported = await this.scoutPort(symbols, String(p.headline ?? "").slice(0, 200), now);
+      if ("reason" in ported)
+        return { ok: false, reason: ported.reason, symbol: symbols[0] ?? "", arena: "?" };
+      target = ported;
+    }
     if (!target) return { ok: false, reason: "no tradeable symbol", symbol: symbols[0] ?? "", arena: "?" };
     const { symbol, arena } = target;
     if (t1?.direction === "down") return { ok: false, reason: "bearish catalyst (long-only)", symbol, arena };
@@ -2594,6 +3589,28 @@ ${postmortem}`,
     if (q.at && now - q.at > this.d.staleness.quote_seconds * 1000)
       return { ok: false, reason: "quote is stale", symbol, arena };
     const created = typeof p.createdAt === "number" ? p.createdAt : row.enqueued_at;
+    // ADR-060 lateness meter: how much of the move is already done since the headline (hourly bars, code math)
+    const lt = this.d.entry_timing.lateness;
+    const a14d = atr(b, 14);
+    const timing =
+      lt.enabled && p.kind !== "operator" && p.kind !== "roast" && m.hourlyBars && a14d
+        ? lateness(
+            await m.hourlyBars(symbol, created - 26 * 3_600_000).catch(() => []),
+            created,
+            q.bid,
+            a14d,
+            now,
+            lt,
+          )
+        : null;
+    if (timing?.verdict === "LATE")
+      return {
+        ok: false,
+        reason: `late: price already moved ${timing.move_since_atr} ATR since the headline (lateness meter)`,
+        symbol,
+        arena,
+        hypothetical: { bid: q.bid, atr: a14d, gate: true, timing },
+      };
     const facts = await this.catalystFacts(
       row.candidate_id,
       `${String(p.headline ?? "")}\n${String(p.summary ?? "")}`.trim(),
@@ -2638,6 +3655,7 @@ ${postmortem}`,
             }
           : null)(this.kronosFor(symbol, now)),
       research: ((dz) => (dz ? researchView(dz, now) : null))(this.dossierFor(symbol, now)),
+      timing,
     });
     return evidence ? { ok: true, evidence } : { ok: false, reason: "not enough bar history", symbol, arena };
   }
@@ -2756,6 +3774,11 @@ ${postmortem}`,
       ev.evidence.arena,
       `Tier 2 passed it (quality ${dcs.quality100}/100). Catalyst: ${ev.evidence.catalyst.headline}`,
       now,
+      {
+        // MLP4-013: the strongest cases (and exception-lane ones) get the long research budget
+        depth: dcs.quality100 >= 90 || ev.evidence.regimeException ? "deep" : "standard",
+        catalyst: ev.evidence.catalyst.headline,
+      },
     );
     return 1;
   }
@@ -2782,6 +3805,7 @@ ${postmortem}`,
     arena: "CRYPTO" | "EQUITIES",
     context: string,
     now: number,
+    opts: { depth?: "quick" | "standard" | "deep"; catalyst?: string } = {},
   ): Promise<boolean> {
     const cfg = this.d.funnel.research;
     const dispatcher = this.deps.dispatcher;
@@ -2805,6 +3829,11 @@ ${postmortem}`,
         job: "dossier",
         symbol,
         context: context.replace(/\s+/g, " ").slice(0, 280),
+        // ADR-057: arena (scout-ported symbols aren't in the watchlists), stake-weighted depth, the catalyst itself
+        arena,
+        mode: "case",
+        depth: opts.depth ?? "standard",
+        catalyst: (opts.catalyst ?? "").replace(/\s+/g, " ").slice(0, 280),
       });
     } catch (e) {
       await this.alertOnce("research", `⚠️ research dispatch failed (${symbol}): ${errText(e).slice(0, 200)}`);
@@ -2812,7 +3841,13 @@ ${postmortem}`,
     }
     this.bumpDaily("research", now);
     setKV(this.sql, pendingKey, String(now), now);
-    this.journal.append("SYSTEM", "RESEARCH_REQUEST", candidateId, { symbol, arena, context }, now);
+    this.journal.append(
+      "SYSTEM",
+      "RESEARCH_REQUEST",
+      candidateId,
+      { symbol, arena, context, depth: opts.depth ?? "standard" },
+      now,
+    );
     return hold(now);
   }
 
@@ -2822,8 +3857,18 @@ ${postmortem}`,
    */
   async requestCourt(symbolInput: string, by: string): Promise<string> {
     const now = this.deps.now();
-    const target = resolveTradeable([symbolInput.trim()], this.d);
-    if (!target) return `${symbolInput} isn't in the tradeable universe (doctrine watchlists).`;
+    let target: { symbol: string; arena: "CRYPTO" | "EQUITIES" } | null = this.universe.resolve(
+      [symbolInput.trim()],
+      now,
+    );
+    if (!target && !this.universe.enabled)
+      return `${symbolInput} isn't in the tradeable universe (doctrine watchlists).`;
+    if (!target) {
+      // ADR-058: the operator may name any symbol; the scout screens it like a catalyst would
+      const ported = await this.scoutPort([symbolInput.trim()], `operator /court by ${by}`, now, "operator");
+      if ("reason" in ported) return `${symbolInput} can't be traded: ${ported.reason}.`;
+      target = ported;
+    }
     const kill = await this.readKill();
     if (kill !== "CLEAR") return `Kill flag is ${kill}; no court sessions.`;
     if (this.budget.snapshot(now).mode === "REDUCE_ONLY")
@@ -2855,13 +3900,213 @@ ${postmortem}`,
       )
     ) {
       await this.flushJournal();
-      return `📚 Research desk dispatched for ${target.symbol}. The court convenes when the dossier lands (≤ ${this.d.funnel.research.wait_minutes} min) — watch #bull-vs-bear-court.`;
+      return `📚 Research desk dispatched for ${target.symbol}. The court convenes when the deep research lands (fast research after ${this.d.funnel.research.deep_wait_minutes} min if the deep run is slow; ≤ ${this.d.funnel.research.wait_minutes} min) — its card appears in the feed (COURT).`;
     }
     const n = await this.runCourt();
     await this.flushJournal();
     return n > 0
-      ? `Court session for ${target.symbol} finished — see #bull-vs-bear-court.`
-      : `Court session for ${target.symbol} ended without a contract — see #bull-vs-bear-court or the journal.`;
+      ? `Court session for ${target.symbol} finished — see the feed (COURT).`
+      : `Court session for ${target.symbol} ended without a contract — the reasons are in the feed (COURT).`;
+  }
+
+  /**
+   * PSS-013 co-pilot (`/roast SYMBOL thesis`): the operator's own trade idea goes through Tier 0 and the full court
+   * (bull, cross-family bear, rebuttal, panel, judge) right now. It never trades: no contract, no order, ever.
+   */
+  async requestRoast(symbolInput: string, thesis: string, by: string): Promise<string> {
+    const now = this.deps.now();
+    const idea = thesis.replace(/\s+/g, " ").trim().slice(0, 280);
+    if (idea.length < 10)
+      return "Give the idea in a sentence, e.g. `/roast NVDA thesis: datacenter capex beats, buying the dip`.";
+    let target: { symbol: string; arena: "CRYPTO" | "EQUITIES" } | null = this.universe.resolve(
+      [symbolInput],
+      now,
+    );
+    if (!target && this.universe.enabled) {
+      const ported = await this.scoutPort([symbolInput], `operator /roast by ${by}`, now, "operator");
+      if ("reason" in ported) return `${symbolInput} can't be judged: ${ported.reason}.`;
+      target = ported;
+    }
+    if (!target) return `${symbolInput} isn't in the tradeable universe.`;
+    if ((await this.readKill()) !== "CLEAR") return "Kill flag is set; no court sessions.";
+    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day)
+      return "Daily court cap reached.";
+    const id = `roast:${target.symbol}:${now}`;
+    this.sql.exec(
+      "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 3, ?, ?, ?)",
+      id,
+      target.symbol,
+      JSON.stringify({
+        kind: "roast",
+        headline: `Operator's own trade idea (co-pilot roast, no order will be placed): ${idea}`,
+        symbols: [target.symbol],
+        source: by,
+        createdAt: now,
+      }),
+      now - 366 * 86_400_000,
+    );
+    const n = await this.runCourt();
+    await this.flushJournal();
+    return n > 0
+      ? `🔥 Roast of ${target.symbol} is in the feed (COURT). No order placed.`
+      : `The idea on ${target.symbol} didn't survive — the reasons are in the feed (COURT), or ask WHY ${target.symbol}.`;
+  }
+
+  /**
+   * ADR-061 weekly book review (Sundays from 18:00 UTC, or on demand with `/book`): R, age and stagnation per position,
+   * the strongest pairwise correlation, net beta to BTC and SPY in dollars, and a crash replay (each holding's worst
+   * 5-day drop in the past year, applied to today's notional). Measurement only.
+   */
+  async bookReview(force = false): Promise<BookSummary | null> {
+    const now = this.deps.now();
+    const d = new Date(now);
+    const week = `${d.getUTCFullYear()}-${Math.floor((now - Date.UTC(d.getUTCFullYear(), 0, 1)) / (7 * 86_400_000))}`;
+    if (
+      !force &&
+      (d.getUTCDay() !== 0 || d.getUTCHours() < 18 || getKV(this.sql, "book_review_week") === week)
+    )
+      return null;
+    if (!force) setKV(this.sql, "book_review_week", week, now);
+    const m = this.deps.market;
+    const account: AccountId = this.deps.brokers.PAPER ? "PAPER" : "LIVE";
+    const view = this.accountView(account, now);
+    const positions = this.positions(account);
+    if (!m || !view) return null;
+    const syms = positions.map((p) => p.symbol);
+    const crypto = [...new Set([...syms.filter(isCryptoSymbol), "BTC/USD"])];
+    const stocks = [...new Set([...syms.filter((x) => !isCryptoSymbol(x)), "SPY"])];
+    const [cb, sb, quotes] = await Promise.all([
+      m.cryptoDailyBars(crypto, 370, now).catch(() => ({}) as Record<string, Bar[]>),
+      m.stockDailyBars(stocks, 260, now).catch(() => ({}) as Record<string, Bar[]>),
+      this.quotesFor(syms).catch(() => ({}) as Record<string, Quote>),
+    ]);
+    const bars: Record<string, Bar[]> = { ...cb, ...sb };
+    const lines: BookLine[] = positions.map((p) => {
+      const q = quotes[p.symbol];
+      const w = this.watchRow(account, p, now);
+      const st = w ? this.exitState(p, w) : null;
+      const px = q?.bid ?? Number(p.avg_entry);
+      const b = bars[p.symbol] ?? [];
+      return {
+        symbol: p.symbol,
+        arena: p.arena,
+        notionalUsd: Math.round(Number(p.qty) * px * 100) / 100,
+        r: st ? Math.round(rMultiple(st, px) * 100) / 100 : 0,
+        horizonFraction:
+          Math.round(((now - p.opened_at) / Math.max(1, p.max_hold_until - p.opened_at)) * 100) / 100,
+        stagnant: st && q ? stagnant(st, q.bid, now, this.d.exits) : false,
+        betaBtc: bars["BTC/USD"] ? beta(b, bars["BTC/USD"]) : null,
+        betaSpy: bars.SPY ? beta(b, bars.SPY) : null,
+        worst5d: worstWindow(b, 5),
+      };
+    });
+    const pairs: { a: string; b: string; corr: number }[] = [];
+    for (let i = 0; i < syms.length; i++)
+      for (let j = i + 1; j < syms.length; j++) {
+        const x = bars[syms[i] as string];
+        const y = bars[syms[j] as string];
+        const c = x && y ? correlation(x, y, now - 60 * 86_400_000) : null;
+        if (c !== null)
+          pairs.push({ a: syms[i] as string, b: syms[j] as string, corr: Math.round(c * 100) / 100 });
+      }
+    const sum = summarizeBook(lines, view.equityUsd, pairs);
+    this.journal.append(
+      account,
+      "BOOK_REVIEW",
+      null,
+      { ...sum, lines: sum.lines.map((l) => ({ ...l })) },
+      now,
+    );
+    await this.deps.notifier.post("governor", bookCard(account, sum));
+    return sum;
+  }
+
+  /**
+   * ADR-068 community hub: publish this agent's public journal rows (signed, hash-linked) and pull the court
+   * approvals of followed agents in as candidates. A followed idea is only a lead: it goes through Tier 2, the court,
+   * the risk engine and this account's own sizing like any headline. Every 30 min at most; failures retry later.
+   */
+  private async hubSync(now: number): Promise<void> {
+    const hub = this.deps.hub;
+    const http = this.deps.http;
+    if (!hub || !http) return;
+    if (now - Number(getKV(this.sql, "hub_sync_at") ?? 0) < 30 * 60_000) return;
+    setKV(this.sql, "hub_sync_at", String(now), now);
+    if (hub.publish) {
+      const rows = this.sql.exec<{ seq: number; row_json: string }>(
+        "SELECT seq, row_json FROM hub_outbox ORDER BY seq LIMIT 200",
+      );
+      const r = await publishBatch(
+        http,
+        hub,
+        rows.map((x) => JSON.parse(x.row_json)),
+        this.journal.head(),
+        now,
+      );
+      if (r.ok && rows.length) this.sql.exec("DELETE FROM hub_outbox WHERE seq <= ?", rows.at(-1)?.seq ?? 0);
+      if (!r.ok) await this.alertOnce("hub-publish", `⚠️ hub publish failed: HTTP ${r.status} ${r.body}`);
+    }
+    for (const agent of hub.follow.slice(0, 10)) {
+      const key = `hub_follow:${agent}`;
+      const rows = await fetchFeed(http, hub.url, agent, Number(getKV(this.sql, key) ?? 0));
+      for (const row of rows) {
+        setKV(this.sql, key, String(row.seq), now);
+        const p = JSON.parse(row.payload_json) as {
+          symbol?: string;
+          origin?: string;
+          thesis?: string;
+          win?: number;
+        };
+        if (p.origin !== "COURT" || !p.symbol || now - row.ts > 6 * 3_600_000) continue;
+        const id = `follow:${agent}:${row.seq}`;
+        if (!this.markSeen(id, now)) continue;
+        this.sql.exec(
+          "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 2, ?, ?, ?)",
+          id,
+          p.symbol,
+          JSON.stringify({
+            kind: "follow",
+            headline: `Followed agent ${agent}'s court approved a long in ${p.symbol}: ${String(p.thesis ?? "").slice(0, 200)}`,
+            summary: "",
+            symbols: [p.symbol],
+            source: `hub:${agent}`,
+            createdAt: row.ts,
+            tier1: { material: 0.7, direction: "up", escalate: 1.5 },
+          }),
+          now,
+        );
+        this.journal.append("SYSTEM", "FOLLOW_LEAD", id, { symbol: p.symbol, agent, seq: row.seq }, now);
+      }
+    }
+  }
+
+  /** `/universe`: the dynamic universe right now. */
+  universeView(): string {
+    const now = this.deps.now();
+    if (!this.universe.enabled) return "Dynamic universe is off (doctrine universe.enabled).";
+    const c = this.universe.counts(now);
+    const rows = this.universe.list(now);
+    const fmt = (st: string) =>
+      rows
+        .filter((r) => r.status === st)
+        .slice(0, 15)
+        .map((r) => r.symbol)
+        .join(", ") || "—";
+    return [
+      `🌐 Universe: ${c.trade} hot-ported · ${c.watch} watched · ${c.rejected} refused today (core watchlists always on)`,
+      `**Trade:** ${fmt("TRADE")}`,
+      `**Watch:** ${fmt("WATCH")}`,
+      `**Refused:** ${
+        rows
+          .filter((r) => r.status === "REJECTED")
+          .slice(0, 6)
+          .map((r) => `${r.symbol} (${r.reason.slice(0, 50)})`)
+          .join("; ") || "—"
+      }`,
+      `Today: ${this.daily("ports", now)}/${this.d.universe.max_ports_per_day} screens · ${this.daily("open_intake", now)}/${this.d.universe.max_open_intake_per_day} wire headlines into Tier 1`,
+    ]
+      .join("\n")
+      .slice(0, 1900);
   }
 
   /** Completed COURT trades so far (calibration weight). */
@@ -3185,6 +4430,28 @@ ${postmortem}`,
       await close(`🚫 Contract invalid: ${violations.slice(0, 3).join("; ")}`, false);
       return 0;
     }
+    if (row.candidate_id.startsWith("roast:")) {
+      // PSS-013 co-pilot: the operator's own idea got the full hearing; it never becomes a contract or an order
+      this.journal.append(
+        "SYSTEM",
+        "ROAST",
+        row.candidate_id,
+        {
+          symbol: e.symbol,
+          win_cal: winUsed,
+          bear: bear.value.lethality,
+          entry: [contract.entry_plan.zone_low, contract.entry_plan.zone_high],
+          stop: contract.invalidation_criteria.stop_price,
+          targets: contract.entry_plan.targets,
+        },
+        now,
+      );
+      await close(
+        `🧪 Roast only — no order. The court would size this at a calibrated ${Math.round(winUsed * 100)}% win chance: buy ${contract.entry_plan.zone_low}–${contract.entry_plan.zone_high}, stop ${contract.invalidation_criteria.stop_price}, target ${contract.entry_plan.targets[0]}.`,
+        false,
+      );
+      return 1;
+    }
     this.recordContract(contract, now);
     this.journal.append(
       "SYSTEM",
@@ -3252,12 +4519,15 @@ ${postmortem}`,
       const ok = await this.route(account, contract, quotes);
       traded ||= ok;
       const why = this.lastRejections.get(contract.contract_id);
+      const rested = !ok && why ? await this.maybeRest(account, contract, why, now) : null;
       outcomes.push(
         ok
           ? `✅ ${account}: entry order placed`
-          : why
-            ? `🛑 ${account}: declined by the risk engine — ${why.slice(0, 3).join("; ")}`
-            : `👻 ${account}: shadow only (autonomy dial)`,
+          : rested
+            ? `⏳ ${account}: resting — ${rested}`
+            : why
+              ? `🛑 ${account}: declined by the risk engine — ${why.slice(0, 3).join("; ")}`
+              : `👻 ${account}: shadow only (autonomy dial)`,
       );
     }
     session.contractId = contract.contract_id;
@@ -3333,8 +4603,8 @@ ${postmortem}`,
           this.rejectCandidate(
             {
               candidateId: it.candidateId,
-              symbol: resolveTradeable(it.symbols, this.d)?.symbol ?? it.symbols[0] ?? "?",
-              arena: resolveTradeable(it.symbols, this.d)?.arena ?? "CRYPTO",
+              symbol: this.universe.resolve(it.symbols, now)?.symbol ?? it.symbols[0] ?? "?",
+              arena: this.universe.resolve(it.symbols, now)?.arena ?? "CRYPTO",
               source: "tier1",
             },
             "TIER1",
@@ -3352,8 +4622,20 @@ ${postmortem}`,
 
     const decisions = interpretTier1(items, result, this.d);
     let promoted = 0;
+    const held = new Set(this.symbolsInPlay());
     for (const [i, dcs] of decisions.entries()) {
       const it = items[i] as TriageItem;
+      // ADR-059: a material headline about a held symbol (either direction) is a re-underwriting tripwire
+      const heldSym = this.universe.resolve(it.symbols, now)?.symbol;
+      if (heldSym && held.has(heldSym) && dcs.material >= this.d.exits.review.held_material_min)
+        this.sql.exec(
+          "UPDATE position_watch SET pending_headline = ? WHERE symbol = ?",
+          `${dcs.direction === "down" ? "⬇ " : dcs.direction === "up" ? "⬆ " : ""}${it.headline}`.slice(
+            0,
+            300,
+          ),
+          heldSym,
+        );
       if (!dcs.promote) {
         this.sql.exec("DELETE FROM triage_queue WHERE candidate_id = ?", dcs.candidateId);
         continue;
@@ -3529,11 +4811,14 @@ ${postmortem}`,
       now,
     );
     const cal = b.items.find((x) => x.skill_id === "earnings-calendar")?.payload as
-      | { events?: { symbol?: unknown; date?: unknown }[] }
+      | { events?: { symbol?: unknown; date?: unknown }[]; coverage?: unknown }
       | undefined;
     if (cal && Array.isArray(cal.events)) {
       this.sql.exec("DELETE FROM earnings");
-      for (const ev of cal.events.slice(0, 3000)) {
+      // ADR-058: a truncated full-market calendar would pass dynamic stocks unchecked, so it doesn't count as "all"
+      const complete = cal.events.length <= EARNINGS_MAX_ROWS;
+      setKV(this.sql, "earnings_coverage", cal.coverage === "all" && complete ? "all" : "watchlist", now);
+      for (const ev of cal.events.slice(0, EARNINGS_MAX_ROWS)) {
         if (
           typeof ev.symbol !== "string" ||
           typeof ev.date !== "string" ||
@@ -3851,7 +5136,15 @@ ${postmortem}`,
       "SYSTEM",
       "CONTRACT",
       k.contract_id,
-      { symbol: k.symbol, strategy: k.strategy_id, origin: k.origin },
+      // thesis + plan are what followers read on the hub (ADR-068); prices are public, nothing here is secret
+      {
+        symbol: k.symbol,
+        strategy: k.strategy_id,
+        origin: k.origin,
+        thesis: k.thesis_summary,
+        arena: k.arena,
+        win: Math.round(k.win_prob_used * 100) / 100,
+      },
       now,
     );
   }
@@ -3981,17 +5274,7 @@ ${postmortem}`,
       return false;
     }
     const view = { ...baseView, availableCashUsd: Math.min(baseView.availableCashUsd, posture.roomUsd) };
-    const asset: AssetView = {
-      tradable: meta.tradable && meta.status === "active",
-      fractionable: meta.fractionable,
-      minQty: meta.min_order_size ? Number(meta.min_order_size) : 0,
-      qtyIncrement: meta.min_trade_increment
-        ? Number(meta.min_trade_increment)
-        : contract.arena === "CRYPTO"
-          ? 1e-9
-          : 1e-9,
-      minNotionalUsd: Math.max(1, this.d.execution.min_order_notional_usd[contract.arena] ?? 1),
-    };
+    const asset = this.assetView(meta, contract.arena);
     const v = validateEntry(
       {
         contract,
@@ -4058,6 +5341,59 @@ ${postmortem}`,
     return ok;
   }
 
+  private assetView(meta: AlpacaAsset, arena: Arena): AssetView {
+    return {
+      tradable: meta.tradable && meta.status === "active",
+      fractionable: meta.fractionable,
+      minQty: meta.min_order_size ? Number(meta.min_order_size) : 0,
+      qtyIncrement: meta.min_trade_increment ? Number(meta.min_trade_increment) : 1e-9,
+      minNotionalUsd: Math.max(1, this.d.execution.min_order_notional_usd[arena] ?? 1),
+    };
+  }
+
+  /**
+   * Would this contract pass the whole validator (fee hurdle and sizing included) if `freed` were sold first? Used
+   * before a rotation, so a stagnant position is only released for a newcomer that can actually enter (review finding).
+   */
+  private async wouldEnterAfterFreeing(
+    account: AccountId,
+    contract: DecisionContract,
+    freed: { notionalUsd: number; riskUsd: number },
+    now: number,
+  ): Promise<boolean> {
+    const q = (await this.quotesFor([contract.symbol]).catch(() => ({}) as Record<string, Quote>))[
+      contract.symbol
+    ];
+    const meta = await this.assetMeta(contract.symbol, account).catch(() => null);
+    const view = this.accountView(account, now);
+    if (!q || !meta || !view) return false;
+    const v = validateEntry(
+      {
+        contract,
+        account: {
+          ...view,
+          openSlots: Math.max(0, view.openSlots - 1),
+          availableCashUsd: view.availableCashUsd + freed.notionalUsd,
+          heatUsedUsd: Math.max(0, view.heatUsedUsd - freed.riskUsd),
+        },
+        market: {
+          bid: q.bid,
+          ask: q.ask,
+          quoteAt: q.at,
+          typicalSpreadFrac: this.typicalSpread(contract.symbol),
+        },
+        asset: this.assetView(meta, contract.arena),
+        reputationWeight: this.reputationWeight(this.catalystKey(contract.bull_case_receipts)),
+        regimeMultiplier: this.fundingMultiplier(contract.symbol, now),
+        now,
+      },
+      this.d,
+      this.c,
+    );
+    // the price may still be above the zone: that's what resting waits for
+    return v.ok || v.reasons.every((r) => r === "price ran past the entry zone");
+  }
+
   private reject(
     account: AccountId,
     contract: DecisionContract,
@@ -4086,7 +5422,13 @@ ${postmortem}`,
       },
       now,
     );
-    this.journal.append(account, "REJECT", contract.contract_id, { stage, reasons }, now);
+    this.journal.append(
+      account,
+      "REJECT",
+      contract.contract_id,
+      { symbol: contract.symbol, stage, reasons },
+      now,
+    );
   }
 
   private async submit(
@@ -4341,6 +5683,27 @@ ${postmortem}`,
     }
   }
 
+  /** ADR-075: model calls today per provider (from the router gate's counters) against each daily cap. */
+  modelUse(now: number): StatusView["modelUse"] {
+    const day = utcDay(now);
+    const caps = this.d.llm_routing.daily_call_caps;
+    const providers = this.sql
+      .exec<{ key: string; value: string }>(
+        "SELECT key, value FROM settings WHERE key LIKE 'llm_calls:%' AND key LIKE ?",
+        `%:${day}`,
+      )
+      .map((r) => {
+        const provider = r.key.slice("llm_calls:".length, -(day.length + 1));
+        return { provider, calls: Number(r.value) || 0, cap: caps[provider] ?? null };
+      })
+      .sort((a, b) => b.calls - a.calls);
+    let worst = { provider: "none", fraction: 0 };
+    for (const p of providers)
+      if (p.cap && p.calls / p.cap > worst.fraction)
+        worst = { provider: p.provider, fraction: p.calls / p.cap };
+    return { worst, providers };
+  }
+
   status(): StatusView {
     const now = this.deps.now();
     const last = getKV(this.sql, "last_pulse_at");
@@ -4348,9 +5711,13 @@ ${postmortem}`,
       now,
       lastPulseAt: last ? Number(last) : null,
       budget: this.budget.snapshot(now),
+      modelUse: this.modelUse(now),
       journalHead: this.journal.head(),
       outboxPending: this.journal.pending(),
       equity: this.equityHistory(now - 7 * 86_400_000),
+      benchmark: Object.fromEntries(
+        ACCOUNTS.filter((a) => this.deps.brokers[a]).map((a) => [a, this.benchmark(a, now - 7 * 86_400_000)]),
+      ),
       regimes: this.sql
         .exec<{
           arena: string;
@@ -4740,9 +6107,18 @@ ${postmortem}`,
   }
 
   /** One equity sample per account per UTC hour (HUD chart, web terminal). */
-  private sampleEquity(now: number): void {
+  private async sampleEquity(now: number): Promise<void> {
     const hour = Math.floor(now / 3_600_000);
     if (getKV(this.sql, "equity_hour") === String(hour)) return;
+    // MLP0-024: what holding BTC or SPY would have done with the same money (one quotes call per hour)
+    const q = await this.quotesFor(["BTC/USD", "SPY"]).catch(() => ({}) as Record<string, Quote>);
+    const mid = (x: Quote | undefined) => (x && x.bid > 0 ? (x.bid + x.ask) / 2 : null);
+    this.sql.exec(
+      "INSERT OR REPLACE INTO bench_history (at, btc, spy) VALUES (?, ?, ?)",
+      hour * 3_600_000,
+      mid(q["BTC/USD"]),
+      mid(q.SPY),
+    );
     for (const row of this.sql.exec<AccountRow>("SELECT * FROM accounts")) {
       const eq = this.effectiveEquityCents(row);
       if (eq === null) continue;
@@ -4754,6 +6130,16 @@ ${postmortem}`,
       );
     }
     setKV(this.sql, "equity_hour", String(hour), now);
+  }
+
+  /** Buy-and-hold BTC and SPY with the account's own equity at the window's first sample (MLP0-024). */
+  benchmark(account: AccountId, since: number): { btc: number[][]; spy: number[][] } {
+    const eq = this.equityHistory(since)[account] ?? [];
+    const rows = this.sql.exec<{ at: number; btc: number | null; spy: number | null }>(
+      "SELECT at, btc, spy FROM bench_history WHERE at >= ? ORDER BY at",
+      since,
+    );
+    return benchmarkLines(eq, rows);
   }
 
   equityHistory(since: number): Partial<Record<AccountId, number[][]>> {
@@ -4781,7 +6167,8 @@ ${postmortem}`,
   }
 
   isRevoked(id: string): boolean {
-    return one(this.sql, "SELECT 1 AS x FROM seen_items WHERE id = ?", `web:${id}`) !== undefined;
+    // `one` returns null when there's no row (it was compared to undefined, so every session looked revoked)
+    return one(this.sql, "SELECT 1 AS x FROM seen_items WHERE id = ?", `web:${id}`) !== null;
   }
 
   /** Memory Vault view: decayed beliefs, reputation weights, merged scar rules. */
@@ -4834,556 +6221,29 @@ ${postmortem}`,
 
 // ---------------------------------------------------------------------- helpers
 
+/** Journal kinds that feed the `/why` trail (each must carry a symbol, facts.symbol or out). */
+const WHY_KINDS = new Set([
+  "CANDIDATE_REJECT",
+  "REJECT",
+  "CONTRACT",
+  "COURT",
+  "ENTRY_FACTS",
+  "EXIT",
+  "STOP_MOVE",
+  "HARVEST_TRAIL",
+  "REVIEW",
+  "RESTING",
+  "RESTING_FILLED",
+  "RESTING_DROPPED",
+  "ROTATE",
+  "UNIVERSE_PORT",
+  "UNIVERSE_REJECT",
+  "DOSSIER",
+  "TIER2_PASS",
+  "ROAST",
+]);
+
+/** Earnings rows kept per calendar batch (ADR-058: the whole market for 4 days ≈ 1–3k rows in earnings season). */
+const EARNINGS_MAX_ROWS = 5000;
 /** An equity earnings calendar older than this blocks equity entries (fail closed, ADR-035). */
 const EARNINGS_CALENDAR_MAX_AGE_MS = 4 * 86_400_000;
-
-const TERMINAL_KINDS: Record<string, string> = {
-  ENTRY_FACTS: "🎯",
-  ORDER_SUBMITTED: "📨",
-  FILL: "💱",
-  EXIT: "🏁",
-  RED_LOCK: "🛑",
-  UNLOCK: "🔓",
-  MODE: "⚙️",
-  DIAL: "🎚️",
-  FLATTEN: "🧹",
-  KILL_SEEN: "☠️",
-  KILL_CLEARED: "✅",
-  COURT: "⚖️",
-  DISPATCH: "📤",
-  GOVERNOR: "🧬",
-  OPTIONS_LAB: "🧪",
-  INGEST_REJECTED: "⚠️",
-  DAY_ROLL: "🔗",
-};
-
-/** One compact line per notable journal event for #agent-terminal; null for the rest. */
-export function terminalLine(r: {
-  ts: number;
-  account: string;
-  kind: string;
-  refId: string | null;
-  payloadJson: string;
-}): string | null {
-  const icon = TERMINAL_KINDS[r.kind];
-  if (!icon) return null;
-  let p: Record<string, unknown> = {};
-  try {
-    p = JSON.parse(r.payloadJson) as Record<string, unknown>;
-  } catch {
-    p = {};
-  }
-  const f = (p.facts ?? {}) as Record<string, unknown>;
-  const detail =
-    r.kind === "ENTRY_FACTS"
-      ? `${f.symbol ?? ""} ${f.strategy_id ?? ""} w=${p.reputation_weight ?? 1}`
-      : r.kind === "DISPATCH"
-        ? String(p.job ?? "")
-        : r.kind === "EXIT"
-          ? `${p.symbol ?? ""} ${p.reason ?? ""} ${typeof p.pnl_cents === "number" ? `$${(p.pnl_cents / 100).toFixed(2)}` : ""}`
-          : r.kind === "FILL"
-            ? `${p.role ?? ""} ${p.qty ?? ""} @ ${p.price ?? ""}`
-            : JSON.stringify(p).slice(0, 120);
-  const hhmm = new Date(r.ts).toISOString().slice(11, 16);
-  const acct = r.account === "SYSTEM" ? "" : ` ${r.account}`;
-  return `\`${hhmm}\` ${icon} ${r.kind}${acct} ${detail}`.slice(0, 200);
-}
-
-/** QuickChart line image for the HUD (rendered off-platform: zero Worker CPU). */
-export function equityChartUrl(points: number[][] | undefined): string | null {
-  if (!points || points.length < 2) return null;
-  const pts = points.slice(-72);
-  const cfg = {
-    type: "line",
-    data: {
-      labels: pts.map(() => ""),
-      datasets: [
-        { data: pts.map((p) => p[1]), fill: false, pointRadius: 0, borderColor: "#38bdf8", borderWidth: 2 },
-      ],
-    },
-    options: { legend: { display: false }, scales: { xAxes: [{ display: false }] } },
-  };
-  return `https://quickchart.io/chart?w=500&h=140&bkg=%23111827&c=${encodeURIComponent(JSON.stringify(cfg))}`;
-}
-
-function errText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-/** Add business days (Mon–Fri). Holidays aren't modeled, which is why callers add a day of buffer. */
-export function addBusinessDays(ts: number, days: number): number {
-  let t = ts;
-  let left = days;
-  while (left > 0) {
-    t += 86_400_000;
-    const dow = new Date(t).getUTCDay();
-    if (dow !== 0 && dow !== 6) left--;
-  }
-  return t;
-}
-
-const bandColor = (b: Band) =>
-  b === "GREEN" ? COLORS.green : b === "YELLOW" ? COLORS.yellow : b === "ORANGE" ? COLORS.orange : COLORS.red;
-const usd = (n: number | null) => (n === null ? "—" : `$${n.toFixed(2)}`);
-
-export function hudMessage(s: StatusView): DiscordMessage {
-  const age = s.lastPulseAt === null ? "never" : `${Math.round((s.now - s.lastPulseAt) / 1000)}s ago`;
-  const embeds = s.accounts.map((a) => ({
-    ...(equityChartUrl(s.equity[a.account])
-      ? { image: { url: equityChartUrl(s.equity[a.account]) as string } }
-      : {}),
-    title: `${a.account} · ${a.rung} · Stop ${a.autonomyStop} · ${a.breaker}${a.locked ? " 🔒" : ""}`,
-    color: bandColor(a.breaker),
-    description: a.configured
-      ? `mode **${a.mode}**${a.modeReason ? ` (${a.modeReason})` : ""}`
-      : "_not configured_",
-    fields: [
-      {
-        name: "Equity",
-        value: `${usd(a.equityUsd)}${a.account === "PAPER" ? ` (broker ${usd(a.brokerEquityUsd)}, modeled costs ${usd(a.modeledCostUsd)})` : ""}`,
-        inline: false,
-      },
-      { name: "HWM", value: usd(a.hwmUsd), inline: true },
-      { name: "Orders today", value: String(a.ordersToday), inline: true },
-      {
-        name: `Positions (${a.positions.length})`,
-        value:
-          a.positions.length === 0
-            ? "flat"
-            : a.positions
-                .map(
-                  (p) =>
-                    `${p.symbol} ${p.qty} @ ${p.avgEntry} · stop ${p.stop}${p.brokerStop ? " 🛡" : " ⚠️"} · tgt ${p.target}${p.state === "EXITING" ? " · exiting" : ""}`,
-                )
-                .join("\n")
-                .slice(0, 1000),
-        inline: false,
-      },
-    ],
-  }));
-  const regimeLine = s.regimes
-    .map(
-      (r) =>
-        `${r.arena} **${r.posture}**${r.score !== null ? ` ${r.score.toFixed(0)}` : ""}${r.ceiling !== null ? ` · ceiling ${(r.ceiling * 100).toFixed(0)}%` : ""} · ${r.ageMinutes}m${r.fresh ? "" : " ⚠️stale"}`,
-    )
-    .join("  |  ");
-  const paper = s.accounts.find((a) => a.account === "PAPER" && a.configured);
-  const components: DiscordMessage["components"] = paper
-    ? [
-        {
-          type: 1,
-          components: [
-            paper.mode === "PAUSED"
-              ? { type: 2, style: 3, label: "Resume PAPER entries", custom_id: "resume:PAPER" }
-              : { type: 2, style: 2, label: "Pause PAPER entries", custom_id: "pause:PAPER" },
-            { type: 2, style: 4, label: "Flatten PAPER…", custom_id: "flatten:PAPER" },
-          ],
-        },
-      ]
-    : [];
-  return {
-    components,
-    content:
-      `🧠 **CORTEX-54** · pulse ${age} · budget **${s.budget.mode}** (${s.budget.worst.resource} ${(s.budget.worst.fraction * 100).toFixed(0)}%) · journal #${s.journalHead.seq}${s.outboxPending > 0 ? ` (${s.outboxPending} unflushed)` : ""}` +
-      (regimeLine ? `\n🌐 ${regimeLine}` : ""),
-    embeds,
-  };
-}
-
-/** Informational contract card for #court. No buttons: execution never waits on a human (ADR-024). */
-export function contractCard(k: DecisionContract): DiscordMessage {
-  return {
-    embeds: [
-      {
-        title: `⚖️ ${k.symbol} · ${k.strategy_id} · ${k.origin}`,
-        color: COLORS.cyan,
-        description: k.thesis_summary,
-        fields: [
-          { name: "Entry zone", value: `${k.entry_plan.zone_low} – ${k.entry_plan.zone_high}`, inline: true },
-          { name: "Stop", value: k.invalidation_criteria.stop_price, inline: true },
-          { name: "Target", value: k.entry_plan.targets.join(" / "), inline: true },
-          { name: "Bear case", value: k.bear_case_brief.slice(0, 1000), inline: false },
-        ],
-        footer: { text: `contract ${k.contract_id}` },
-      },
-    ],
-  };
-}
-
-const postureColor = (p: string) =>
-  p === "NEW_ENTRY_ALLOWED" ? COLORS.green : p === "REDUCE_ONLY" ? COLORS.yellow : COLORS.red;
-
-/** Posture card for #pulse-and-briefs (crypto every 4 h, equities pre-open/post-close). */
-export function postureCard(b: Batch, previous: string | null): DiscordMessage {
-  const p = b.posture;
-  if (!p) return { content: `${b.job}: ${b.items.length} item(s)` };
-  const changed = previous !== null && previous !== p.posture ? ` (was ${previous})` : "";
-  return {
-    embeds: [
-      {
-        title: `${p.arena === "CRYPTO" ? "🪙 Crypto regime" : "📊 Equity posture"} · ${p.posture}${changed}`,
-        color: postureColor(p.posture),
-        description: p.summary,
-        fields: [
-          { name: "Score", value: `${p.score.toFixed(1)} / 100`, inline: true },
-          {
-            name: "Exposure ceiling",
-            value: p.ceiling === null ? "—" : `${(p.ceiling * 100).toFixed(0)}%`,
-            inline: true,
-          },
-          { name: "Confidence", value: p.confidence ?? "—", inline: true },
-          ...b.items.slice(0, 6).map((i) => ({
-            name: i.skill_id,
-            value: String((i.payload as { headline?: unknown }).headline ?? "ok").slice(0, 200),
-            inline: false,
-          })),
-        ],
-        footer: {
-          text: `${b.job} · produced ${new Date(b.produced_at).toISOString()}${b.run_url ? " · GitHub Actions" : ""}`,
-        },
-        timestamp: new Date(b.produced_at).toISOString(),
-      },
-    ],
-  };
-}
-
-/** #world-intel card for a Tier 1 promotion. */
-export function intelCard(
-  it: TriageItem,
-  d: { material: number; direction: string; escalate: number },
-  payload: Record<string, unknown>,
-): DiscordMessage {
-  const arrow = d.direction === "up" ? "📈" : d.direction === "down" ? "📉" : "↔️";
-  const url = typeof payload.url === "string" && payload.url.startsWith("https://") ? payload.url : null;
-  return {
-    embeds: [
-      {
-        title: `${arrow} ${it.symbols.slice(0, 4).join(", ") || it.kind} · P(material) ${d.material.toFixed(2)} · priority ${d.escalate.toFixed(1)}/3`,
-        color: d.direction === "up" ? COLORS.green : d.direction === "down" ? COLORS.red : COLORS.cyan,
-        description: `${it.headline.slice(0, 300)}${url ? `\n${url}` : ""}`,
-        footer: {
-          text: `${it.kind} · ${it.source} · ${it.ageMinutes}m old · Tier 1 clef-flash → Tier 2 queue`,
-        },
-      },
-    ],
-  };
-}
-
-export interface CourtSession {
-  symbol: string;
-  arena: string;
-  catalyst: { headline: string; source: string; url: string | null; kind: string };
-  bid: number;
-  atr: number;
-  facts?: Record<string, string | number> | null;
-  kronos?: string | null;
-  research?: Dossier | null;
-  bull?: {
-    thesis: string;
-    setup?: string;
-    entry_low: number;
-    entry_high: number;
-    stop: number;
-    targets: number[];
-    conviction: number;
-    horizon_hours: number;
-    receipts?: string[];
-    by: string;
-  };
-  bear?: { fatal_flaws: string[]; kill_criteria: string[]; lethality: number; brief?: string; by: string };
-  rebuttal?: {
-    rebuttal: string;
-    concessions: string[];
-    still_long: boolean;
-    revised_conviction: number;
-    by: string;
-  };
-  panel?: SeatOpinion[];
-  synth?: {
-    winProb: number;
-    calibrated: number;
-    bearLethality: number;
-    regimeFit: number;
-    suitability100: number;
-  };
-  contractId?: string;
-  verdict?: string;
-  ok?: boolean;
-}
-
-const bar = (p: number) =>
-  `${"█".repeat(Math.round(p * 10))}${"░".repeat(10 - Math.round(p * 10))} ${(p * 100).toFixed(0)}%`;
-const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
-const model = (by: string) => `\`${by.split("/").slice(1).join("/") || by}\``;
-const STANCE: Record<string, string> = { support: "🟢 SUPPORT", oppose: "🔴 OPPOSE", abstain: "⚪ ABSTAIN" };
-
-/**
- * #bull-vs-bear-court transcript (ADR-044): one message, one embed per stage of the hearing — the docket, the bull's
- * opening, the bear's cross-examination, the bull's rebuttal, the expert panel and the ruling. Kept under Discord's
- * 6,000-character message limit by trimming the longest fields first.
- */
-/** ADR-051: the research desk's briefing as one compact embed inside the court transcript (budget ≈ 1,300 chars). */
-function researchBriefEmbed(d: Dossier) {
-  const mark = { BULL: "🟢", BEAR: "🔴", NEUTRAL: "⚪" } as const;
-  const top = [...d.findings]
-    .sort((a, b) => Number(b.verified) - Number(a.verified))
-    .slice(0, 4)
-    .map(
-      (f) =>
-        `${mark[f.stance]} ${cut(f.claim, 150)} *(${f.published ?? "undated"}, [${hostOf(f.source_url)}](${f.source_url}))*`,
-    )
-    .join("\n");
-  const next = d.catalysts
-    .slice(0, 3)
-    .map((c) => `**${c.date ?? "date?"}** ${cut(c.event, 90)}`)
-    .join(" · ");
-  const fields: { name: string; value: string; inline?: boolean }[] = [];
-  if (top) fields.push({ name: "Exhibits from the web", value: cut(top, 900) });
-  if (next) fields.push({ name: "📅 On the calendar", value: cut(next, 320) });
-  const counts = { BULL: 0, BEAR: 0, NEUTRAL: 0 };
-  for (const f of d.findings) counts[f.stance] += 1;
-  const a = d.agent;
-  return {
-    title: `📚 Research desk briefing — ${d.findings.length} findings · 🟢 ${counts.BULL} · 🔴 ${counts.BEAR}`,
-    description: cut(d.summary || "(no summary)", 420),
-    color: COLORS.cyan,
-    fields,
-    footer: {
-      text: cut(
-        `${a.steps} steps · ${a.tool_calls} tool calls · ${a.pages_read} pages read · ${a.models[0] ?? "?"} · unverified web text, cite as res_*`,
-        200,
-      ),
-    },
-  };
-}
-
-function hostOf(u: string): string {
-  try {
-    return new URL(u).hostname.replace(/^www\./, "");
-  } catch {
-    return "source";
-  }
-}
-
-/** ADR-051: the research desk's dossier, posted to the court channel before the hearing. */
-export function dossierCard(d: Dossier): DiscordMessage {
-  const mark = { BULL: "🟢", BEAR: "🔴", NEUTRAL: "⚪" } as const;
-  const findings = d.findings
-    .slice(0, 8)
-    .map(
-      (f) =>
-        `${mark[f.stance]} ${cut(f.claim, 220)} — *${f.published ?? "undated"}* [${cut(f.source_title || "source", 40)}](${f.source_url})${f.verified ? "" : " ·headline only"}`,
-    )
-    .join("\n");
-  const cats = d.catalysts
-    .slice(0, 5)
-    .map((c) => `• **${c.date ?? "date?"}** ${cut(c.event, 160)}`)
-    .join("\n");
-  const fields: { name: string; value: string; inline?: boolean }[] = [];
-  if (cats) fields.push({ name: "📅 What's coming", value: cut(cats, 900) });
-  if (d.bull_case) fields.push({ name: "🐂 Case for", value: cut(d.bull_case, 500), inline: true });
-  if (d.bear_case) fields.push({ name: "🐻 Case against", value: cut(d.bear_case, 500), inline: true });
-  if (d.risks.length)
-    fields.push({ name: "⚠️ Risks", value: cut(d.risks.map((r) => `• ${r}`).join("\n"), 600) });
-  if (d.open_questions.length)
-    fields.push({
-      name: "❓ Could not verify",
-      value: cut(d.open_questions.map((q) => `• ${q}`).join("\n"), 400),
-    });
-  const a = d.agent;
-  return {
-    embeds: [
-      {
-        title: `📚 Research desk — ${d.symbol}`,
-        description: cut(`${d.summary || "(no summary)"}\n\n**Key findings**\n${findings || "none"}`, 3500),
-        color: COLORS.cyan,
-        fields,
-        footer: {
-          text: cut(
-            `${a.steps} steps · ${a.tool_calls} tool calls · ${a.pages_read} pages read · ${Math.round(a.wall_s)} s · ${a.models.join(", ")} · web text is unverified`,
-            300,
-          ),
-        },
-      },
-    ],
-  };
-}
-
-export function courtSessionCard(s: CourtSession): DiscordMessage {
-  type Field = { name: string; value: string; inline?: boolean };
-  type E = {
-    title: string;
-    description?: string;
-    color: number;
-    fields?: Field[];
-    footer?: { text: string };
-  };
-  const embeds: E[] = [];
-  const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
-
-  const docket: Field[] = [
-    {
-      name: "Market",
-      value: `bid **${s.bid}**\nATR14 ${s.atr.toPrecision(4)} (${pct(s.atr / s.bid)})`,
-      inline: true,
-    },
-    { name: "Source", value: `${s.catalyst.kind} · ${cut(s.catalyst.source, 40)}`, inline: true },
-  ];
-  const facts = Object.entries(s.facts ?? {});
-  if (facts.length > 0)
-    docket.push({
-      name: "🔎 Facts on the record (Clairic)",
-      value: facts.map(([k, v]) => `\`${k}\` ${v}`).join(" · "),
-    });
-  if (s.kronos) docket.push({ name: "🔮 Kronos (low confidence)", value: cut(s.kronos, 300) });
-  embeds.push({
-    title: `⚖️ CORTEX COURT — ${s.symbol} (${s.arena})`,
-    description: `**Matter before the court**\n> ${cut(s.catalyst.headline, 300)}${s.catalyst.url ? `\n[source](${s.catalyst.url})` : ""}`,
-    color: COLORS.cyan,
-    fields: docket,
-  });
-  if (s.research) embeds.push(researchBriefEmbed(s.research));
-
-  if (s.bull) {
-    const b = s.bull;
-    const rr = (b.targets[0] ?? b.entry_high) - b.entry_high;
-    const risk = b.entry_low - b.stop;
-    embeds.push({
-      title: `🐂 Opening statement — Bull Advocate`,
-      description: cut(b.thesis, 700),
-      color: COLORS.green,
-      fields: [
-        {
-          name: "Proposed trade",
-          value: `entry ${b.entry_low}–${b.entry_high}\nstop ${b.stop}\ntargets ${b.targets.join(" / ")}`,
-          inline: true,
-        },
-        {
-          name: "Terms",
-          value: `${b.setup ?? "—"} · ${b.horizon_hours}h\nreward:risk ${risk > 0 ? (rr / risk).toFixed(2) : "—"}\nconviction ${b.conviction}/10`,
-          inline: true,
-        },
-        ...(b.receipts?.length
-          ? [{ name: "Exhibits", value: cut(b.receipts.map((r) => `\`${r}\``).join(" "), 300) }]
-          : []),
-      ],
-      footer: { text: `argued by ${b.by}` },
-    });
-  }
-  if (s.bear) {
-    embeds.push({
-      title: `🐻 Cross-examination — Bear Prosecutor · lethality ${(s.bear.lethality * 100).toFixed(0)}%`,
-      description: s.bear.fatal_flaws
-        .slice(0, 4)
-        .map((f, i) => `**${i + 1}.** ${cut(f, 260)}`)
-        .join("\n"),
-      color: COLORS.red,
-      fields: [
-        {
-          name: "The bull is wrong if…",
-          value: cut(
-            s.bear.kill_criteria
-              .slice(0, 3)
-              .map((k) => `• ${k}`)
-              .join("\n"),
-            600,
-          ),
-        },
-      ],
-      footer: { text: `prosecuted by ${s.bear.by}` },
-    });
-  }
-  if (s.rebuttal) {
-    const r = s.rebuttal;
-    embeds.push({
-      title: `🐂 Rebuttal — ${r.still_long ? "the bull stands firm" : "the bull withdraws"}`,
-      description: cut(r.rebuttal, 900),
-      color: r.still_long ? COLORS.green : COLORS.orange,
-      fields: [
-        ...(r.concessions.length
-          ? [
-              {
-                name: "Conceded",
-                value: cut(
-                  r.concessions
-                    .slice(0, 3)
-                    .map((c) => `• ${c}`)
-                    .join("\n"),
-                  500,
-                ),
-              },
-            ]
-          : []),
-        {
-          name: "Conviction after cross",
-          value: `${s.bull?.conviction ?? "?"} → **${r.revised_conviction}**/10`,
-          inline: true,
-        },
-      ],
-      footer: { text: `answered by ${r.by}` },
-    });
-  }
-  if (s.panel && s.panel.length > 0) {
-    const tally = (k: string) => s.panel?.filter((p) => p.stance === k).length ?? 0;
-    embeds.push({
-      title: `🎓 Expert panel — ${tally("support")} for · ${tally("oppose")} against · ${tally("abstain")} abstain`,
-      color: COLORS.yellow,
-      fields: s.panel.map((p) => ({
-        name: `${p.emoji} ${p.title} — ${STANCE[p.stance] ?? p.stance} (${(p.confidence * 100).toFixed(0)}%)`,
-        value: cut(`*${p.headline}*\n${p.points.map((x) => `• ${x}`).join("\n")}\n— ${model(p.by)}`, 1000),
-      })),
-    });
-  }
-  const ruling: Field[] = [];
-  if (s.synth)
-    ruling.push({
-      name: "Clef 27B, presiding",
-      value: [
-        `\`P(win) raw   ${bar(s.synth.winProb)}\``,
-        `\`P(win) calib ${bar(s.synth.calibrated)}\``,
-        `\`Bear right   ${bar(s.synth.bearLethality)}\``,
-        `\`Regime fit   ${bar(s.synth.regimeFit)}\``,
-        `\`Suitability  ${bar(s.synth.suitability100 / 100)}\``,
-      ].join("\n"),
-    });
-  ruling.push({ name: "Judgment of the risk engine", value: cut(s.verdict ?? "—", 1000) });
-  embeds.push({
-    title: s.ok ? "🔨 RULING — trade approved" : "🔨 RULING — no trade",
-    color: s.ok ? COLORS.green : s.synth ? COLORS.yellow : COLORS.red,
-    fields: ruling,
-    footer: {
-      text: `${s.contractId ? `contract ${s.contractId}` : "no contract"} · models argue, code computes, the risk engine decides`,
-    },
-  });
-
-  // Discord: ≤ 1024 per field value, ≤ 4096 per description, ≤ 6000 characters per message.
-  for (const e of embeds) for (const f of e.fields ?? []) f.value = cut(f.value, 1024);
-  const size = () =>
-    embeds.reduce(
-      (n, e) =>
-        n +
-        e.title.length +
-        (e.description?.length ?? 0) +
-        (e.footer?.text.length ?? 0) +
-        (e.fields ?? []).reduce((m, f) => m + f.name.length + f.value.length, 0),
-      0,
-    );
-  while (size() > 5800) {
-    let longest: { get: () => string; set: (v: string) => void } | null = null;
-    let len = 0;
-    for (const e of embeds) {
-      if ((e.description?.length ?? 0) > len) {
-        len = e.description?.length ?? 0;
-        longest = { get: () => e.description ?? "", set: (v) => (e.description = v) };
-      }
-      for (const f of e.fields ?? [])
-        if (f.value.length > len) {
-          len = f.value.length;
-          longest = { get: () => f.value, set: (v) => (f.value = v) };
-        }
-    }
-    if (!longest || len < 80) break;
-    longest.set(cut(longest.get(), Math.floor(len * 0.8)));
-  }
-  return { embeds };
-}

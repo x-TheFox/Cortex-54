@@ -154,6 +154,13 @@ describe("Tier 2 exception bar (ADR-039)", () => {
       },
     },
   });
+  it("a Strong structure passes Tier 2 (2026-10-27: the old bar of 78 meant Excellent only)", () => {
+    expect(interpretTier2(ans(0.8, 0.8) as never, d)).toMatchObject({ pass: true, quality100: 75 });
+    const fair = ans(0.8, 0.8);
+    (fair.answers.structural_quality as { score: number }).score = 2;
+    expect(interpretTier2(fair as never, d).reasons.join(" ")).toContain("quality 50 <");
+  });
+
   it("waives regime alignment but demands a higher long_favored for exception candidates", () => {
     const normal = interpretTier2(ans(0.8, 0.2) as never, d);
     expect(normal.reasons.join(" ")).toContain("regime_alignment");

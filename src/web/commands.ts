@@ -4,7 +4,19 @@ import type { AccountId } from "../lib/ids.ts";
  * Operator commands shared by Discord and the web terminal (Phase 6 exit: every control has parity).
  * Status is rendered by each front end; everything else returns the brain's one-line answer.
  */
-export const OPERATOR_COMMANDS = ["status", "pause", "resume", "dial", "unlock", "flatten", "court"] as const;
+export const OPERATOR_COMMANDS = [
+  "status",
+  "pause",
+  "resume",
+  "dial",
+  "unlock",
+  "flatten",
+  "court",
+  "why",
+  "roast",
+  "book",
+  "universe",
+] as const;
 export type OperatorCommand = (typeof OPERATOR_COMMANDS)[number];
 
 export interface CommandArgs {
@@ -13,6 +25,7 @@ export interface CommandArgs {
   confirm?: string | undefined;
   postmortem?: string | undefined;
   symbol?: string | undefined;
+  thesis?: string | undefined;
 }
 
 /** The DO stub surface the runner needs (the real stub and test fakes both satisfy it). */
@@ -23,6 +36,13 @@ export interface OperatorBrain {
   unlock(account: AccountId, postmortem: string, by: string): Promise<string> | string;
   flatten(account: AccountId, by: string): Promise<string>;
   court(symbol: string, by: string): Promise<string>;
+  /** MLP0-011: the decision trail for a symbol (deterministic). */
+  why(symbol: string): Promise<string> | string;
+  /** PSS-013 co-pilot: the court judges the operator's own idea; never trades. */
+  roast(symbol: string, thesis: string, by: string): Promise<string>;
+  /** ADR-061: the book review now. */
+  book(): Promise<string>;
+  universe(): Promise<string> | string;
 }
 
 const asAccount = (a: unknown): AccountId | null => (a === "PAPER" || a === "LIVE" ? a : null);
@@ -52,14 +72,23 @@ export async function runCommand(
         : needAccount;
     case "flatten":
       return account ? { ok: true, message: await b.flatten(account, by) } : needAccount;
-    case "court": {
+    case "court":
+    case "why":
+    case "roast": {
       const symbol = String(args.symbol ?? "")
         .trim()
         .toUpperCase();
-      if (!/^[A-Z.]{1,8}(\/USD)?$/.test(symbol))
+      if (!/^[A-Z0-9.]{1,10}(\/USD)?$/.test(symbol))
         return { ok: false, message: "Give a symbol, e.g. BTC/USD or NVDA." };
+      if (name === "why") return { ok: true, message: await b.why(symbol) };
+      if (name === "roast")
+        return { ok: true, message: await b.roast(symbol, String(args.thesis ?? ""), by) };
       return { ok: true, message: await b.court(symbol, by) };
     }
+    case "book":
+      return { ok: true, message: await b.book() };
+    case "universe":
+      return { ok: true, message: await b.universe() };
     default:
       return { ok: false, message: `Unknown command ${name}` };
   }

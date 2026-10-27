@@ -10,6 +10,7 @@ dependencies = [
   "pandas-market-calendars==5.2.2",
   "yfinance>=0.2.0",
   "pyyaml>=6",
+  "anthropic>=2.3.0",
 ]
 
 [dependency-groups]
@@ -24,6 +25,9 @@ kronos = [
   "safetensors==0.6.2",
   "tqdm>=4.66",
 ]
+
+# Kronos companion (ADR-069): Chronos-2 (Apache-2.0), installed with the kronos group for `run kronos`
+chronos = ["chronos-forecasting>=2.1"]
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]

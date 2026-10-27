@@ -3,7 +3,7 @@
  * Small, transactional, current-state only. History goes to D1 via the outbox.
  * Once deployed: bump HOT_SCHEMA_VERSION and append statements; never edit applied ones.
  */
-export const HOT_SCHEMA_VERSION = 7;
+export const HOT_SCHEMA_VERSION = 9;
 
 export const HOT_SCHEMA: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -84,4 +84,30 @@ export const HOT_SCHEMA: readonly string[] = [
      received_at INTEGER NOT NULL)`,
   `CREATE TABLE IF NOT EXISTS court_waits (candidate_id TEXT PRIMARY KEY, symbol TEXT NOT NULL,
      until_at INTEGER NOT NULL)`,
+  // v8: dynamic universe (ADR-058) and the prefilter's near-duplicate memory
+  `CREATE TABLE IF NOT EXISTS universe (symbol TEXT PRIMARY KEY, arena TEXT NOT NULL, status TEXT NOT NULL,
+     source TEXT NOT NULL, reason TEXT NOT NULL, metrics_json TEXT NOT NULL, added_at INTEGER NOT NULL,
+     expires_at INTEGER NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS headline_ring (id TEXT PRIMARY KEY, tokens TEXT NOT NULL, at INTEGER NOT NULL)`,
+  // v8: exit intelligence (ADR-059): excursions, ratchet/trail state and re-underwriting per open position
+  `CREATE TABLE IF NOT EXISTS position_watch (account TEXT NOT NULL, symbol TEXT NOT NULL, contract_id TEXT NOT NULL,
+     initial_stop REAL NOT NULL, mfe REAL NOT NULL, mae REAL NOT NULL, trailing INTEGER NOT NULL DEFAULT 0,
+     regime_open_at_entry INTEGER, extended_until INTEGER, last_review_at INTEGER, reviews INTEGER NOT NULL DEFAULT 0,
+     last_tripwires TEXT, pending_headline TEXT, PRIMARY KEY (account, symbol))`,
+  // v8: resting convictions (ADR-060): approved court contracts waiting for their entry zone or a free slot
+  `CREATE TABLE IF NOT EXISTS resting (contract_id TEXT NOT NULL, account TEXT NOT NULL, symbol TEXT NOT NULL,
+     until_at INTEGER NOT NULL, created_at INTEGER NOT NULL, checks INTEGER NOT NULL DEFAULT 0, why TEXT NOT NULL,
+     PRIMARY KEY (contract_id, account))`,
+  // v8: job queue for desktop runners (ADR-065): research jobs a linked CORTEX app claims instead of GitHub Actions
+  `CREATE TABLE IF NOT EXISTS job_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, workflow TEXT NOT NULL, key TEXT NOT NULL,
+     inputs_json TEXT NOT NULL, created_at INTEGER NOT NULL, claimed_at INTEGER, claimed_by TEXT)`,
+  // v8: journal rows waiting to be published to the community hub (ADR-068)
+  `CREATE TABLE IF NOT EXISTS hub_outbox (seq INTEGER PRIMARY KEY, row_json TEXT NOT NULL)`,
+  // v8: hourly BTC and SPY prices for the buy-and-hold benchmark beside the equity line (MLP0-024)
+  `CREATE TABLE IF NOT EXISTS bench_history (at INTEGER PRIMARY KEY, btc REAL, spy REAL)`,
+  // v9: the app's feed (ADR-071): every card the brain sends to Discord, kept for the web app, which is the main
+  // dashboard. Discord is optional on top.
+  `CREATE TABLE IF NOT EXISTS inbox (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, channel TEXT NOT NULL,
+     msg_json TEXT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS inbox_channel ON inbox (channel, id)`,
 ];

@@ -810,3 +810,234 @@ found:
 
 **Kept:** the constitution, crypto gates, Tier 2's bar, breakers, long-only, and the losing bounce and inverse-ETF
 strategies staying in the LAB.
+
+## ADR-057 — Research desk v2: wide steps, two scopes, compaction, fast and deep rings (2026-10-26)
+**Context:** the operator asked for no 3-tool-call limit, research that covers both the general news and the story
+behind the triggering headline, automatic compaction, and permission to run long since research is the system's main
+window on the world.
+**Decision:**
+- Up to 8 tool calls per step, run in parallel (`Limits.max_actions_per_step`, thread pool).
+- The first step is seeded by the harness with one search per scope: MARKET (section headlines + market news),
+  CATALYST (the triggering headline), ASSET. Notes carry a scope; the agent names 2–3 cruxes first; the first
+  "finish" is held back once for a CONTRA hunt.
+- Compaction at 55% of the main models' context: the model writes a digest; code keeps only digest items whose URLs
+  and numbers appear in the notes they replace. All notes stay in memory for the dossier.
+- Two rings: the fast dossier posts for the court (which waits ≤ 25 min as before); the run continues up to ~2 h
+  (`depth: deep`) and posts a deep dossier that replaces it. Depth is stake-weighted (Tier 2 quality ≥ 90 or exception
+  lane → deep). Watch mode researches held positions against the bear's kill criteria.
+- The dossier gains market_context, catalyst_trace (origin URL only if a tool returned it), cruxes, related symbols,
+  code-computed filing flags (S-1/S-3/424Bx in 30 days, 8-K in 3 days) and a watch-mode thesis status.
+
+## ADR-058 — Dynamic universe and the scout (2026-10-26)
+**Context:** "every symbol can be watched and traded"; a scout ports symbols in when news is promising.
+**Decision:** the whole Alpaca news stream is intake behind a zero-neuron prefilter (catalyst words vs wire noise,
+near-duplicate check, a daily cap on non-watchlist headlines). When a catalyst about an unknown symbol passes Tier 1,
+the scout screens it in code (tradable, active, fractionable stock, not OTC, no leveraged/inverse/volatility name
+unless the constitution lists it, no stablecoin, ≥ 30 daily bars, dollar volume and spread floors measured on Alpaca's
+venue / the IEX feed) and hot-ports it as TRADE for 7 days (renewed by new catalysts, kept while held). Refusals are
+cached for a day. Research-named related symbols are WATCH (news priority, no trading without their own catalyst).
+Hot-ported stocks need a whole-market earnings calendar (`coverage: all`, next 4 days, Nasdaq complete) or they fail
+closed. LAB keeps the watchlists only.
+
+## ADR-059 — Exit intelligence (2026-10-26)
+**Context:** "90% of IQ is spent on entry". Exits were three fixed rules.
+**Decision:** MFE/MAE per position; breakeven + fees at +1R, ATR chandelier trail from +1.5R (tighter when the regime
+closes); hold-or-harvest at the target (trail for ≤ 48 h past the horizon only while regime, EMA20, RSI < 78 and Kronos
+agree); tripwires (regime flip since entry, Kronos p10 breach, funding stress, a WEAKENED/BROKEN watch dossier, a
+material headline about the held symbol) trigger one Clef re-underwriting call → HOLD/TIGHTEN/EXIT, code sets every
+price; equities are sold before earnings inside the blackout; a stagnant position (≥ half its horizon, |R| < 0.25) can
+be released for a stronger waiting court contract. Stops only ever move up. LAB keeps plain exits as a control. The
+Governor grades exits (capture, give-back, left on the table, saved) separately from entries.
+
+## ADR-060 — Entry timing: lateness meter, resting convictions, temporal fact sheet (2026-10-26)
+**Decision:** Tier 0 measures the move since the headline on hourly bars in daily ATRs (plus pre-drift and volume
+ratio); ≥ 0.8 ATR is LATE and refused (graded like other refusals). Court contracts blocked only by "price ran past the
+zone" or "max positions" rest for ≤ 48 h (and ≤ half their horizon), re-checked every pulse with every gate. Evidence
+opens with today's date, weekday and US session.
+
+## ADR-061 — Governor exit scorecard, virtual monkey control, missed moves; operator commands (2026-10-26)
+**Decision:** the Governor simulates two control groups on the same bars (random entries with our geometry; our
+entries with random exits) and reports the entry and exit edge, plus watchlist moves ≥ 3 ATR that never reached Tier 0.
+New commands on Discord and the web terminal: `/why` (a deterministic decision trail from the journal), `/roast`
+(the court judges the operator's own idea; never a contract or an order), `/book` (weekly review: R, age, correlation,
+net beta to BTC/SPY, crash replay), `/universe`.
+
+## ADR-062 — Monitoring surfaces (2026-10-26)
+**Decision:** ntfy phone pushes for alarms, fills/exits, rulings, reviews and weekly cards (topic = secret);
+`/pill` read-only status with a bearer token for the SwiftBar (macOS) and PowerShell tray (Windows) widgets; the web
+terminal is installable as an app (manifest + pass-through service worker; CSP allows manifest/worker from self).
+
+## ADR-063 — BYOK models and portable Clef (2026-10-26)
+**Decision:** Claude (official SDK, `claude-opus-5-5`, server-side refusal fallback on), OpenAI, a local Ollama model
+or any OpenAI-compatible endpoint lead the court chains when the user brings a key (`llm_routing.byok`); without keys
+the free chains run as before. Clef runs outside the Worker through the Workers AI REST API, or through a shim that
+answers Clef's question format with any chat model (answers pass the same conformance check).
+**Revised the same day:** BYOK became the model pool (ADR-072); Clef/Clairic run only on the user's Cloudflare AI, with
+a structured stand-in when it is missing (ADR-072).
+
+## ADR-064 — cortexd local mode (2026-10-26)
+**Decision:** the same Brain runs in Node: SQLite files for hot state and the journal (same migrations), a keyless
+sandbox broker on live public crypto prices (demo) or the user's own Alpaca paper account, research jobs as local
+`uv` subprocesses (no GitHub), the web terminal on localhost, a background service (launchd / systemd user unit /
+logon task) and the `cortex` CLI (`setup`, `doctor`, `start`, `demo`, `link`, `service`, `kill`, `rearm`, `--json`
+everywhere). LIVE keys are not accepted in local mode. Fixed on the way: `isRevoked` compared `null` to `undefined`,
+so every web terminal command answered "signed out".
+
+## ADR-065 — Cloud mode without GitHub: job queue, desktop runner, `cortex deploy` (2026-10-26)
+**Decision:** `RUNNER_MODE=queue` puts the brain's batch jobs in a hot queue that a linked desktop (`cortex runner`)
+claims over an HMAC-signed endpoint and runs locally. `cortex deploy` provisions D1, KV, the brain and the sentinel in
+the user's own Cloudflare account. Because a deploy uploads the (minified) code to the customer's account, it is an
+advanced option, not the product default (see docs/DISTRIBUTION.md).
+
+## ADR-066 — Desktop app and headless image (2026-10-26)
+**Decision:** a Tauri v2 shell runs the bundled `cortexd.mjs` on a shipped, checksum-verified official Node runtime,
+opens the cockpit with a one-time login, keeps a tray pill (equity, positions, pulse; kill switch and re-arm), hides to
+the tray on close, and the daemon exits with the app. The product bundle ships no TypeScript source. A Dockerfile runs
+the same bundle headless.
+
+## ADR-067 — Sanity vetoes (2026-10-26)
+**Decision:** new crypto entries are refused when USDT or USDC is > 50 bps off $1 or Alpaca's mid is > 1% from
+Coinbase's; stock entries are refused while Nasdaq's halt feed shows the symbol halted. Unreachable sources are counted
+as policy vacuums and don't block (the validator's own quote gates still fail closed).
+
+## ADR-068 — Community hub (2026-10-26)
+**Context:** commercial direction: a community, shared memory, copy trading, leaderboards — without hosting anyone's
+broker keys or code.
+**Decision:** a small hub Worker the publisher hosts. Agents identify by their own Ed25519 key; they publish signed
+batches of public journal rows (contracts, rulings, exits, excursions, reviews) whose hashes the hub recomputes; heads
+can't go backwards and published rows can't change. A leaderboard ranks agents with ≥ 5 closed trades. Following an
+agent turns its court approvals into Tier 2 leads for the follower's own funnel (never orders). Memory packs (scar
+rules + beliefs) are signed; importing stages a proposal that only `cortex memory apply` merges, beliefs at half
+confidence. Scar rules only ever remove trades.
+
+## ADR-069 — Kronos companion: Chronos-2 (2026-10-26)
+**Decision:** Timer-S1 (8.3B MoE, non-commercial paper licence) is not usable in a sold CPU product; Chronos-2
+(Apache-2.0, 120M, CPU ≈ 0.2 s per series) runs beside Kronos in the forecast job. Its p_up and quantiles are stored
+and shown as a SHADOW second opinion only, until the Governor has graded both on the same outcomes.
+
+## ADR-070 — Model drift canary, chaos test, and what they found (2026-10-26)
+**Decision:** a weekly workflow sends the same golden bull prompt to every court model and records answered / schema /
+latency. Its first run found Gemini 3.5 and 3.8 both 503, Qwen failing Groq's JSON validation and TPM cap, and Nemotron
+cut off mid-reasoning at 1,500 tokens. Fixes: NIM gets a 4,096-token output floor (4/4 valid after), the OpenAI-compatible
+provider retries once without JSON mode on Groq's validation 400, and the chains are ordered so a cross-family pair
+exists when only Groq gpt-oss and NIM answer. A seeded chaos test (random 5xx, lost order responses, failing cancels
+across hundreds of pulses) checks the money invariants; it led to broker-sync alerts firing only after 3 failed pulses
+in a row (69 alerts in 6 simulated days before).
+
+## ADR-071 — The app is the dashboard; Discord is optional (2026-10-26)
+**Context:** commercial product: the desktop app and its panel are what people use. Discord was the dashboard
+(alerts, court transcripts, commands), which a non-technical buyer shouldn't need.
+**Decision:** every card the brain posts also lands in a hot-store inbox (`InboxNotifier`, hot schema v9, bounded to
+3,000 rows / 30 days) that the app's FEED renders; the live HUD is not kept (the cockpit is its live version). ASK
+carries why / court / roast / book review / watchlist. Replies that named Discord channels now name the feed. Discord
+connects from a bot token alone (`src/discord/setup.ts`: category, channels, invite link when needed; the operator's
+script uses the same code plus the sentinel webhook and slash commands). LIVE autonomy and LIVE unlocks are allowed
+from the app on a session signed in within the last 10 minutes (RATIFY and the cooling-off unchanged); before, they
+were Discord-only.
+**Cost:** one hot-store row per card (~100–300/day), far inside the DO's 100k rows written/day.
+
+## ADR-072 — The model pool, and Clef/Clairic only on Cloudflare AI (2026-10-26)
+**Context:** operator: users bring any number of endpoints, free or paid, round robin across all models with
+fallbacks; warn when only one model exists. Separately: no local Clef; Clef and Clairic need a Cloudflare AI key, and
+without it an LLM answers in their exact structure.
+**Decision:** `src/court/pool.ts`. The pool is the built-in free providers (their doctrine-verified models, families
+and daily caps) plus the user's endpoints (`LLM_POOL` secret in the cloud, `llm` in the local config). Order: free
+first / paid first / mixed; round robin rotates the bull and bear chains within each tier group on every hearing
+(other chains, like the rebuttal pinned to the bull's own model, run as given); the bear starts one step further
+round. Families: lineages when the pool has several (the strongest independence), each model its own family when it
+has one lineage; the same model on two endpoints counts once. One model total blocks the court until the user adds a
+second or accepts the same model on both sides (then a `~bear` alias with its own family; the warning stays). A model
+that is rate-limited or times out sits out for 5 minutes. OpenAI-compatible endpoints adapt to servers that reject a
+parameter (JSON mode, temperature, `max_tokens` → `max_completion_tokens`); Anthropic-compatible endpoints get the
+server-side refusal fallback only on api.anthropic.com with a supported model (it would 400 elsewhere). Model
+discovery: OpenAI `GET /models` (retrying with `/v1`), Anthropic Models API via the SDK. Clef/Clairic in local mode:
+Cloudflare Workers AI (REST) when its key is set; otherwise `ShimClef`/`ShimClairic` on the pool's best model, with a
+JSON schema built from the questions/fields and the same validators; every surface says performance is marginally
+lower. The two-endpoint BYOK built earlier that day is gone (never released).
+
+## ADR-073 — First-launch onboarding, live settings (2026-10-26)
+**Decision:** a local brain that hasn't been onboarded opens a welcome screen with two paths: a five-step wizard
+(account, AI models, Cloudflare AI, alerts, done; each step is the same component as SETTINGS) or a prompt to paste
+into any agent that runs commands (`local/agent-prompt.ts`, identical to docs/SETUP_WITH_AN_AGENT.md, test-enforced).
+Settings save to config.json and reload the brain in-process (same port, same session secret); the CLI also watches
+config.json, so an agent's `cortex llm add` / `cortex setup --set …` apply live. New CLI: `cortex llm list|add|remove|
+models|prefs`, `cortex setup --onboarded`. Keys never go back to the browser (only "…last4"). Local sessions last 30
+days (cloud 12 h). The cockpit gains TODAY, one plain sentence on top of ACCOUNTS.
+
+## ADR-074 — The court waits for deep research; the product's support and safety net (2026-10-26)
+**Context:** operator: the court should hear the deep dossier and use the fast one only when the deep run is slow.
+A re-review of every idea for the app-first objective found the research desk ignored the user's model pool, and
+that a sold product needs a way to ask for help and to recover from a bad cloud deploy.
+**Decision:** dossiers carry `complete`; the early fast ring is `complete: false` and only shortens the court's wait
+to `funnel.research.deep_wait_minutes` (12) after dispatch; a complete dossier releases at once; a late partial never
+replaces a complete one. The research desk reads `LLM_POOL` (the user's order; Anthropic-compatible endpoints via the
+official Python SDK). `cortex support` / SETTINGS → HEALTH write a redacted support file (key names, never values;
+test-enforced) and show the doctor's checks in plain words (`local/health.ts`, shared). `cortex deploy` verifies the
+new brain answers /health with this build's constitution and runs `wrangler rollback -y` if it doesn't. SETTINGS shows
+a 7-day model scoreboard from `llm_calls`. Remaining re-verdicts are planned in docs/IDEAS_WORKLOG.md §F.
+**Addendum 2026-10-27 (live funnel review):** in 3 days PAPER placed no orders. 97 promoted headlines → 77 stopped at
+Tier 0 (stale or REDUCE_ONLY equity posture, stale quotes, bearish catalysts) → 23 reached Tier 2 → 0 passed. Crypto is
+in a drawdown (BTC under its EMA20, every pair 7–27% under its 20-day high), so the long-only breakout is correctly
+idle. One bug: `min_structural_score` 78 on a 5-level score (0/25/50/75/100) meant "Excellent only"; now 70.
+
+
+## ADR-075 — Paid-model cost meter, spend caps, demote, court capacity (2026-10-27)
+**Context:** IDEAS_WORKLOG §E/§F: users who add paid models need to see and bound what they cost, drop a model that
+does badly without deleting it, and let the court hear more trades when quotas are no longer the limit (MLP5-005).
+**Decision:** endpoints may carry `price_in` / `price_out` (USD per 1M tokens) and `daily_spend_cap`. The router counts
+tokens per provider per UTC day through the brain's gate (hot `settings` rows, so a restart doesn't reset the cap;
+providers that report no usage are estimated at ~4 characters per token) and skips a provider once its cost reaches
+the cap; the rest of the pool carries on. The scoreboard shows 7-day cost per model and a DEMOTE / RESTORE switch
+(`prefs.demoted`, `provider/model`); demoted models leave the rotation and the pool notes say so. Local config
+`court.max_per_day` (1–60, default the doctrine's 12) overrides `funnel.tier3.max_sprints_per_day` and lifts the
+research dispatch cap with it; SETTINGS estimates the daily cost from the scoreboard's tokens and prices. The local
+cockpit's third gauge is AI USE TODAY (calls against each provider's daily cap; `StatusView.modelUse`) instead of the
+Cloudflare FREE TIER gauge, which means nothing on the user's own computer. Hearings never make a trade bigger.
+
+## ADR-076 — Keys in the OS keychain, encrypted backups, phone access, reset, tray health (2026-10-27)
+**Context:** IDEAS_WORKLOG §E/§F (MLP3-012, MLP4-031, MLP4-029, settings export, "reset this computer", tray health).
+**Decision:** `secret_store: "keychain"` moves every typed key out of config.json into the OS store (macOS Keychain via
+`security -i`, value on stdin; libsecret via `secret-tool`; Windows DPAPI per user), written before the file loses
+them; generated local secrets (session, ingest, the tray's pill token) stay in the file. `cortex backup [--keys]` /
+SETTINGS → BACK UP write one passphrase-encrypted file (scrypt N=2^15 → AES-256-GCM) with the settings, consistent
+`VACUUM INTO` copies of the hot store and journal, and applied memory packs; keys only when asked. Restore keeps this
+computer's own secrets, port and network setting, swaps the files with the brain stopped, and starts a paper backup
+without its Alpaca keys in demo mode. Phone access (`lan.enabled`, off by default) listens on the local network over
+plain HTTP; a phone signs in once through a QR code (encoded in the browser) and may watch and use the controls, but
+settings and keys can only change from the computer itself (403 for non-loopback settings writes); the session cookie
+drops `Secure` only in this mode. Phone alerts show their ntfy topic as a QR code too. Reset needs the typed word
+RESET, then stops the brain, removes the service and the keychain item, and deletes the CORTEX home (the broker account
+is untouched). `/pill` carries the one-line problem from the runtime checks, the kill switch, the licence or a
+blocked pool; the desktop tray shows it as ⚠ next to the icon and as a menu line.
+
+## ADR-077 — Releases: every platform, changelog, signed auto-update, licences, demo cockpit (2026-10-27)
+**Context:** operator: an app build and auto release with generated changelogs for all supported platforms; §F
+PSS-029…036 (licensing, signed updates) and PSS-037…039 (public demo cockpit).
+**Decision:** `.github/workflows/release.yml` runs on every merge to main that touches the app (or by hand with a
+minor/major bump): `scripts/changelog.ts` picks the next version from the latest `vX.Y.Z` tag and writes notes grouped
+from the commit subjects; a draft release is filled by a matrix build (macOS arm64 and x86_64, Linux x86_64 and arm64,
+Windows x86_64: dmg, app bundle, msi, NSIS installer, AppImage, deb, rpm), the demo cockpit zip, and `latest.json`
+for the Tauri updater; it is published once at least one platform built. Updater bundles are signed with a minisign
+key whose public half is in `tauri.conf.json`; the private half is the `TAURI_SIGNING_PRIVATE_KEY` repository secret
+(without it the installers still ship, but installed apps don't see the release). The app checks at launch and every
+6 hours and offers the update in the tray; nothing installs without a click. Apps are not code-signed or notarized
+(an Apple developer account costs money, so that's the operator's call); the notes say how to open them.
+Licences (`local/license.ts`) are Ed25519-signed JSON checked offline against a publisher key baked in at build time
+(`CORTEX_LICENSE_PUBKEY` repository variable; unset = builds that never check, like this public repo's). Without a
+valid licence demo mode works and paper mode holds new entries exactly like the kill switch, so every open position
+keeps its stop and exits; nothing unsafe ever follows from a licence problem. `scripts/license.ts` makes the publisher
+key and issues licences. `pnpm web:demo` builds the panel as static files that answer the API in the browser from the
+same fixtures as `pnpm web:dev` (the production build leaves that code out).
+
+## ADR-078 — Broker conformance suite; Brain.ts split begins (2026-10-27)
+**Context:** §F: MLP4-027 multi-broker adapters (customers Alpaca doesn't serve) and PSS-006 (the 6,900-line Brain.ts
+is a delivery risk for a product team).
+**Decision:** `src/broker/registry.ts` lists the venues CORTEX trades through with their capabilities, and
+`test/broker-conformance.test.ts` is the contract every adapter must pass unchanged: idempotent client order ids,
+lookups by client id, refusing to sell more than is held, cancels, fills as activities. It found the local sandbox
+broker accepted a sell with nothing held and reported a sale larger than the position; it now refuses both, like
+Alpaca. A second venue joins only after its adapter passes the suite and a supervised paper session against the real
+venue; the candidates and what each lacks (no paper mode, or an account to run the session) are listed in the
+registry, because an unverified adapter in the order path would be trading on a guess (U6). Brain.ts: the cards and
+terminal lines (~700 lines of pure rendering) moved to `src/cortex/cards.ts` (re-exported, so importers didn't
+change); the next modules follow the same way, one per quiet change, behind the simulated-pulse tests.
