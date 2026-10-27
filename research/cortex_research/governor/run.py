@@ -488,6 +488,9 @@ def main() -> int:
     # calibration map → file (the workflow turns a changed file into a PR)
     if a.weekly and len(pairs) >= MIN_OUTCOMES_FOR_MAP:
         method, pts = M.calibration_map(pairs)
+        # audit F-A2-03: maps only ever shrink confidence above a coin flip (the TS schema refuses anything else);
+        # min of two non-decreasing curves stays non-decreasing
+        pts = [(x, min(y, max(x, 0.5))) for x, y in pts]
         cal_path = REPO / "config" / "calibration.json"
         cal = json.loads(cal_path.read_text())
         incumbent = (cal.get("maps", {}).get("court.win_prob") or {}).get("points")

@@ -156,7 +156,7 @@ import {
   kronosSignal,
 } from "../strategy/KronosForecast.ts";
 import { prefilter } from "../universe/prefilter.ts";
-import { normalizeSymbol, screenAsset } from "../universe/screen.ts";
+import { isLeveragedOrInverse, normalizeSymbol, screenAsset } from "../universe/screen.ts";
 import { Universe } from "../universe/Universe.ts";
 import {
   addBusinessDays,
@@ -735,6 +735,14 @@ export class Brain {
         await this.ensureProtectiveStops(account, broker);
         await this.applyBreaker(account, broker);
         if (this.killedFor(account)) await this.cancelEntries(account, broker, "KILLED by sentinel");
+        // audit F-A2-01R: every path into REDUCE_ONLY or PAUSED (auto issues, oversized equity, budget, operator)
+        // takes resting entries down at once, not only the flatten path
+        const mode = this.account(account)?.mode;
+        if (
+          (mode === "REDUCE_ONLY" || mode === "PAUSED") &&
+          this.openOrders(account).some((o) => o.role === "ENTRY" && o.state !== "pending_cancel")
+        )
+          await this.cancelEntries(account, broker, mode);
       } catch (e) {
         if (!(e instanceof SubrequestBudgetExceeded)) {
           await this.alertOnce(
@@ -3339,9 +3347,23 @@ ${postmortem}`,
     }
     const insane = await this.sanityVeto(contract, now);
     if (insane) return insane;
-    const held = this.positions(account)
-      .map((p) => p.symbol)
-      .filter((s) => s !== contract.symbol);
+    // audit F-A2-02: "held" includes resting entry orders and live risk reservations, so two correlated entries in
+    // the same pulse (or one resting, one new) can't both pass
+    const held = [
+      ...new Set([
+        ...this.positions(account).map((p) => p.symbol),
+        ...this.openOrders(account)
+          .filter((o) => o.role === "ENTRY")
+          .map((o) => o.symbol),
+        ...this.sql
+          .exec<{ symbol: string }>(
+            "SELECT symbol FROM risk_reservations WHERE account = ? AND expires_at >= ?",
+            account,
+            now,
+          )
+          .map((r) => r.symbol),
+      ]),
+    ].filter((s) => s !== contract.symbol);
     const m = this.deps.market;
     if (held.length === 0 || !m) return null;
     const g = this.d.sizing.correlation_guard;
@@ -5389,6 +5411,12 @@ ${postmortem}`,
       return false;
     }
     const view = { ...baseView, availableCashUsd: Math.min(baseView.availableCashUsd, posture.roomUsd) };
+    // audit F-A2-07: U3 checked on every order, not only by how the universe is built: no leveraged, inverse or
+    // volatility product unless the constitution lists it (its 1x inverse ETFs)
+    if (contract.arena === "EQUITIES" && isLeveragedOrInverse(contract.symbol, meta.name, this.c)) {
+      this.reject(account, contract, "VALIDATOR", ["U3 leveraged, inverse or volatility product"], now);
+      return false;
+    }
     const asset = this.assetView(meta, contract.arena);
     const v = validateEntry(
       {
@@ -5452,7 +5480,8 @@ ${postmortem}`,
       contract.contract_id,
       account,
     );
-    if (ok) this.sql.exec("UPDATE accounts SET orders_today = orders_today + 1 WHERE account = ?", account);
+    // audit F-A2-05: every submit attempt counts against the daily cap, so a refusal loop can't run unbounded
+    this.sql.exec("UPDATE accounts SET orders_today = orders_today + 1 WHERE account = ?", account);
     return ok;
   }
 
