@@ -29,6 +29,7 @@ import {
   SCAR_TISSUE,
 } from "../src/generated/config.ts";
 import { hubFromEnv } from "../src/hub/client.ts";
+import { TERMS_VERSION } from "../src/legal/version.ts";
 import { verifyRoute } from "../src/lib/hmac.ts";
 import type { AccountId } from "../src/lib/ids.ts";
 import { InboxNotifier, readFeed } from "../src/notify/inbox.ts";
@@ -39,7 +40,6 @@ import { snapshotDb } from "./backup.ts";
 import { type LocalConfig, loadConfig } from "./config.ts";
 import { runtimeChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
-import { TERMS_VERSION } from "../src/legal/version.ts";
 import { entriesBlocked, readLicense } from "./license.ts";
 import { loadLocalScar, mergeScar } from "./memory.ts";
 import { SimBroker } from "./simbroker.ts";

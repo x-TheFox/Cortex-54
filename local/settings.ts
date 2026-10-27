@@ -10,6 +10,7 @@ import {
 } from "../src/court/pool.ts";
 import { discordSetup } from "../src/discord/setup.ts";
 import { DOCTRINE } from "../src/generated/config.ts";
+import { TERMS_VERSION } from "../src/legal/version.ts";
 import { ntfyUrl } from "../src/notify/push.ts";
 import type { WebSettings } from "../src/web/api.ts";
 import { AGENT_PROMPT } from "./agent-prompt.ts";
@@ -24,7 +25,6 @@ import {
 import { KEY_NAMES, type KeyName, type LocalConfig, LocalConfigSchema, saveConfig } from "./config.ts";
 import { configChecks, runtimeChecks } from "./health.ts";
 import { secretBackend } from "./keychain.ts";
-import { TERMS_VERSION } from "../src/legal/version.ts";
 import { activateKey, installLicense, readLicense, releaseKey, STORE_URL } from "./license.ts";
 
 /**

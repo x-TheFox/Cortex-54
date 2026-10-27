@@ -237,7 +237,14 @@ describe("breaker hysteresis (audit W3-01)", () => {
 describe("applyMap (audit F-B1-09: the TS twin gets its own direct test)", () => {
   it("interpolates, clamps outside the fitted range and stays monotone", async () => {
     const { applyMap } = await import("../src/contracts/calibration.ts");
-    const map = { n: 60, points: [[0.2, 0.25], [0.5, 0.45], [0.8, 0.6]] as [number, number][] };
+    const map = {
+      n: 60,
+      points: [
+        [0.2, 0.25],
+        [0.5, 0.45],
+        [0.8, 0.6],
+      ] as [number, number][],
+    };
     expect(applyMap(map, 0.1)).toBe(0.25);
     expect(applyMap(map, 0.9)).toBe(0.6);
     expect(applyMap(map, 0.5)).toBeCloseTo(0.45);

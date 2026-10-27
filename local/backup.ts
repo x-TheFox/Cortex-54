@@ -141,7 +141,8 @@ export function restoreInto(home: string, b: OpenedBackup, current: LocalConfig 
   // audit F-A6-06: stage every file first, then swap; if any swap fails, put the previous files back, so a failed
   // restore never leaves a mix of old and new databases
   const names = Object.keys(b.files);
-  for (const n of names) writeFileSync(join(home, `${n}.restore`), b.files[n as FileName] as Buffer, { mode: 0o600 });
+  for (const n of names)
+    writeFileSync(join(home, `${n}.restore`), b.files[n as FileName] as Buffer, { mode: 0o600 });
   const swapped: string[] = [];
   try {
     for (const n of names) {

@@ -3996,8 +3996,7 @@ ${postmortem}`,
     if (kill !== "CLEAR") return `Kill flag is ${kill}; no court sessions.`;
     if (this.budget.snapshot(now).mode === "REDUCE_ONLY")
       return "Budget is in REDUCE_ONLY; no court sessions.";
-    if (this.daily("court", now) >= this.courtCap())
-      return "Daily court cap reached.";
+    if (this.daily("court", now) >= this.courtCap()) return "Daily court cap reached.";
     const id = `operator:${target.symbol}:${now}`;
     this.sql.exec(
       "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 3, ?, ?, ?)",
@@ -4052,8 +4051,7 @@ ${postmortem}`,
     }
     if (!target) return `${symbolInput} isn't in the tradeable universe.`;
     if ((await this.readKill()) !== "CLEAR") return "Kill flag is set; no court sessions.";
-    if (this.daily("court", now) >= this.courtCap())
-      return "Daily court cap reached.";
+    if (this.daily("court", now) >= this.courtCap()) return "Daily court cap reached.";
     const id = `roast:${target.symbol}:${now}`;
     this.sql.exec(
       "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 3, ?, ?, ?)",

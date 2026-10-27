@@ -128,7 +128,11 @@ const VaultSchema = z.object({
 /** Fill any secret that is missing (an older vault, or a file from before keychain mode kept them). */
 function withSecrets(s: LocalConfig["secrets"], vault: Record<string, string>): LocalConfig["secrets"] {
   const pick = (k: keyof LocalConfig["secrets"]) => (vault[k] || s[k] || secret()) as string;
-  return { web_session: pick("web_session"), ingest_hmac: pick("ingest_hmac"), pill_token: pick("pill_token") };
+  return {
+    web_session: pick("web_session"),
+    ingest_hmac: pick("ingest_hmac"),
+    pill_token: pick("pill_token"),
+  };
 }
 
 export function loadConfig(home = cortexHome()): LocalConfig | null {
