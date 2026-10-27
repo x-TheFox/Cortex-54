@@ -5,12 +5,14 @@
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
+import { buildLegal } from "./build-legal.ts";
 
 const run = (args: string[]) => execFileSync("pnpm", ["exec", ...args], { stdio: "inherit" });
 
 run(["vite", "build", "--config", "landing/vite.config.ts"]);
 run(["vite", "build", "--config", "web/vite.demo.config.ts", "--outDir", "../landing-dist/demo"]);
 for (const f of ["landing-dist/demo/_headers", "landing-dist/demo/sw.js"]) if (existsSync(f)) rmSync(f);
+buildLegal(["landing-dist/legal"]); // ADR-087: terms, EULA, privacy, refunds, risk
 if (!existsSync("landing-dist/index.html") || !existsSync("landing-dist/demo/index.html")) {
   throw new Error("landing build incomplete");
 }

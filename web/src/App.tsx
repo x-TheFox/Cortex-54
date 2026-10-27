@@ -242,13 +242,13 @@ export function App() {
         <div className="signin">
           <div className="display">
             <div className="glass">
-              <span className="label dim">Savant · TERMINAL</span>
+              <span className="label dim">SAVANT · CORTEX</span>
               <p className="alert caution">
                 <span className="alert-title">
                   {boot === "expired" ? "LOGIN LINK EXPIRED" : "NO SESSION"}
                 </span>
               </p>
-              <p className="alert-action">OPEN THE DASHBOARD FROM THE Savant APP (TRAY → OPEN)</p>
+              <p className="alert-action">OPEN THE DASHBOARD FROM THE SAVANT APP (TRAY → OPEN)</p>
               <p className="alert-action">OR RUN `savant link` · OR /terminal IN DISCORD</p>
               <p className="alert-action">EACH LINK WORKS ONCE, FOR 10 MINUTES</p>
             </div>
@@ -280,7 +280,7 @@ export function App() {
         </button>
         <div className="strip-title" data-guide="strip">
           <span className="brand">
-            Savant<small>OPERATOR TERMINAL</small>
+            SAVANT<small>CORTEX AGENT</small>
           </span>
           <span className="readouts" aria-live="off">
             <span>

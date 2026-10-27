@@ -713,7 +713,22 @@ export class Brain {
     const quotes = await this.quotesFor(this.symbolsInPlay()).catch(() => ({}) as Record<string, Quote>);
     for (const account of ACCOUNTS) {
       const broker = this.deps.brokers[account];
-      if (!broker || report.accounts[account]?.ok !== true) continue;
+      if (!broker) continue;
+      if (report.accounts[account]?.ok !== true) {
+        // Audit BL-4 / F-A1-02: the sync failed, so broker state is unknown — no new orders, but the exits (synthetic
+        // stops, targets, time stops) still run from the last known positions: protection is what matters most when
+        // things go wrong. A refused exit (the broker really is down) just retries next pulse.
+        try {
+          report.exits += await this.manageExits(account, broker, quotes);
+        } catch (e) {
+          if (!(e instanceof SubrequestBudgetExceeded))
+            await this.alertOnce(
+              `manage:${account}`,
+              `⚠️ ${account} exits during a broker outage: ${errText(e).slice(0, 300)}`,
+            );
+        }
+        continue;
+      }
       try {
         report.exits += await this.manageExits(account, broker, quotes);
         await this.manageOrders(account, broker);
@@ -874,6 +889,12 @@ export class Brain {
     kronos: { job: "kronos", within_min: 90 },
     governor: { job: "governor", within_min: 60 },
     "governor-weekly": { job: "governor", within_min: 90 },
+    // audit F-A1-06: every dispatched job kind is watched, not 6 of 11
+    world: { job: "world-intel", within_min: 60 },
+    "options-open": { job: "options-lab", within_min: 60 },
+    "options-close": { job: "options-lab", within_min: 60 },
+    screeners: { job: "screeners", within_min: 90 },
+    backtest: { job: "backtest", within_min: 180 },
   };
 
   private async checkDispatchReceipts(now: number): Promise<void> {
@@ -1389,7 +1410,13 @@ export class Brain {
       return;
     }
     const notional = qty * price;
-    const liquidity = order.role === "ENTRY" ? "maker" : "taker";
+    // audit F-A1-05: only an entry limit that rested before filling earned the maker fee; one that filled on arrival
+    // (it crossed the spread), an IOC or a market order paid taker. Stops and exits are taker.
+    const rested = ts - order.created_at > 30_000;
+    const liquidity =
+      order.role === "ENTRY" && order.order_type === "limit" && order.tif !== "ioc" && rested
+        ? "maker"
+        : "taker";
     let feeCents = 0;
     let slipBps = 0;
     if (account === "PAPER" && this.d.accounts.PAPER?.apply_fee_model) {
@@ -2255,7 +2282,11 @@ export class Brain {
       )
         continue;
       const crypto = pos.arena === "CRYPTO";
-      if (!crypto && !(await broker.clock()).is_open) continue; // equity fractional stops: regular hours, TIF day
+      // Audit BL-4 / F-A1-01: a whole-share equity stop rests GTC at the broker, so it also protects overnight, on
+      // weekends and holidays. Alpaca takes fractional stops only as day orders in regular hours: a fractional position
+      // is watched by the synthetic stop outside them (shown as SYNTHETIC in the cockpit).
+      const wholeShares = !crypto && Number.isInteger(Number(pos.qty)) && Number(pos.qty) >= 1;
+      if (!crypto && !wholeShares && !(await broker.clock()).is_open) continue;
       const stop = Number(pos.stop_price);
       const tick = defaultTick(stop, pos.arena);
       const attempt =
@@ -2275,7 +2306,7 @@ export class Brain {
         symbol: pos.symbol,
         arena: pos.arena,
         type: crypto ? "stop_limit" : "stop",
-        tif: crypto ? "gtc" : "day",
+        tif: crypto || wholeShares ? "gtc" : "day",
         qty: pos.qty,
         limitPrice: crypto
           ? roundPrice(stop * (1 - this.d.execution.exit_collar_bps / 10_000), tick, "down")
@@ -2298,7 +2329,25 @@ export class Brain {
   /** Unfilled passive entries are cancelled after N pulses (no chasing). */
   private async manageOrders(account: AccountId, broker: BrokerApi): Promise<void> {
     const now = this.deps.now();
-    for (const o of this.openOrders(account).filter((x) => x.role === "ENTRY" && x.state !== "PLANNED")) {
+    // Audit F-A1-03: a position closed outside the robot (by hand at the broker, or reconciled away) can leave its
+    // protective stop resting; a later trigger would be a refused sell, or worse. Cancel stops with no position.
+    const held = new Set(this.positions(account).map((p) => p.symbol));
+    for (const o of this.openOrders(account).filter(
+      (x) => x.role === "STOP" && !held.has(x.symbol) && x.broker_order_id && x.state !== "pending_cancel",
+    )) {
+      await broker.cancelOrder(o.broker_order_id as string);
+      this.sql.exec(
+        "UPDATE orders SET state = 'pending_cancel', updated_at = ? WHERE client_order_id = ?",
+        now,
+        o.client_order_id,
+      );
+      this.logOrder(account, o, "CANCEL_ORPHAN_STOP", now);
+    }
+    // Audit F-A1-04: an equity EXIT rests as a day limit; when it hasn't filled after N pulses it is cancelled, and the
+    // exit engine re-submits it next pulse at a fresh price (a new attempt id).
+    for (const o of this.openOrders(account).filter(
+      (x) => (x.role === "ENTRY" || x.role === "EXIT") && x.state !== "PLANNED",
+    )) {
       const pulses = o.pulses_unfilled + 1;
       this.sql.exec(
         "UPDATE orders SET pulses_unfilled = ? WHERE client_order_id = ?",

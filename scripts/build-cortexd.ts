@@ -10,6 +10,7 @@
  *
  * Run with: node dist/cortexd/cortexd.mjs <command>   (CORTEX_ROOT defaults to the bundle's own folder)
  */
+import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { build } from "esbuild";
@@ -57,5 +58,10 @@ if (process.argv.includes("--with-cloud-deploy")) {
   copy("workers/sentinel", "workers/sentinel");
 }
 copy("research", "research", (p) => !/(\.venv|\.vendor|__pycache__|\.pytest_cache|tests)(\/|$)/.test(p));
+// ADR-087: the legal texts, the licence and every third-party notice ship inside each installer
+execFileSync("tsx", ["scripts/build-legal.ts", join(out, "legal")], { stdio: "inherit" });
+execFileSync("tsx", ["scripts/third-party.ts", join(out, "legal", "THIRD_PARTY_NOTICES.md")], {
+  stdio: "inherit",
+});
 writeFileSync(join(out, "VERSION"), `${process.env.CORTEX_VERSION ?? "dev"} ${new Date().toISOString()}\n`);
 console.log(`cortexd bundle → ${out}`);

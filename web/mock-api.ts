@@ -529,7 +529,7 @@ export function mockRoute(
       return ok({
         managed: "cloud",
         message:
-          "Settings live in the app on your own computer. This cockpit runs on synthetic data; download CORTEX-54 to set yours up.",
+          "Settings live in the app on your own computer. This cockpit runs on synthetic data; download Savant to set yours up.",
       });
     case "/api/command":
       return ok({

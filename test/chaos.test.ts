@@ -142,87 +142,91 @@ function run(seed: number) {
 }
 
 describe("chaos: random broker faults never break the money invariants (ADR-070)", () => {
-  it.each([1, 7, 42, 1337])("seed %i", async (seed) => {
-    const t = run(seed);
-    let p = 100;
-    let checked = 0;
-    for (let i = 0; i < 300; i++) {
-      // a random walk with occasional breakouts above the 101 prior high and sharp drops through stops
-      // oscillates through the 101 breakout level about once a day, with noise and occasional gaps both ways
-      const shock = t.r() < 0.05 ? (t.r() < 0.5 ? 3 : -4) : 0;
-      p = 100.6 + 2.6 * Math.sin((i * 2 * Math.PI) / 48) + (t.r() - 0.5) * 1.0 + shock;
-      t.step(30 * 60_000, p);
-      t.broker.faults = i % 10 !== 9;
-      const report = await t.brain.pulse(); // must never throw
-      expect(report).toBeTruthy();
-      if (t.broker.faults) continue;
-      checked++;
-      // 1. hot state agrees with the broker about what is held. Fills are read at the start of the next pulse, so an
-      //    exit or entry that filled during this pulse may lag by one pulse — but only in that explainable way.
-      const hot = t.sql.exec<{
-        symbol: string;
-        qty: string;
-        stop_price: string;
-        avg_entry: string;
-        state: string;
-      }>("SELECT symbol, qty, stop_price, avg_entry, state FROM positions");
-      const live = [...t.fake.positionsBySymbol.entries()].filter(([, v]) => v.qty > 1e-9).map(([k]) => k);
-      for (const h of hot.filter((x) => !live.includes(x.symbol)))
-        expect(h.state, `${h.symbol} gone at broker`).toBe("EXITING");
-      for (const s of live.filter((x) => !hot.some((h) => h.symbol === x))) {
-        const pending = t.sql.exec("SELECT 1 AS x FROM orders WHERE symbol = ? AND role = 'ENTRY'", s);
-        expect(pending.length, `${s} held at broker but unknown to the brain`).toBeGreaterThan(0);
+  it.each([1, 7, 42, 1337])(
+    "seed %i",
+    async (seed) => {
+      const t = run(seed);
+      let p = 100;
+      let checked = 0;
+      for (let i = 0; i < 300; i++) {
+        // a random walk with occasional breakouts above the 101 prior high and sharp drops through stops
+        // oscillates through the 101 breakout level about once a day, with noise and occasional gaps both ways
+        const shock = t.r() < 0.05 ? (t.r() < 0.5 ? 3 : -4) : 0;
+        p = 100.6 + 2.6 * Math.sin((i * 2 * Math.PI) / 48) + (t.r() - 0.5) * 1.0 + shock;
+        t.step(30 * 60_000, p);
+        t.broker.faults = i % 10 !== 9;
+        const report = await t.brain.pulse(); // must never throw
+        expect(report).toBeTruthy();
+        if (t.broker.faults) continue;
+        checked++;
+        // 1. hot state agrees with the broker about what is held. Fills are read at the start of the next pulse, so an
+        //    exit or entry that filled during this pulse may lag by one pulse — but only in that explainable way.
+        const hot = t.sql.exec<{
+          symbol: string;
+          qty: string;
+          stop_price: string;
+          avg_entry: string;
+          state: string;
+        }>("SELECT symbol, qty, stop_price, avg_entry, state FROM positions");
+        const live = [...t.fake.positionsBySymbol.entries()].filter(([, v]) => v.qty > 1e-9).map(([k]) => k);
+        for (const h of hot.filter((x) => !live.includes(x.symbol)))
+          expect(h.state, `${h.symbol} gone at broker`).toBe("EXITING");
+        for (const s of live.filter((x) => !hot.some((h) => h.symbol === x))) {
+          const pending = t.sql.exec("SELECT 1 AS x FROM orders WHERE symbol = ? AND role = 'ENTRY'", s);
+          expect(pending.length, `${s} held at broker but unknown to the brain`).toBeGreaterThan(0);
+        }
+        // 2. every position has an exit (U4), and its stop only ever moved up from where it started (ADR-059)
+        for (const h of hot) {
+          expect(Number(h.stop_price)).toBeGreaterThan(0);
+          const w = t.sql.exec<{ initial_stop: number }>(
+            "SELECT initial_stop FROM position_watch WHERE symbol = ?",
+            h.symbol,
+          )[0];
+          if (w) expect(Number(h.stop_price)).toBeGreaterThanOrEqual(w.initial_stop - 1e-9);
+        }
+        // 3. never two live entry orders for the same symbol, never a duplicate client order id
+        const open = [...t.fake.orders.values()].filter((o) =>
+          ["new", "accepted", "partially_filled"].includes(o.status),
+        );
+        const entries = open.filter((o) => o.side === "buy").map((o) => o.symbol);
+        expect(new Set(entries).size).toBe(entries.length);
+        const ids = [...t.fake.orders.values()].map((o) => o.client_order_id);
+        expect(new Set(ids).size).toBe(ids.length);
+        // 4. never more than the constitution's notional per position (35% of equity, with fill slippage room)
+        for (const [s, v] of t.fake.positionsBySymbol)
+          expect(v.qty * (t.market.quotes[s]?.bid ?? 0)).toBeLessThanOrEqual(54 * 0.35 * 1.25);
       }
-      // 2. every position has an exit (U4), and its stop only ever moved up from where it started (ADR-059)
-      for (const h of hot) {
-        expect(Number(h.stop_price)).toBeGreaterThan(0);
-        const w = t.sql.exec<{ initial_stop: number }>(
-          "SELECT initial_stop FROM position_watch WHERE symbol = ?",
-          h.symbol,
-        )[0];
-        if (w) expect(Number(h.stop_price)).toBeGreaterThanOrEqual(w.initial_stop - 1e-9);
+      // settle: three fault-free pulses on a frozen market → the brain and the broker agree exactly
+      t.broker.faults = false;
+      for (let k = 0; k < 3; k++) {
+        t.step(60_000, t.px);
+        await t.brain.pulse();
       }
-      // 3. never two live entry orders for the same symbol, never a duplicate client order id
-      const open = [...t.fake.orders.values()].filter((o) =>
-        ["new", "accepted", "partially_filled"].includes(o.status),
-      );
-      const entries = open.filter((o) => o.side === "buy").map((o) => o.symbol);
-      expect(new Set(entries).size).toBe(entries.length);
-      const ids = [...t.fake.orders.values()].map((o) => o.client_order_id);
-      expect(new Set(ids).size).toBe(ids.length);
-      // 4. never more than the constitution's notional per position (35% of equity, with fill slippage room)
-      for (const [s, v] of t.fake.positionsBySymbol)
-        expect(v.qty * (t.market.quotes[s]?.bid ?? 0)).toBeLessThanOrEqual(54 * 0.35 * 1.25);
-    }
-    // settle: three fault-free pulses on a frozen market → the brain and the broker agree exactly
-    t.broker.faults = false;
-    for (let k = 0; k < 3; k++) {
-      t.step(60_000, t.px);
+      t.fake.tick();
       await t.brain.pulse();
-    }
-    t.fake.tick();
-    await t.brain.pulse();
-    const finalHot = t.sql
-      .exec<{ symbol: string }>("SELECT symbol FROM positions WHERE state = 'OPEN'")
-      .map((x) => x.symbol)
-      .sort();
-    const finalLive = [...t.fake.positionsBySymbol.entries()]
-      .filter(([, v]) => v.qty > 1e-9)
-      .map(([k]) => k)
-      .sort();
-    expect(finalHot).toEqual(finalLive);
-    expect(checked).toBeGreaterThan(20);
-    expect(t.broker.injected + t.broker.lost).toBeGreaterThan(10); // faults really happened
-    // and trading really happened through them: entries filled and positions were closed
-    expect(t.fake.acts.filter((a) => a.side === "buy").length).toBeGreaterThanOrEqual(2);
-    expect(t.sql.exec("SELECT * FROM exits").length).toBeGreaterThan(1);
-    // 5. cash never goes negative (no margin, no shorting)
-    expect(t.fake.cash).toBeGreaterThanOrEqual(-1e-6);
-    // 6. the journal hash chain is intact after all of it
-    await t.brain.flushJournal();
-    const rows = t.d1.db
-      .prepare("SELECT seq, ts, kind, payload_json, prev_row_sha256, row_sha256 FROM journal ORDER BY seq")
-      .all() as never[];
-    expect(verifyChain(rows).ok).toBe(true);
-  });
+      const finalHot = t.sql
+        .exec<{ symbol: string }>("SELECT symbol FROM positions WHERE state = 'OPEN'")
+        .map((x) => x.symbol)
+        .sort();
+      const finalLive = [...t.fake.positionsBySymbol.entries()]
+        .filter(([, v]) => v.qty > 1e-9)
+        .map(([k]) => k)
+        .sort();
+      expect(finalHot).toEqual(finalLive);
+      expect(checked).toBeGreaterThan(20);
+      expect(t.broker.injected + t.broker.lost).toBeGreaterThan(10); // faults really happened
+      // and trading really happened through them: entries filled and positions were closed
+      expect(t.fake.acts.filter((a) => a.side === "buy").length).toBeGreaterThanOrEqual(2);
+      expect(t.sql.exec("SELECT * FROM exits").length).toBeGreaterThan(1);
+      // 5. cash never goes negative (no margin, no shorting)
+      expect(t.fake.cash).toBeGreaterThanOrEqual(-1e-6);
+      // 6. the journal hash chain is intact after all of it
+      await t.brain.flushJournal();
+      const rows = t.d1.db
+        .prepare("SELECT seq, ts, kind, payload_json, prev_row_sha256, row_sha256 FROM journal ORDER BY seq")
+        .all() as never[];
+      expect(verifyChain(rows).ok).toBe(true);
+    },
+    30_000,
+  ); // hundreds of pulses: slow under a full parallel run
 });
