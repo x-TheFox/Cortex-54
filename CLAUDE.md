@@ -290,8 +290,9 @@ research/                 Python (uv): cortex_research.run crypto|equity|world �
 local/                    cortexd local mode + `cortex` CLI (ADR-064/065): runtime, sandbox broker, jobs, service,
                           deploy, runner, memory packs, settings backend + live reload (settings.ts), agent-prompt.ts,
                           keychain, encrypted backups, licences (keychain.ts, backup.ts, license.ts — ADR-076/077)
-landing/                  the product's landing page (ADR-084): static vanilla TS + GSAP/Lenis, numbers printed from config/
-                          at build time, demo cockpit at /demo/; deployed to GitHub Pages by release.yml. Notes: landing/CLAUDE.md
+landing/                  the product's landing page (ADR-084/090): static vanilla TS + GSAP/Lenis, numbers printed from config/
+                          at build time, demo cockpit at /demo/; getsavant.pro on Vercel (`pnpm deploy:landing`). Notes: landing/CLAUDE.md
+workers/license/          Whop licence-key server (ADR-086): machine-bound Ed25519 tokens (`pnpm deploy:license`)
 desktop/                  Tauri v2 app (ADR-066): src-tauri/ shell; bundles dist/cortexd + an official Node runtime
 hub/                      community hub Worker + D1 migrations (ADR-068), hosted by the publisher
 src/universe/ src/portfolio/ src/hub/   dynamic universe + scout (058), exits/lateness/book (059–061), hub protocol (068)
@@ -502,5 +503,9 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-27: ADR-084: the landing page (`landing/`): its own paper-and-ink identity, the real sizer and journal hash
   running on the page, constitution and limits printed from config/ at build time, the demo cockpit one click from
   the hero. GitHub Pages now serves the page at the root and the demo cockpit at `/demo/`.
+- 2026-10-27: launch round (operator). ADR-085 rebrand: **Savant** (the app) with **Cortex** (the agent), "54" retired.
+  ADR-086 Whop checkout/licences ($29/mo, $249/yr, 7-day trial, free demo) + the `savant-license` Worker. ADR-087 legal
+  set + first-launch terms. ADR-088 pre-launch audit response (`docs/AUDIT_2026-10-27.md`). ADR-089 shipped-build
+  protection (obfuscation, bytecode, tamper check). ADR-090 getsavant.pro on Vercel, downloads/updates via the domain.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

@@ -1139,3 +1139,84 @@ limit). CORTEX-54 is sold as closed-source software, so the page never links to 
 every buy button goes to the hosted checkout set in `landing/checkout.ts` (a non-https or GitHub link fails the
 build); until that link exists the buttons scroll to the download section, which says checkout opens soon.
 
+
+## ADR-085 — Savant is the product, Cortex is the agent (2026-10-27)
+**Context:** operator: rebrand for sale; the old name mixed the agent, the product and a number ($54) that no longer
+describes the product (ADR-081 made every account size first-class).
+**Decision:** the app and company are **Savant**; the agent inside it keeps the name **Cortex**; the "54" is retired
+($54 stays only as the worked example in the docs and on the page). The reasoning is in `docs/BRAND.md`. Every visible
+string, the desktop identifier (`com.savant.desktop`), installers (`Savant_*`), the CLI (`savant`, `cortex` kept as an
+alias), the home folder (`~/.savant`, with `~/.cortex54` still read when it exists) and the icon changed. Internal
+identifiers that customers never see and that would break deployed state keep their names: Durable Object names, `c54-`
+order ids, licence and backup kinds, `CORTEX_*` variables, the keychain service and the repository name.
+
+## ADR-086 — Whop for checkout, licence keys and downloads; a licence server for machine-bound tokens (2026-10-27)
+**Context:** operator: sell through Whop (storefront, checkout, licence management) with monthly and yearly plans, a
+free demo and a 7-day trial. Whop licence keys can only be checked with a server-side API key, which must never ship
+inside the app.
+**Decision:** Whop product `prod_sdzK9Kr4E2Kgz` (route `savant-agent`): Monthly $29 and Yearly $249, each with a 7-day
+trial (initial price 0, so nothing is charged during it), and a free demo plan. Whop's Software app is attached, so
+every membership carries a licence key and the buyer finds key and downloads in their Whop orders. A small Worker,
+`savant-license` (`workers/license`), holds the Whop API key and the publisher's Ed25519 signing key: `POST
+/v1/activate {key, machine}` checks the membership (active, trialing, completed or past_due; this product; a **paid**
+plan only, so a free-demo membership is refused), binds it to a one-way machine fingerprint in the membership's
+`metadata.hwid` on first use, and returns a v2 licence token (machine-bound, 14 days, never past the paid period + 1
+day). `POST /v1/release` frees the binding from the bound machine; customers can also reset it from Whop. The app
+refreshes the token about daily, keeps working offline up to 14 days, and drops it when the server says the
+membership ended, the key is unknown, bound elsewhere, for another product or the free plan. Without a valid licence
+the demo always works and a broker account keeps its stops but opens nothing new (ADR-077). Rate-limited per address
+and per key. `pnpm deploy:license`; secrets `WHOP_API_KEY`, `LICENSE_SIGNING_KEY`. The build bakes the server and store
+URLs from the `SAVANT_LICENSE_URL` / `SAVANT_STORE_URL` repository variables.
+
+## ADR-087 — The legal layer: terms, EULA, privacy, refunds, risk; accepted at first launch (2026-10-27)
+**Context:** the pre-launch audit (BL-2): a paid product had no licence file, terms, privacy policy or in-app
+disclaimer, and third-party attributions were not shipped.
+**Decision:** `LICENSE` (proprietary) and `docs/legal/` (terms, EULA, privacy, refunds, risk), rendered to HTML pages
+(the app's `/legal/`, getsavant.pro/legal/) and to PDFs for Whop's policy fields. `scripts/third-party.ts` writes
+THIRD_PARTY_NOTICES.md (npm production packages, the web panel's runtime packages and fonts, every Rust crate linked
+into the shell, Node.js) into every installer and onto the site. At first launch the app shows a short risk summary
+and asks the user to accept the terms, EULA and risk disclosure; the accepted version (`src/legal/version.ts`) and
+time are stored in config, and new entries on a real broker account are held until the current version is accepted
+(bumping the version asks again). The drafts still need a lawyer's review before scale.
+
+## ADR-088 — Pre-launch audit response (2026-10-27)
+**Context:** an operator-supplied pre-launch audit (`docs/AUDIT_2026-10-27.md` keeps the ledger) listed blockers and
+~70 findings across risk, execution, the LLM path, surfaces, the local app and the research desk. Each finding was
+re-verified against the code before acting; some were wrong or already handled and are recorded as such.
+**Decision:** every confirmed finding is fixed or answered; the ledger gives each one's verdict and fix. Highlights:
+exit management keeps running during broker outages and overnight (GTC whole-share stops, orphan-stop sweep, EXIT
+re-pricing); resting entries are cancelled on every reduce-only/pause; calibration maps may only shrink; the fee
+hurdle and risk are re-checked at the real order size; journal replays are idempotent and quarantined rows retry daily;
+signed requests are bound to their route; `/health` is minimal in public; replay guards on ingest and Discord; per-IP
+rate limits; untrusted text is fenced in prompts and rendered inert in cards; the hub's open write surface is bounded;
+the sentinel keeps its own kill record; Wi-Fi devices need a fresh sign-in for destructive commands; the desktop's
+Node runtime is pinned by version and hash; restores are atomic; research subprocesses get a scrubbed environment;
+backtest verdicts need a deflated Sharpe and an un-overfit lab and declare their survivorship bias; README, PRODUCT,
+RISK_DOCTRINE and ARCHITECTURE now say what is true (LIVE off until ratified; the 30-day gate is advice, ADR-083).
+
+## ADR-089 — Protection for shipped builds (2026-10-27)
+**Context:** operator: protect the program from decompilation and tampering. Software that runs on a customer's
+computer can't be made unreadable; the goal is to make reverse engineering expensive and tampering detectable, without
+slowing the trading loop.
+**Decision:** `scripts/protect.ts`, run by `cortexd:build` (`--no-protect` skips it for quick local builds):
+(1) `cortexd.mjs` is minified without source maps and then obfuscated (renamed identifiers, an encoded rotated string
+table, numbers as expressions; control-flow flattening and dead-code injection off for speed); (2) the Python research
+package ships as bytecode only, compiled for Python 3.12 (the shipped project pins it; uv installs it); (3) the desktop
+shell embeds the bundle's sha256 at build time (`build.rs`) and refuses to start, or to run any tray command against, a
+modified bundle, showing a reinstall page instead; (4) licences stay Ed25519-signed and machine-bound (ADR-086), so a
+patched check is caught by (3) and a forged licence needs the private key, which never ships. Recommended next, an
+operator decision: make this repository private and publish installers from a separate public, binary-only releases
+repository (only `landing/vercel.json` and the updater fallback would change).
+
+## ADR-090 — getsavant.pro on Vercel; downloads and updates through the product domain (2026-10-27)
+**Context:** operator: deploy the landing page to Vercel on getsavant.pro. The GitHub Pages copy exposed the repository
+name, and installed apps fetched updates straight from GitHub release URLs.
+**Decision:** Vercel project `savant` serves `landing-dist/` (`pnpm deploy:landing`); `landing/vercel.json` carries
+security headers (HSTS, nosniff, no-referrer, permissions policy, COOP, frame-options) and redirects:
+`/download/<file>` and `/download/v<ver>/<file>` → the release assets, `/updates/latest.json` → the updater manifest,
+`/buy` → Whop, `/account` → Whop orders, `www` → apex. Release assets get version-less copies (`Savant_<platform>.<ext>`)
+so download links never go stale; the updater reads getsavant.pro first (GitHub as fallback) and `latest.json` links
+bundles through getsavant.pro. The page gains pricing (printed from `landing/checkout.ts`), plan checkouts with the
+trial, a sign-in link to Whop orders, the legal footer, `/welcome/` (after purchase: downloads and the licence step),
+a 404, an Open Graph image and a sitemap. The release workflow no longer deploys GitHub Pages, and goes live only when
+every platform and the demo built.
