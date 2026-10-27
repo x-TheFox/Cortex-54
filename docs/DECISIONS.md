@@ -1058,3 +1058,14 @@ licence key now exists (private half only on the operator's machine, `~/.cortex-
 `CORTEX_LICENSE_PUBKEY` repository variable, so release builds check licences from the next release on, and the
 operator holds a perpetual publisher licence. GitHub Pages serves the demo cockpit (https://x-thefox.github.io/Cortex-54/),
 redeployed by every release.
+
+## ADR-080 — macOS bundles are sealed with an ad-hoc signature (2026-10-27)
+**Context:** v0.1.1's macOS app opened as "“CORTEX-54” is damaged and can't be opened". Its main binary carried only
+the linker's ad-hoc signature with no sealed resources (`codesign --verify`: "code has no resources but signature
+indicates they must be present"), and macOS treats a quarantined download with a broken signature as damaged.
+**Decision:** `bundle.macOS.signingIdentity: "-"` makes the bundler sign every binary and then the whole bundle
+(sealed resources), with the hardened runtime and `entitlements.plist` (JIT and unsigned executable memory for the
+bundled Node/V8, network client and server). Verified: `codesign --verify --deep --strict` passes, the bundled Node
+runs under the new signature, and a quarantined copy keeps a valid signature. Gatekeeper then shows its normal
+"can't verify the developer" prompt (System Settings → Privacy & Security → Open Anyway) until the Apple secrets of
+ADR-079 make releases notarized; `APPLE_SIGNING_IDENTITY` replaces the ad-hoc identity in CI.

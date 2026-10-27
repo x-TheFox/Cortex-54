@@ -37,7 +37,13 @@
     "resources": {
       "../../dist/cortexd/": "cortexd/"
     },
-    "externalBin": ["binaries/node"]
+    "externalBin": ["binaries/node"],
+    "macOS": {
+      "signingIdentity": "-",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "11.0"
+    }
   },
   "plugins": {
     "updater": {
