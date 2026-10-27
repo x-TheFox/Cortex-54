@@ -273,15 +273,11 @@ export class LocalCortex {
   /** ADR-075 cost meter: today's tokens and USD for every priced endpoint. */
   spend(): { provider: string; input: number; output: number; usd: number; cap: number | null }[] {
     const g = this.router?.gate;
-    return Object.entries(this.pricing)
-      .filter(([p]) => !p.endsWith("~bear"))
-      .map(([p, price]) => {
-        const t = g?.tokensToday?.(p) ?? { input: 0, output: 0 };
-        const bear = g?.tokensToday?.(`${p}~bear`) ?? { input: 0, output: 0 };
-        const input = t.input + bear.input;
-        const output = t.output + bear.output;
-        return { provider: p, input, output, usd: costUsd(price, input, output), cap: price.cap ?? null };
-      });
+    return Object.entries(this.pricing).map(([p, price]) => {
+      // the router counts a same-model bear alias with its endpoint
+      const { input, output } = g?.tokensToday?.(p) ?? { input: 0, output: 0 };
+      return { provider: p, input, output, usd: costUsd(price, input, output), cap: price.cap ?? null };
+    });
   }
 
   /** ADR-076: consistent copies of the databases for a backup, taken while the brain runs. */

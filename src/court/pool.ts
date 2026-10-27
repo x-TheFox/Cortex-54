@@ -257,7 +257,6 @@ export function buildPool(
             panel: { ...r.panel, chain },
           },
         };
-  for (const [p, x] of Object.entries({ ...pricing })) if (providers[`${p}~bear`]) pricing[`${p}~bear`] = x;
   return {
     providers,
     d: out,

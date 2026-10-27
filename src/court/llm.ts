@@ -246,15 +246,16 @@ export class LlmRouter {
   /** ADR-075 cost meter: USD per 1M tokens per provider, with an optional daily spend cap */
   pricing: Record<string, { in: number; out: number; cap?: number }> = {};
 
-  /** USD a provider has spent today (0 when it has no price). */
+  /** USD a provider has spent today (0 when it has no price). The same-model bear alias counts with its endpoint. */
   spentToday(provider: string): number {
-    const p = this.pricing[provider];
-    const t = this.gate?.tokensToday?.(provider);
+    const base = provider.replace(/~bear$/, "");
+    const p = this.pricing[base];
+    const t = this.gate?.tokensToday?.(base);
     return p && t ? (t.input * p.in + t.output * p.out) / 1_000_000 : 0;
   }
 
   private overBudget(provider: string): boolean {
-    const cap = this.pricing[provider]?.cap;
+    const cap = this.pricing[provider.replace(/~bear$/, "")]?.cap;
     return cap !== undefined && this.spentToday(provider) >= cap;
   }
   /**
@@ -328,7 +329,7 @@ export class LlmRouter {
           const res = await p.complete(hop.model, req, timeoutMs ?? r.timeout_ms);
           // a provider that doesn't report usage is estimated at ~4 characters per token (prompt only)
           this.gate?.tokens?.(
-            hop.provider,
+            hop.provider.replace(/~bear$/, ""),
             res.inputTokens ?? Math.ceil((req.system.length + req.user.length) / 4),
             res.outputTokens ?? Math.ceil(res.text.length / 4),
           );

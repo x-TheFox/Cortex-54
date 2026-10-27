@@ -318,3 +318,53 @@ describe("release changelog (ADR-077)", () => {
     expect(g.Changes).toEqual(["Tidy imports"]);
   });
 });
+
+describe("spend cap with one model on both sides (ADR-075)", () => {
+  it("the bear alias spends from the same daily cap as its endpoint", async () => {
+    const built = buildPool(
+      doctrine,
+      {},
+      {
+        endpoints: [ep("solo", ["claude-y"], { price_in: 10, price_out: 50, daily_spend_cap: 0.01 })],
+        prefs: { ...prefs, allow_same_model: true },
+      },
+    );
+    built.providers["ep:solo"] = {
+      async complete() {
+        return { text: '{"ok":1}', inputTokens: 600, outputTokens: 100 };
+      },
+    };
+    const router = poolRouter(built, { ...prefs, allow_same_model: true });
+    const tokens = new Map<string, { input: number; output: number }>();
+    router.gate = {
+      allow: () => true,
+      used: () => undefined,
+      tokens: (p, i, o) => {
+        const t = tokens.get(p) ?? { input: 0, output: 0 };
+        tokens.set(p, { input: t.input + i, output: t.output + o });
+      },
+      tokensToday: (p) => tokens.get(p) ?? { input: 0, output: 0 },
+    };
+    const req = { system: "s", user: "u", maxOutputTokens: 10, schema: {} };
+    expect(
+      await router.run(
+        built.d.llm_routing.bull_chain,
+        req,
+        (j) => j,
+        [],
+        () => undefined,
+      ),
+    ).not.toBeNull();
+    // the bull spent the cap: the bear alias of the same endpoint is out too
+    expect(
+      await router.run(
+        built.d.llm_routing.bear_chain,
+        req,
+        (j) => j,
+        [],
+        () => undefined,
+      ),
+    ).toBeNull();
+    expect([...tokens.keys()]).toEqual(["ep:solo"]);
+  });
+});
