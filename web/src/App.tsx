@@ -448,7 +448,20 @@ export function App() {
       )}
 
       {onb && settings.data && (
-        <Onboarding s={settings.data} reload={settings.reload} close={() => setOnb(false)} />
+        <Onboarding
+          s={settings.data}
+          reload={settings.reload}
+          close={() => {
+            // leaving setup (finished or "just look around") always opens the guide: the cockpit is new to them
+            setOnb(false);
+            try {
+              localStorage.setItem(GUIDE_SEEN_KEY, "1");
+            } catch {
+              /* storage unavailable */
+            }
+            setGuide(true);
+          }}
+        />
       )}
 
       <Guide open={guide} onClose={() => setGuide(false)} setPage={setPage} />
