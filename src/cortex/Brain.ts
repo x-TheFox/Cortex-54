@@ -1245,7 +1245,7 @@ export class Brain {
       this.setMode(
         account,
         "REDUCE_ONLY",
-        `equity $${(eff / 100).toFixed(2)} ≫ doctrine start $${start}; reset the account or update doctrine, then /resume`,
+        `equity $${(eff / 100).toFixed(2)} ≫ doctrine start $${start}; reset the account or update doctrine, then press RESUME`,
         now,
       );
     }
@@ -5878,8 +5878,8 @@ ${postmortem}`,
     const row = this.account(account);
     if (row?.locked === 1) {
       return account === "PAPER"
-        ? `${account} is RED-locked; it unlocks itself after the cooldown once flat (or /unlock now).`
-        : `${account} is RED-locked. Use /unlock with a written postmortem.`;
+        ? `${account} is RED-locked; it unlocks itself after the cooldown once flat (or UNLOCK with a postmortem now).`
+        : `${account} is RED-locked. Write a postmortem and press UNLOCK.`;
     }
     this.setMode(account, "NORMAL", `resumed by ${by}`, this.deps.now());
     return `${account} resumed.`;
@@ -6051,7 +6051,7 @@ ${postmortem}`,
         },
       ],
     });
-    return `${account}: flatten started (${n} exit orders). Mode REDUCE_ONLY until /resume.`;
+    return `${account}: flatten started (${n} exit orders). Reduce-only until you press RESUME (or /resume in Discord).`;
   }
 
   noteKill(killed: boolean): void {

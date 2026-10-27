@@ -90,6 +90,23 @@ export function AccountPanel({
           </button>
           Entries
         </div>
+        {/* after a flatten (or any reduce-only hold) the account stays exits-only until the operator resumes it */}
+        {a.configured && a.mode === "REDUCE_ONLY" && !a.locked && (
+          <div className="ctl">
+            <button
+              type="button"
+              className="pb"
+              disabled={busy}
+              aria-label={`Resume ${a.account} new entries`}
+              title={a.modeReason ?? undefined}
+              onClick={() => void run("resume", { account: a.account })}
+            >
+              <span className="on-amber">REDUCE</span>
+              <span className="on-white">RESUME</span>
+            </button>
+            Resume
+          </div>
+        )}
         <div className="ctl">
           <fieldset className="rotary" aria-label={`${a.account} autonomy stop`}>
             {[0, 1, 2, 3, 4].map((n) => (
