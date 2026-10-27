@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { buildDocs } from "./build-docs.ts";
 import { buildLegal, page } from "./build-legal.ts";
 
 const run = (args: string[]) => execFileSync("pnpm", ["exec", ...args], { stdio: "inherit" });
@@ -15,6 +16,7 @@ run(["vite", "build", "--config", "landing/vite.config.ts"]);
 run(["vite", "build", "--config", "web/vite.demo.config.ts", "--outDir", "../landing-dist/demo"]);
 for (const f of ["landing-dist/demo/_headers", "landing-dist/demo/sw.js"]) if (existsSync(f)) rmSync(f);
 buildLegal(["landing-dist/legal"]); // ADR-087: terms, EULA, privacy, refunds, risk
+buildDocs("landing/docs", "landing-dist/docs"); // ADR-093: install guide and help
 // and the third-party notices, the same file every installer ships
 const tp = join(mkdtempSync(join(tmpdir(), "savant-tp-")), "THIRD_PARTY_NOTICES.md");
 execFileSync("pnpm", ["exec", "tsx", "scripts/third-party.ts", tp], { stdio: "inherit" });

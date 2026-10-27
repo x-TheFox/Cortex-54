@@ -38,13 +38,7 @@ describe("landing page claims (ADR-084)", () => {
   });
 
   it("sells through Whop: plan buttons, the trial, the refund policy and the legal pages", () => {
-    for (const t of [
-      "%%PRICE_MONTHLY%%",
-      "%%PRICE_YEARLY%%",
-      "%%CHECKOUT_MONTHLY%%",
-      "%%CHECKOUT_YEARLY%%",
-      "%%ORDERS_URL%%",
-    ])
+    for (const t of ["%%PRICE_MONTHLY%%", "%%PRICE_YEARLY%%", "%%CHECKOUT_MONTHLY%%", "%%CHECKOUT_YEARLY%%"])
       expect(html).toContain(t);
     for (const d of ["terms", "eula", "privacy", "refunds", "risk"])
       expect(html).toContain(`./legal/${d}.html`);

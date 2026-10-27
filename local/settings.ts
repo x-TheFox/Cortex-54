@@ -25,7 +25,15 @@ import {
 import { KEY_NAMES, type KeyName, type LocalConfig, LocalConfigSchema, saveConfig } from "./config.ts";
 import { configChecks, runtimeChecks } from "./health.ts";
 import { secretBackend } from "./keychain.ts";
-import { activateKey, installLicense, readLicense, releaseKey, STORE_URL } from "./license.ts";
+import {
+  activateKey,
+  installLicense,
+  pollDeviceSignIn,
+  readLicense,
+  releaseKey,
+  STORE_URL,
+  startDeviceSignIn,
+} from "./license.ts";
 import { decideProposal, readProposals } from "./proposals.ts";
 
 /**
@@ -512,9 +520,52 @@ export class LocalSettings implements WebSettings {
     return { ok: true, message: "Thanks. Savant can trade now." };
   }
 
+  /** ADR-093: the device sign-in in progress (one at a time) */
+  private signin: { secret: string; code: string; url: string; until: number } | null = null;
+
   /** ADR-077: install a licence file (checked against this build's publisher key before it is saved). */
-  async license(q: { file?: string; key?: string; release?: boolean }) {
+  async license(q: { file?: string; key?: string; release?: boolean; signin?: boolean; poll?: boolean }) {
     const c = this.d.cfg();
+    const net = this.d.fetcher ? { fetcher: this.d.fetcher } : {};
+    // ADR-093: sign in with the Savant account instead of pasting a key
+    if (q.signin) {
+      const r = await startDeviceSignIn(this.d.home, net);
+      if (!r.ok) return r;
+      this.signin = { secret: r.secret, code: r.code, url: r.url, until: Date.now() + r.expiresIn * 1000 };
+      return {
+        ok: true,
+        message: `Your browser opens getsavant.pro. Check the code there matches ${r.code}, then sign in.`,
+        url: r.url,
+        code: r.code,
+      };
+    }
+    if (q.poll) {
+      const s = this.signin;
+      if (!s || Date.now() > s.until) {
+        this.signin = null;
+        return { ok: false, message: "Sign-in timed out. Click Sign in again.", status: "expired" };
+      }
+      const p = await pollDeviceSignIn(s.secret, net);
+      if (p.status === "pending" || p.status === "error")
+        return {
+          ok: false,
+          message: "Waiting for you to approve in the browser…",
+          status: "pending",
+          code: s.code,
+          url: s.url,
+        };
+      this.signin = null;
+      if (p.status === "expired" || !p.key)
+        return { ok: false, message: "Sign-in timed out. Click Sign in again.", status: "expired" };
+      const r = await activateKey(this.d.home, p.key, { app: "desktop", ...net });
+      if (!r.ok) return { ...r, status: "error" };
+      await this.save({ keys: { SAVANT_LICENSE_KEY: p.key } });
+      return {
+        ok: true,
+        message: `Signed in. ${r.message} Paper and live trading are unlocked.`,
+        status: "done",
+      };
+    }
     // ADR-086: a Whop licence key → the licence server → a token bound to this computer
     if (q.release) {
       const key = c.keys.SAVANT_LICENSE_KEY;

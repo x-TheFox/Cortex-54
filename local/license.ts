@@ -1,5 +1,6 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import {
   type ActivateResponse,
@@ -117,6 +118,80 @@ export const entriesBlocked = (st: LicenseState) => st.required && !st.ok;
 type Fetch = (u: string, i?: RequestInit) => Promise<Response>;
 
 /** Exchange a Whop licence key for a machine-bound token. Saves it on success. */
+/** A readable name for this computer, shown on the customer's account page (ADR-093). */
+export function deviceName(): string {
+  const n = hostname()
+    .replace(/\.(local|lan|home)$/i, "")
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .slice(0, 60);
+  return n || "This computer";
+}
+
+/**
+ * ADR-093: device sign-in. The app asks the server for a short code and a page to open; the user signs in on
+ * getsavant.pro and approves; pollDeviceSignIn then returns the licence key, which activates through activateKey().
+ */
+export async function startDeviceSignIn(
+  home: string,
+  o: { server?: string; fetcher?: Fetch } = {},
+): Promise<
+  { ok: true; code: string; url: string; secret: string; expiresIn: number } | { ok: false; message: string }
+> {
+  const f = o.fetcher ?? ((u, i) => fetch(u, i));
+  try {
+    const res = await f(`${(o.server ?? LICENSE_SERVER).replace(/\/$/, "")}/v1/device/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ machine: machineId(home), name: deviceName() }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const d = (await res.json()) as {
+      ok: boolean;
+      message?: string;
+      user_code?: string;
+      verify_url?: string;
+      device_secret?: string;
+      expires_in?: number;
+    };
+    if (!d.ok || !d.user_code || !d.verify_url || !d.device_secret)
+      return { ok: false, message: d.message ?? "Sign-in isn't available right now." };
+    return {
+      ok: true,
+      code: d.user_code,
+      url: d.verify_url,
+      secret: d.device_secret,
+      expiresIn: d.expires_in ?? 900,
+    };
+  } catch {
+    return {
+      ok: false,
+      message: "Couldn't reach the licence server. Check the internet connection and try again.",
+    };
+  }
+}
+
+export async function pollDeviceSignIn(
+  secret: string,
+  o: { server?: string; fetcher?: Fetch } = {},
+): Promise<{ status: "pending" | "approved" | "expired" | "error"; key?: string }> {
+  const f = o.fetcher ?? ((u, i) => fetch(u, i));
+  try {
+    const res = await f(`${(o.server ?? LICENSE_SERVER).replace(/\/$/, "")}/v1/device/poll`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ device_secret: secret }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    const d = (await res.json()) as { status?: string; key?: string };
+    if (d.status === "approved" && d.key) return { status: "approved", key: d.key };
+    if (d.status === "pending" || d.status === "expired") return { status: d.status };
+    return { status: "error" };
+  } catch {
+    return { status: "error" };
+  }
+}
+
 export async function activateKey(
   home: string,
   key: string,
@@ -129,7 +204,7 @@ export async function activateKey(
     const res = await f(`${(o.server ?? LICENSE_SERVER).replace(/\/$/, "")}/v1/activate`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ key: key.trim(), machine, app: o.app }),
+      body: JSON.stringify({ key: key.trim(), machine, app: o.app, name: deviceName() }),
       signal: AbortSignal.timeout(20_000),
     });
     r = (await res.json()) as ActivateResponse;

@@ -1924,3 +1924,10 @@ fieldset.ratify {
   gap: 8px;
   line-height: 1.45;
 }
+
+/* ADR-093: device sign-in code */
+.big-code {
+  font: 600 28px / 1.1 var(--mono, ui-monospace, monospace);
+  letter-spacing: 0.12em;
+  margin: 8px 0;
+}

@@ -509,5 +509,8 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   ADR-086 Whop checkout/licences ($35/mo, $299/yr, 7-day trial, free demo) + the `savant-license` Worker. ADR-087 legal
   set + first-launch terms. ADR-088 pre-launch audit response (`docs/AUDIT_2026-10-27.md`). ADR-089 shipped-build
   protection (obfuscation, bytecode, tamper check). ADR-090 getsavant.pro on Vercel, downloads/updates via the domain.
+  ADR-091 Governor proposals approved in the app on customer installs (U8 reworded). ADR-092 private source repo,
+  public binary releases, no git for customers. ADR-093 accounts on getsavant.pro (Sign in with Whop), app device
+  sign-in, docs. Licence server live at savant-license.samplayz2ks.workers.dev (also getsavant.pro/api).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

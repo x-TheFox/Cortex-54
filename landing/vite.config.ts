@@ -188,6 +188,8 @@ export default defineConfig({
         main: fileURLToPath(new URL("./index.html", import.meta.url)),
         welcome: fileURLToPath(new URL("./welcome/index.html", import.meta.url)),
         notfound: fileURLToPath(new URL("./404.html", import.meta.url)),
+        account: fileURLToPath(new URL("./account/index.html", import.meta.url)),
+        activate: fileURLToPath(new URL("./activate/index.html", import.meta.url)),
       },
     },
     emptyOutDir: true,

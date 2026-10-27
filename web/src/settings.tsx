@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type EndpointView,
   type ModelList,
@@ -1473,14 +1473,37 @@ export function ProposalsSection({ s, reload }: { s: SettingsView; reload: () =>
   );
 }
 
-/** The Whop licence key: paste it once; the app keeps the machine-bound licence fresh by itself. */
+/**
+ * The licence (ADR-086/093). Signing in with the Savant account is the normal path: the browser opens getsavant.pro,
+ * the user approves, and this computer gets its licence. The key and licence-file paths stay for headless installs.
+ */
 export function LicenseSection({ s, reload }: { s: SettingsView; reload: () => void }) {
   const [key, setKey] = useState("");
   const [r, setR] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
+  const [waiting, setWaiting] = useState<{ code: string; url: string } | null>(null);
   const lic = s.license;
+  useEffect(() => {
+    if (!waiting) return;
+    let alive = true;
+    const t = setInterval(async () => {
+      const res = await post<Result & { status?: string }>("/api/settings/license", { poll: true });
+      if (!alive) return;
+      if (res.status === "pending") return;
+      clearInterval(t);
+      setWaiting(null);
+      setR(res);
+      if (res.ok) {
+        await waitForBrain();
+        reload();
+      }
+    }, 4000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [waiting, reload]);
   if (!lic?.required) return null; // builds without a publisher key (source checkouts) don't sell licences
-  const store = s.storeUrl ?? "https://whop.com/savant-agent/";
   const call = async (body: Record<string, unknown>) => {
     setBusy(true);
     const res = await post<Result>("/api/settings/license", body);
@@ -1491,6 +1514,18 @@ export function LicenseSection({ s, reload }: { s: SettingsView; reload: () => v
       reload();
     }
   };
+  const signIn = async () => {
+    setBusy(true);
+    const res = await post<Result & { url?: string; code?: string }>("/api/settings/license", {
+      signin: true,
+    });
+    setBusy(false);
+    setR(res);
+    if (res.ok && res.url && res.code) {
+      setWaiting({ code: res.code, url: res.url });
+      window.open(res.url, "_blank", "noopener"); // the desktop shell opens it in the system browser
+    }
+  };
   return (
     <section className="set-sec">
       <h4>Licence</h4>
@@ -1499,51 +1534,71 @@ export function LicenseSection({ s, reload }: { s: SettingsView; reload: () => v
           ? `Licensed${lic.license.plan === "trial" ? " (free trial)" : ` · ${lic.license.plan}`}${lic.daysLeft === null ? "" : ` · renews automatically (good offline for ${lic.daysLeft} more days)`}. Paper and live trading are on.`
           : `${lic.reason} Demo mode works without a licence; paper and live trading hold new trades (open positions keep their stops).`}
       </p>
-      {!lic.ok && (
+      {waiting ? (
+        <div className="alert-opt">
+          <b>Finish in your browser</b>
+          <p className="cost">
+            Sign in on getsavant.pro with the Whop account you bought Savant with, and check the code matches:
+          </p>
+          <p className="big-code">{waiting.code}</p>
+          <p className="cost">
+            Browser didn't open? <Ext href={waiting.url}>Open the sign-in page →</Ext>
+          </p>
+        </div>
+      ) : (
+        <div className="set-actions">
+          <button type="button" className="chip go" disabled={busy} onClick={() => void signIn()}>
+            {busy ? "OPENING…" : lic.ok ? "SIGN IN AGAIN" : "SIGN IN WITH YOUR SAVANT ACCOUNT"}
+          </button>
+          <Ext href="https://getsavant.pro/account/">Your account (plan, computers, billing) →</Ext>
+        </div>
+      )}
+      {!lic.ok && !waiting && (
         <p className="cost">
-          Every plan starts with a 7-day free trial. <Ext href={store}>Start a trial or buy Savant →</Ext>{" "}
-          Your licence key is in your Whop orders, next to the download.
+          No plan yet? Every plan starts with a 7-day free trial.{" "}
+          <Ext href="https://getsavant.pro/#pricing">See plans →</Ext>
         </p>
       )}
-      <div className="set-grid">
-        <Secret
-          label="LICENCE KEY (FROM YOUR WHOP ORDER)"
-          hint={s.licenseKey?.hint}
-          value={key}
-          onChange={setKey}
-          placeholder="paste your key"
-        />
-      </div>
-      <div className="set-actions">
-        <button
-          type="button"
-          className="chip go"
-          disabled={busy || key.length < 8}
-          onClick={() => void call({ key })}
-        >
-          {busy ? "CHECKING…" : "ACTIVATE ON THIS COMPUTER"}
-        </button>
-        {s.licenseKey?.set && (
+      <details className="advanced">
+        <summary className="label dim">USE A LICENCE KEY INSTEAD (COMPUTERS WITHOUT A BROWSER)</summary>
+        <p className="cost">Your key is on your account page at getsavant.pro/account.</p>
+        <div className="set-grid">
+          <Secret
+            label="LICENCE KEY"
+            hint={s.licenseKey?.hint}
+            value={key}
+            onChange={setKey}
+            placeholder="paste your key"
+          />
+        </div>
+        <div className="set-actions">
           <button
             type="button"
-            className="chip"
-            disabled={busy}
-            onClick={() => {
-              if (
-                confirm(
-                  "Release the licence from this computer? Paper and live trading hold until you activate it again.",
-                )
-              )
-                void call({ release: true });
-            }}
+            className="chip go"
+            disabled={busy || key.length < 8}
+            onClick={() => void call({ key })}
           >
-            MOVE TO ANOTHER COMPUTER
+            {busy ? "CHECKING…" : "ACTIVATE ON THIS COMPUTER"}
           </button>
-        )}
-        <Ext href="https://whop.com/@me/settings/orders">Manage your subscription →</Ext>
-      </div>
-      <details className="advanced">
-        <summary className="label dim">HAVE A LICENCE FILE INSTEAD?</summary>
+          {s.licenseKey?.set && (
+            <button
+              type="button"
+              className="chip"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  confirm(
+                    "Release the licence from this computer? Paper and live trading hold until you sign in again.",
+                  )
+                )
+                  void call({ release: true });
+              }}
+            >
+              RELEASE FROM THIS COMPUTER
+            </button>
+          )}
+        </div>
+        <p className="label dim">OR A LICENCE FILE</p>
         <input
           className="field plain"
           type="file"

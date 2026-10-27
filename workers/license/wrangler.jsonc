@@ -1,5 +1,6 @@
 {
-  // Savant licence server (ADR-086): checks Whop licence keys and signs machine-bound licence tokens.
+  // Savant licence and account server (ADR-086, ADR-093): Whop licence keys, machine-bound licence tokens, Sign in
+  // with Whop for getsavant.pro, device sign-in for the app.
   // Secrets (never in git): WHOP_API_KEY (a Whop account API key), LICENSE_SIGNING_KEY (the publisher Ed25519 key,
   // PKCS#8 PEM, from scripts/license.ts keygen). Deploy: pnpm deploy:license
   "$schema": "../../node_modules/wrangler/config-schema.json",
@@ -11,7 +12,13 @@
   "vars": {
     // only memberships of the Savant product count, and only its paid plans (monthly, yearly; trials included)
     "WHOP_PRODUCT_IDS": "prod_sdzK9Kr4E2Kgz",
-    "WHOP_PAID_PLAN_IDS": "plan_4bBHwmIccRi3d,plan_1uDX0TPE2wKea"
+    "WHOP_PAID_PLAN_IDS": "plan_4bBHwmIccRi3d,plan_1uDX0TPE2wKea",
+    // ADR-093: Sign in with Whop (public PKCE client "Savant Account") for getsavant.pro and the app
+    "WHOP_OAUTH_CLIENT_ID": "app_ge1Rv8QkJmsDdh",
+    "WHOP_ACCOUNT_ID": "biz_6HQpqa8fQ9QFUd",
+    "SITE_ORIGIN": "https://getsavant.pro"
   },
+  // ADR-093: device sign-in codes (15-minute TTL)
+  "kv_namespaces": [{ "binding": "DEVICES", "id": "818223a5007747d2ac8358bb6039a628" }],
   "ratelimits": [{ "name": "RL", "namespace_id": "5401", "simple": { "limit": 20, "period": 60 } }]
 }

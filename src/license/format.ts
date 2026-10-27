@@ -47,6 +47,8 @@ export const ActivateRequestSchema = z.object({
   key: z.string().trim().min(8).max(100),
   machine: z.string().regex(/^[0-9a-f]{32,64}$/),
   app: z.string().max(40).optional(),
+  /** ADR-093: a readable name for this computer, shown on the account page ("MacBook Pro") */
+  name: z.string().trim().max(60).optional(),
 });
 export type ActivateResponse =
   | { ok: true; license: License; message: string }

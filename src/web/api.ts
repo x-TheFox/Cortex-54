@@ -60,7 +60,13 @@ export interface WebSettings {
   /** ADR-081: cap the paper account's borrowing at 1x at the broker */
   cashOnly?(account: "PAPER" | "LIVE"): Promise<{ ok: boolean; message: string }>;
   /** ADR-077: install a licence file */
-  license?(q: { file?: string; key?: string; release?: boolean }): Promise<{ ok: boolean; message: string }>;
+  license?(q: {
+    file?: string;
+    key?: string;
+    release?: boolean;
+    signin?: boolean;
+    poll?: boolean;
+  }): Promise<{ ok: boolean; message: string; url?: string; code?: string; status?: string }>;
   /** ADR-091: approve or dismiss a Governor proposal */
   proposal?(q: {
     which: "calibration" | "scar";
@@ -296,6 +302,8 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
                 ...(str("file") ? { file: str("file") } : {}),
                 ...(str("key") ? { key: str("key") } : {}),
                 ...(body.release === true ? { release: true } : {}),
+                ...(body.signin === true ? { signin: true } : {}),
+                ...(body.poll === true ? { poll: true } : {}),
               })
             : { ok: false, message: "Not available here." },
         );

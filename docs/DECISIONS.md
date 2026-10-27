@@ -1220,3 +1220,43 @@ bundles through getsavant.pro. The page gains pricing (printed from `landing/che
 trial, a sign-in link to Whop orders, the legal footer, `/welcome/` (after purchase: downloads and the licence step),
 a 404, an Open Graph image and a sitemap. The release workflow no longer deploys GitHub Pages, and goes live only when
 every platform and the demo built.
+
+## ADR-091 — Governor proposals are approved in the app on a customer's install (2026-10-27)
+**Context:** operator: customers have no GitHub repository, so a Governor "pull request" means nothing to them. On a
+customer's computer the weekly Governor tried to write calibration and scar-tissue proposals into the app's own
+(read-only, signed) bundle, and nothing would ever apply them.
+**Decision:** the app runs the Governor with `GOVERNOR_STATE_DIR` = the Savant home. Proposals go to
+`<home>/proposals/` and wait in **Settings → Governor proposals**, where the user approves or dismisses each one. An
+approved calibration map is written to `<home>/calibration.json` and replaces the built-in map (re-validated as
+shrink-only on every load; a damaged file falls back to the built-in map); an approved rule joins the local scar
+tissue. Proposals can only tighten. The publisher's own cloud deployment keeps the pull-request path. Constitution U8
+now says this ("self-modification-needs-approval") and that the paper graduation gate is advice before RATIFY
+(ADR-083).
+
+## ADR-092 — Releases from a private source repository; customers never need GitHub or git (2026-10-27)
+**Context:** operator: the source repository goes private; customers have no GitHub account, only their own
+Cloudflare (optional) and API keys.
+**Decision:** the release workflow can publish installers to a public, binary-only repository (repository variable
+`RELEASES_REPO`, token `RELEASES_TOKEN` with contents write on it); unset, releases stay where they are. Version tags
+stay in the source repository. getsavant.pro's download and update redirects take the releases repository at build
+time (`SAVANT_RELEASES_REPO`), and the app reads updates only from getsavant.pro. The research desk no longer needs git:
+its two pinned open-source packages download as archives with the curl and tar every supported OS ships. Nothing a
+customer runs talks to GitHub with an identity; the Governor and research jobs run as local processes.
+
+## ADR-093 — Savant accounts on getsavant.pro (Sign in with Whop) and app sign-in instead of licence keys (2026-10-27)
+**Context:** operator: manage accounts, licences, devices and cancellations on our own site, and let people sign in
+to the app instead of pasting a key. Clerk was offered; Whop supports OAuth ("Sign in with Whop").
+**Decision:** the account **is** the buyer's Whop account (public OAuth app "Savant Account", PKCE, no secret), so
+there is one login, no email matching and no second user database. The licence Worker gained the account API
+(`workers/license/src/account.ts`): it checks the Whop access token against Whop's userinfo, then acts with the seller
+key on that user's memberships only. getsavant.pro/account shows the plan, trial and renewal dates, the computer
+holding the licence (name, last check-in), the licence key (for headless installs), **Cancel** (at period end) and
+**Keep my subscription**, **Remove this computer**, and **Manage billing** (Whop, for invoices and payment methods).
+The app's Settings → Licence leads with **Sign in with your Savant account**: the device-authorization pattern (a
+short code, getsavant.pro/activate, approve in the browser, the app picks up its key and activates it through the
+normal licence path). One computer at a time: signing in elsewhere asks before moving, and the old computer drops its
+licence at its next check. Device codes live 15 minutes in a KV namespace. Vercel proxies `/api/*` to the Worker so
+the site's CSP stays `'self'`. getsavant.pro/docs carries the install guide (including the one-time macOS
+Gatekeeper and Windows SmartScreen prompts), getting started, account, live trading, troubleshooting and uninstall.
+Checkout returns to /welcome/ with a payment confirmation. Also fixed on the way: the licence server read the plan
+from `plan_id`, but Whop sends `variant_id`, so every paid key would have been refused as the free plan.

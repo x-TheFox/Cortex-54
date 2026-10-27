@@ -6,6 +6,19 @@ import {
   type LicenseBody,
   licenseBody,
 } from "../../../src/license/format.ts";
+import { accountRoutes } from "./account.ts";
+import {
+  type Env,
+  type Fetch,
+  fail,
+  json,
+  type Membership,
+  REFRESH_HOURS,
+  refusal,
+  TOKEN_DAYS,
+  VALID,
+  whop,
+} from "./common.ts";
 
 /**
  * Savant licence server (ADR-086). The one place a Whop API key lives: the desktop app never holds it.
@@ -19,63 +32,6 @@ import {
  * it is online, and a customer can work offline for up to two weeks. Binding follows Whop's documented pattern
  * (membership metadata `hwid`); customers can also reset it themselves from their Whop orders.
  */
-
-export interface Env {
-  WHOP_API_KEY: string;
-  /** Ed25519 private key, PKCS#8 PEM (the publisher licence key, scripts/license.ts keygen) */
-  LICENSE_SIGNING_KEY: string;
-  /** only memberships of these products count (comma-separated prod_ ids); empty = any product of the account */
-  WHOP_PRODUCT_IDS?: string;
-  /** only memberships on these plans unlock trading (comma-separated plan_ ids); empty = any plan. The free demo plan
-   * is a Whop membership too, so production lists only the paid (monthly, yearly) plans. */
-  WHOP_PAID_PLAN_IDS?: string;
-  WHOP_API_BASE?: string;
-  /** Workers rate-limiting binding (optional; wrangler.jsonc) */
-  RL?: { limit(o: { key: string }): Promise<{ success: boolean }> };
-}
-
-const TOKEN_DAYS = 14;
-const REFRESH_HOURS = 24;
-const VALID = new Set(["active", "trialing", "completed", "past_due"]); // past_due: Whop's retry grace period
-
-type Fetch = (u: string, i?: RequestInit) => Promise<Response>;
-
-interface Membership {
-  id: string;
-  status: string;
-  product_id?: string;
-  product?: { id: string; title: string };
-  plan_id?: string;
-  plan?: { id: string } | null;
-  metadata?: Record<string, unknown>;
-  user_id?: string | null;
-  current_period_end?: string | null;
-  expires_at?: string | null;
-}
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "content-type": "application/json",
-      "cache-control": "no-store",
-      "access-control-allow-origin": "*",
-    },
-  });
-
-const fail = (code: string, message: string, status = 400) =>
-  json({ ok: false, code, message } satisfies ActivateResponse, status);
-
-async function whop(env: Env, f: Fetch, method: string, path: string, body?: unknown): Promise<Response> {
-  return f(`${(env.WHOP_API_BASE ?? "https://api.whop.com/api/v1").replace(/\/$/, "")}${path}`, {
-    method,
-    headers: {
-      authorization: `Bearer ${env.WHOP_API_KEY}`,
-      "content-type": "application/json",
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
-}
 
 /** PEM (PKCS#8) → CryptoKey for Ed25519 signing. */
 async function signingKey(pem: string): Promise<CryptoKey> {
@@ -104,25 +60,7 @@ async function lookup(env: Env, f: Fetch, key: string): Promise<Membership | Res
   if (!r.ok)
     return fail("upstream", "The licence check is unavailable right now. Try again in a few minutes.", 502);
   const m = (await r.json()) as Membership;
-  const allowed = (env.WHOP_PRODUCT_IDS ?? "")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-  const product = m.product_id ?? m.product?.id ?? "";
-  if (allowed.length && !allowed.includes(product))
-    return fail("wrong_product", "That key belongs to a different product.", 403);
-  const paid = (env.WHOP_PAID_PLAN_IDS ?? "")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
-  const plan = m.plan_id ?? m.plan?.id ?? "";
-  if (paid.length && !paid.includes(plan))
-    return fail(
-      "free_plan",
-      "That key is for the free demo, which runs without a licence. Start the 7-day trial or a subscription to trade a real account.",
-      403,
-    );
-  return m;
+  return refusal(env, m) ?? m;
 }
 
 export async function handle(
@@ -140,6 +78,13 @@ export async function handle(
       },
     });
   if (url.pathname === "/v1/health") return json({ ok: true, name: "Savant licence server" });
+  // ADR-093: the account (Sign in with Whop) and device sign-in endpoints
+  if (
+    url.pathname.startsWith("/v1/account") ||
+    url.pathname.startsWith("/v1/device") ||
+    url.pathname.startsWith("/v1/auth")
+  )
+    return accountRoutes(request, env, f, url);
   if (request.method !== "POST" || !["/v1/activate", "/v1/release"].includes(url.pathname))
     return fail("not_found", "Not found.", 404);
   const raw = await request.text();
@@ -154,7 +99,7 @@ export async function handle(
     })(),
   );
   if (!parsed.success) return fail("bad_request", "Send a licence key and a machine id.");
-  const { key, machine } = parsed.data;
+  const { key, machine, name } = parsed.data;
   // rate limits: per key (guessing keys is pointless anyway) and per client address
   const ip = request.headers.get("cf-connecting-ip") ?? "?";
   if (env.RL) {
@@ -175,7 +120,7 @@ export async function handle(
       return fail("bound_to_another_machine", "Only the computer this key is active on can release it.", 409);
     if (bound) {
       const r = await whop(env, f, "PATCH", `/memberships/${m.id}`, {
-        metadata: { ...m.metadata, hwid: null },
+        metadata: { ...m.metadata, hwid: null, device_name: null },
       });
       if (!r.ok)
         return fail("upstream", "Couldn't release the key right now. Try again in a few minutes.", 502);
@@ -195,11 +140,27 @@ export async function handle(
       "This key is active on another computer. Release it there (Settings → Licence), or reset it from your Whop orders.",
       409,
     );
+  const seen = Date.parse(String(m.metadata?.last_seen ?? ""));
   if (!bound) {
     const r = await whop(env, f, "PATCH", `/memberships/${m.id}`, {
-      metadata: { ...m.metadata, hwid: machine, activated_at: new Date().toISOString() },
+      metadata: {
+        ...m.metadata,
+        hwid: machine,
+        device_name: name ?? m.metadata?.device_name ?? "This computer",
+        activated_at: new Date().toISOString(),
+        last_seen: new Date().toISOString(),
+      },
     });
     if (!r.ok) return fail("upstream", "Couldn't activate right now. Try again in a few minutes.", 502);
+  } else if (!Number.isFinite(seen) || Date.now() - seen > 20 * 3_600_000) {
+    // the account page shows when each device last checked in (at most one write a day per device)
+    await whop(env, f, "PATCH", `/memberships/${m.id}`, {
+      metadata: {
+        ...m.metadata,
+        last_seen: new Date().toISOString(),
+        ...(name ? { device_name: name } : {}),
+      },
+    }).catch(() => undefined);
   }
 
   const now = Date.now();

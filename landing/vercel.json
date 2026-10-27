@@ -1,7 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": false,
-  "trailingSlash": true,
   "redirects": [
     {
       "source": "/:path(.*)",
@@ -78,6 +77,12 @@
           "value": "public, max-age=31536000, immutable"
         }
       ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://savant-license.samplayz2ks.workers.dev/:path*"
     }
   ]
 }
