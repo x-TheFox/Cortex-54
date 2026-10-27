@@ -75,7 +75,7 @@ if (process.argv[1]?.endsWith("changelog.ts")) {
     "### Install",
     args.includes("--notarized")
       ? "- **macOS** (Apple silicon or Intel): open the `.dmg` and drag CORTEX-54 to Applications. Signed and notarized by Apple."
-      : "- **macOS** (Apple silicon or Intel): open the `.dmg` and drag CORTEX-54 to Applications. The app isn't notarized yet: the first time, right-click it and choose Open.",
+      : "- **macOS** (Apple silicon or Intel): open the `.dmg` and drag CORTEX-54 to Applications. It isn't notarized by Apple yet, so the first time macOS says it can't verify the developer: open System Settings → Privacy & Security and press Open Anyway (on macOS 14 and earlier: right-click the app → Open). Prefer Terminal? `xattr -dr com.apple.quarantine /Applications/CORTEX-54.app`.",
     "- **Windows**: run the `-setup.exe` (or the `.msi`). SmartScreen may ask once: More info → Run anyway.",
     "- **Windows MSIX** (Windows 11): in PowerShell, `Add-AppxPackage -AllowUnsigned .\\CORTEX-54_*.msix`. Installed this way, Windows manages the files: install the next release's MSIX to update.",
     "- **Linux**: the `.AppImage` (make it executable), or the `.deb` / `.rpm`.",
