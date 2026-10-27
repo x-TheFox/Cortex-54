@@ -11,9 +11,9 @@ on:
         type: choice
         options: [kill, rearm]
       reason:
-        description: "Why (journaled and posted to #alarms)"
+        description: "Why (posted to #alarms; a re-arm needs 10+ characters)"
         required: false
-        default: "operator kill via GitHub"
+        default: "operator action via GitHub"
 
 permissions: {}
 
@@ -26,6 +26,7 @@ jobs:
         env:
           SENTINEL_URL: ${{ vars.SENTINEL_URL }}
           SENTINEL_TICK_SECRET: ${{ secrets.SENTINEL_TICK_SECRET }}
+          SENTINEL_REARM_SECRET: ${{ secrets.SENTINEL_REARM_SECRET }}
           ACTION: ${{ inputs.action }}
           REASON: ${{ inputs.reason }}
         run: |
@@ -34,5 +35,6 @@ jobs:
             curl -fsS --max-time 30 -X POST -G --data-urlencode "reason=$REASON" \
               -H "authorization: Bearer $SENTINEL_TICK_SECRET" "$SENTINEL_URL/kill"
           else
-            curl -fsS --max-time 30 -X POST -H "authorization: Bearer $SENTINEL_TICK_SECRET" "$SENTINEL_URL/rearm"
+            curl -fsS --max-time 30 -X POST -G --data-urlencode "reason=$REASON" \
+              -H "authorization: Bearer ${SENTINEL_REARM_SECRET:-$SENTINEL_TICK_SECRET}" "$SENTINEL_URL/rearm"
           fi

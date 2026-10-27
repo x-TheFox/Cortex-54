@@ -213,12 +213,18 @@ def world_job(version: str) -> dict | None:
 def sign_and_post(body: str) -> requests.Response:
     secret = os.environ["INGEST_HMAC_SECRET"]
     ts = str(int(time.time()))
-    sig = hmac.new(secret.encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
+    # route-bound signature (audit F-A3-03)
+    sig = hmac.new(secret.encode(), f"{ts}./ingest/batch.{body}".encode(), hashlib.sha256).hexdigest()
     url = os.environ["CORTEX_URL"].rstrip("/") + "/ingest/batch"
     return requests.post(
         url,
         data=body.encode(),
-        headers={"content-type": "application/json", "x-cortex-timestamp": ts, "x-cortex-signature": f"sha256={sig}"},
+        headers={
+            "content-type": "application/json",
+            "x-cortex-timestamp": ts,
+            "x-cortex-audience": "/ingest/batch",
+            "x-cortex-signature": f"sha256={sig}",
+        },
         timeout=30,
     )
 

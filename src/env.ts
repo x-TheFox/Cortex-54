@@ -2,6 +2,8 @@ import type { AgentCortexDO, LabCortexDO } from "./cortex/AgentCortexDO.ts";
 
 /** Bindings and secrets for the `cortex` worker. Keep in sync with wrangler.jsonc and .dev.vars.example. */
 export interface Env {
+  /** Audit F-A3-07: per-IP rate limiter (wrangler `ratelimits`); absent in tests and local dev. */
+  RL?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   CORTEX: DurableObjectNamespace<AgentCortexDO>;
   /** ADR-045: the LAB brain (forward-tests strategies on its own paper account) and its journal. */
   CORTEX_LAB?: DurableObjectNamespace<LabCortexDO>;

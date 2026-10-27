@@ -162,7 +162,9 @@ export function validateEntry(i: ValidateInput, d: Doctrine, c: Constitution): V
     if (!again.ok)
       return {
         ok: false,
-        reasons: [`expected move below fee hurdle at the real order size (${(again.required * 100).toFixed(2)}%)`],
+        reasons: [
+          `expected move below fee hurdle at the real order size (${(again.required * 100).toFixed(2)}%)`,
+        ],
       };
     const riskWithFees = sizing.notionalUsd * (Math.abs(entryPrice - stop) / entryPrice + realFeeRt);
     if (riskWithFees > a.equityUsd * c.hard_limits.max_per_trade_risk_pct + 1e-9)

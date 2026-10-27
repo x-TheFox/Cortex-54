@@ -29,7 +29,7 @@ import {
   SCAR_TISSUE,
 } from "../src/generated/config.ts";
 import { hubFromEnv } from "../src/hub/client.ts";
-import { verifySignedBody } from "../src/lib/hmac.ts";
+import { verifyRoute } from "../src/lib/hmac.ts";
 import type { AccountId } from "../src/lib/ids.ts";
 import { InboxNotifier, readFeed } from "../src/notify/inbox.ts";
 import { ntfyUrl, PushNotifier } from "../src/notify/push.ts";
@@ -537,7 +537,23 @@ export class LocalCortex {
         { ok: false, message: "Settings can only be changed on the computer Savant runs on." },
         { status: 403 },
       );
-    if (request.method === "GET" && url.pathname === "/health") return Response.json(this.health());
+    // audit F-A6-03: key hints, the licensee and licence details stay on this computer
+    if (
+      cfg.lan.enabled &&
+      !local &&
+      request.method === "GET" &&
+      (url.pathname === "/api/settings" || url.pathname.startsWith("/api/settings/"))
+    )
+      return Response.json(
+        { ok: false, message: "Settings are only shown on the computer Savant runs on." },
+        { status: 403 },
+      );
+    if (request.method === "GET" && url.pathname === "/health") {
+      const h = this.health();
+      if (local) return Response.json(h);
+      const { license: _license, ...rest } = h as typeof h & { license?: unknown };
+      return Response.json(rest);
+    }
     if (request.method === "GET" && url.pathname === "/pill") {
       if (!pillAuthorized(request.headers.get("authorization"), cfg.secrets.pill_token))
         return new Response("unauthorized", { status: 401 });
@@ -551,19 +567,27 @@ export class LocalCortex {
       (url.pathname === "/ingest/batch" || url.pathname === "/governor/export")
     ) {
       const body = await request.text();
-      const ok = await verifySignedBody(
-        cfg.secrets.ingest_hmac,
-        request.headers.get("x-cortex-signature"),
-        request.headers.get("x-cortex-timestamp"),
-        body,
-      );
+      const ok = await verifyRoute(cfg.secrets.ingest_hmac, request.headers, url.pathname, body, {
+        legacyOk: url.pathname === "/ingest/batch",
+      });
       if (!ok) return new Response("bad signature", { status: 401 });
       if (url.pathname === "/ingest/batch") {
-        const r = await this.brain.ingestBatch(JSON.parse(body));
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          return new Response("bad json", { status: 400 });
+        }
+        const r = await this.brain.ingestBatch(parsed);
         await this.brain.flushJournal();
         return Response.json(r, { status: r.ok ? 200 : 422 });
       }
-      const q = JSON.parse(body) as { table?: string; after?: number; limit?: number };
+      let q: { table?: string; after?: number; limit?: number };
+      try {
+        q = JSON.parse(body) as typeof q;
+      } catch {
+        return new Response("bad json", { status: 400 });
+      }
       if (!EXPORT_TABLES.has(String(q.table))) return new Response("table not allowed", { status: 400 });
       await this.brain.flushJournal();
       const limit = Math.min(200, Math.max(1, Number(q.limit) || 100));
@@ -584,6 +608,7 @@ export class LocalCortex {
           DB: this.d1,
           SESSION_TTL_MS: 30 * 86_400_000, // your own computer: stay signed in (local mode is paper-only)
           COOKIE_INSECURE: cfg.lan.enabled, // plain HTTP on the user's Wi-Fi (ADR-076)
+          REMOTE_DEVICE: !local,
         },
         this.webBrain(),
       );

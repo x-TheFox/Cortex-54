@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import type { WorkflowDispatcher } from "../src/cortex/dispatch.ts";
-import { hmacHex } from "../src/lib/hmac.ts";
+import { signedHeaders } from "../src/lib/hmac.ts";
 
 /**
  * Desktop research runner for a cloud brain (ADR-065). Polls the user's own cloud worker for queued jobs
@@ -16,15 +16,9 @@ export async function claimOnce(
   runner = hostname().slice(0, 40),
 ): Promise<string | null> {
   const body = JSON.stringify({ runner });
-  const ts = String(Math.floor(Date.now() / 1000));
-  const sig = await hmacHex(secret, `${ts}.${body}`);
   const r = await fetcher(`${url.replace(/\/$/, "")}/runner/claim`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-cortex-timestamp": ts,
-      "x-cortex-signature": `sha256=${sig}`,
-    },
+    headers: await signedHeaders(secret, "/runner/claim", body),
     body,
     signal: AbortSignal.timeout(15_000),
   });

@@ -15,7 +15,7 @@ import {
 } from "./discord/interactions.ts";
 import { verifyDiscordRequest } from "./discord/verify.ts";
 import type { Env } from "./env.ts";
-import { verifySignedBody } from "./lib/hmac.ts";
+import { verifyRoute } from "./lib/hmac.ts";
 import { handleWeb, loginLink } from "./web/api.ts";
 import { runCommand } from "./web/commands.ts";
 import { pill, pillAuthorized, swiftbar } from "./web/pill.ts";
@@ -49,7 +49,13 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
   );
   if (!ok) return new Response("Bad signature", { status: 401 });
 
-  const parsed = InteractionSchema.safeParse(JSON.parse(body));
+  let raw: unknown;
+  try {
+    raw = JSON.parse(body);
+  } catch {
+    return new Response("Bad interaction", { status: 400 }); // audit F-A3-06
+  }
+  const parsed = InteractionSchema.safeParse(raw);
   if (!parsed.success) return new Response("Bad interaction", { status: 400 });
   const i: Interaction = parsed.data;
   if (i.type === PING) return Response.json({ type: 1 });
@@ -59,6 +65,8 @@ async function handleInteraction(request: Request, env: Env, ctx: ExecutionConte
   if (!env.OPERATOR_DISCORD_ID || who !== env.OPERATOR_DISCORD_ID) return ephemeral("⛔ Operator only.");
   const by = `discord:${who}`;
   const b = brain(env);
+  // audit F-A5-05: a signed interaction is valid for Discord's whole timestamp window; act on each id once
+  if (i.id && !(await b.consumeOnce(`discord:${i.id}`))) return ephemeral("Already handled.");
 
   if (i.type === MESSAGE_COMPONENT) return handleButton(i, env, ctx, b, by);
   if (i.type !== APPLICATION_COMMAND) return ephemeral("Unsupported interaction.");
@@ -183,12 +191,7 @@ async function adminReset(request: Request, env: Env): Promise<Response> {
   if (!env.INGEST_HMAC_SECRET) return new Response("not configured", { status: 503 });
   const body = await request.text();
   if (body.length > 500) return new Response("too large", { status: 413 });
-  const ok = await verifySignedBody(
-    env.INGEST_HMAC_SECRET,
-    request.headers.get("x-cortex-signature"),
-    request.headers.get("x-cortex-timestamp"),
-    body,
-  );
+  const ok = await verifyRoute(env.INGEST_HMAC_SECRET, request.headers, "/admin/reset", body);
   if (!ok) return new Response("bad signature", { status: 401 });
   let q: { account?: unknown };
   try {
@@ -208,12 +211,7 @@ async function governorExport(request: Request, env: Env): Promise<Response> {
   if (!env.INGEST_HMAC_SECRET) return new Response("not configured", { status: 503 });
   const body = await request.text();
   if (body.length > 2_000) return new Response("too large", { status: 413 });
-  const ok = await verifySignedBody(
-    env.INGEST_HMAC_SECRET,
-    request.headers.get("x-cortex-signature"),
-    request.headers.get("x-cortex-timestamp"),
-    body,
-  );
+  const ok = await verifyRoute(env.INGEST_HMAC_SECRET, request.headers, "/governor/export", body);
   if (!ok) return new Response("bad signature", { status: 401 });
   let q: { table?: unknown; after?: unknown; limit?: unknown };
   try {
@@ -239,25 +237,43 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    // audit F-A3-07: a flood from one address can't spend the account's 100k daily requests on the brain. Discord
+    // interactions are exempt (they come from Discord's own addresses and are signature-checked first).
+    if (env.RL && url.pathname !== "/discord/interactions") {
+      const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+      if (!(await env.RL.limit({ key: ip })).success)
+        return new Response("slow down", { status: 429, headers: { "retry-after": "60" } });
+    }
+
     if (request.method === "GET" && url.pathname === "/health") {
       const b = brain(env);
       await b.ensureAlarm(); // sentinel ticks keep the heart armed even without a cron (ADR-021)
       await labBrain(env)?.ensureAlarm();
       const health = await b.health();
       const stale = health.last_pulse_at === null || Date.now() - health.last_pulse_at > 15 * 60_000;
-      return Response.json(health, { status: stale ? 503 : 200 });
+      // audit F-A3-04 / F-A5-08: the public answer carries only what the sentinel and `cortex deploy` read; the full
+      // view (SLOs, configured accounts) needs the widget bearer token
+      const full = !!env.PILL_TOKEN && pillAuthorized(request.headers.get("authorization"), env.PILL_TOKEN);
+      const body = full
+        ? health
+        : {
+            now: health.now,
+            last_pulse_at: health.last_pulse_at,
+            next_alarm_at: health.next_alarm_at,
+            constitution_sha256: health.constitution_sha256,
+            discord_fail_streak: health.discord_fail_streak,
+            policy_violations: health.policy_violations,
+          };
+      return Response.json(body, { status: stale ? 503 : 200, headers: { "cache-control": "no-store" } });
     }
 
     if (request.method === "POST" && url.pathname === "/ingest/batch") {
       if (!env.INGEST_HMAC_SECRET) return new Response("ingest not configured", { status: 503 });
       const body = await request.text();
       if (body.length > MAX_BATCH_BYTES) return new Response("too large", { status: 413 });
-      const ok = await verifySignedBody(
-        env.INGEST_HMAC_SECRET,
-        request.headers.get("x-cortex-signature"),
-        request.headers.get("x-cortex-timestamp"),
-        body,
-      );
+      const ok = await verifyRoute(env.INGEST_HMAC_SECRET, request.headers, "/ingest/batch", body, {
+        legacyOk: true,
+      });
       if (!ok) return new Response("bad signature", { status: 401 });
       let parsed: unknown;
       try {
@@ -265,6 +281,9 @@ export default {
       } catch {
         return new Response("bad json", { status: 400 });
       }
+      // audit F-A3-08: a captured signed batch must not be re-applied inside its ±10 min window
+      if (!(await brain(env).consumeOnce(`ingest:${request.headers.get("x-cortex-signature")}`)))
+        return new Response("replayed request", { status: 409 });
       const receipt = await brain(env).ingest(parsed);
       // ADR-045: the LAB brain needs the same regime and Kronos data; it never sees world-intel or Governor batches.
       const job = (parsed as { job?: unknown } | null)?.job;
@@ -287,14 +306,14 @@ export default {
       if (!env.INGEST_HMAC_SECRET) return new Response("not configured", { status: 503 });
       const body = await request.text();
       if (body.length > 500) return new Response("too large", { status: 413 });
-      const ok = await verifySignedBody(
-        env.INGEST_HMAC_SECRET,
-        request.headers.get("x-cortex-signature"),
-        request.headers.get("x-cortex-timestamp"),
-        body,
-      );
+      const ok = await verifyRoute(env.INGEST_HMAC_SECRET, request.headers, "/runner/claim", body);
       if (!ok) return new Response("bad signature", { status: 401 });
-      const runner = String((JSON.parse(body) as { runner?: unknown }).runner ?? "runner").slice(0, 60);
+      let runner = "runner";
+      try {
+        runner = String((JSON.parse(body) as { runner?: unknown }).runner ?? "runner").slice(0, 60);
+      } catch {
+        return new Response("bad json", { status: 400 }); // audit F-A3-06
+      }
       return Response.json({ job: await brain(env).claimJob(runner) });
     }
 

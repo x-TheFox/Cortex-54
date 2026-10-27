@@ -7,7 +7,7 @@ import { brainConfig, brainSecrets, deploy, type Runner, stripJsonc } from "../l
 import { claimOnce } from "../local/runner.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
 import { QueueDispatcher } from "../src/cortex/queue.ts";
-import { verifySignedBody } from "../src/lib/hmac.ts";
+import { verifyRoute } from "../src/lib/hmac.ts";
 import { memorySql } from "./sim/sqlite.ts";
 
 describe("job queue for desktop runners (ADR-065)", () => {
@@ -39,11 +39,10 @@ describe("job queue for desktop runners (ADR-065)", () => {
     const secret = "s".repeat(40);
     const dispatched: string[] = [];
     const fetcher = (async (url: string, init?: RequestInit) => {
-      const ok = await verifySignedBody(
-        secret,
-        new Headers(init?.headers).get("x-cortex-signature"),
-        new Headers(init?.headers).get("x-cortex-timestamp"),
-        String(init?.body),
+      const ok = await verifyRoute(secret, new Headers(init?.headers), "/runner/claim", String(init?.body));
+      // audit F-A3-03: the same signature is worthless on any other route
+      expect(await verifyRoute(secret, new Headers(init?.headers), "/ingest/batch", String(init?.body))).toBe(
+        false,
       );
       expect(url).toBe("https://cortex.example.workers.dev/runner/claim");
       return ok

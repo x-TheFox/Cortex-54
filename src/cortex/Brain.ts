@@ -84,6 +84,7 @@ import {
   REBUTTAL_PROMPT_VERSION,
   REBUTTAL_SCHEMA,
   REBUTTAL_SYSTEM,
+  untrusted,
 } from "../court/prompts.ts";
 import { COLORS, type Notifier } from "../discord/notifier.ts";
 import { fetchFeed, type HubConfig, publishBatch } from "../hub/client.ts";
@@ -1031,7 +1032,13 @@ export class Brain {
         content: `🔗 Journal anchor ${day}: seq ${head.seq} · \`${head.sha}\``,
       });
       this.sql.exec("DELETE FROM seen_activities WHERE at < ?", now - 7 * 86_400_000);
-      this.sql.exec("DELETE FROM seen_items WHERE at < ?", now - 3 * 86_400_000);
+      // audit F-A5-06: sign-out revocations must outlive the longest session (30 days locally), or a copied
+      // "signed-out" cookie revives
+      this.sql.exec(
+        "DELETE FROM seen_items WHERE at < ? AND id NOT LIKE 'web:revoked:%'",
+        now - 3 * 86_400_000,
+      );
+      this.sql.exec("DELETE FROM seen_items WHERE at < ? AND id LIKE 'web:revoked:%'", now - 31 * 86_400_000);
       this.budget.prune(now);
       this.sql.exec("DELETE FROM equity_history WHERE at < ?", now - 35 * 86_400_000);
       this.compactHotState(now);
@@ -1064,6 +1071,7 @@ export class Brain {
       now - 180 * day,
     );
     this.sql.exec("DELETE FROM d1_outbox_dead WHERE dead_at < ?", now - 90 * day);
+    this.journal.requeueQuarantined(now); // audit F-A3-02: dead rows get another chance once a day
     // ADR-051: dossiers are only used while fresh (≤ 12 h); keep a week for the web terminal and debugging
     this.sql.exec("DELETE FROM dossiers WHERE received_at < ?", now - 7 * day);
     this.sql.exec("DELETE FROM court_waits WHERE until_at < ?", now - day);
@@ -4335,7 +4343,7 @@ ${postmortem}`,
       this.d.llm_routing.bull_chain,
       {
         system: BULL_SYSTEM,
-        user: `Evidence JSON (ids for receipts: ${e.receipts.map((r) => r.evidence_id).join(", ")}):\n${evidenceJson}`,
+        user: `Evidence JSON (ids for receipts: ${e.receipts.map((r) => r.evidence_id).join(", ")}):\n${untrusted("evidence", evidenceJson)}`,
         maxOutputTokens: 1500,
         schema: BULL_SCHEMA as unknown as Record<string, unknown>,
       },
@@ -4363,7 +4371,7 @@ ${postmortem}`,
       this.d.llm_routing.bear_chain,
       {
         system: bearSystem(persona),
-        user: `Evidence JSON:\n${evidenceJson}\n\nBull brief JSON:\n${JSON.stringify(checked.bull)}`,
+        user: `Evidence JSON:\n${untrusted("evidence", evidenceJson)}\n\nBull brief JSON:\n${untrusted("bull", JSON.stringify(checked.bull))}`,
         maxOutputTokens: 1500,
         schema: BEAR_SCHEMA as unknown as Record<string, unknown>,
       },
@@ -4390,7 +4398,7 @@ ${postmortem}`,
         [{ provider: bull.provider, model: bull.model }, ...this.d.llm_routing.bull_chain],
         {
           system: REBUTTAL_SYSTEM,
-          user: `Evidence JSON:\n${evidenceJson}\n\nYour brief JSON:\n${JSON.stringify(checked.bull)}\n\nBear attack JSON:\n${JSON.stringify(bear.value)}`,
+          user: `Evidence JSON:\n${untrusted("evidence", evidenceJson)}\n\nYour brief JSON:\n${untrusted("bull", JSON.stringify(checked.bull))}\n\nBear attack JSON:\n${untrusted("bear", JSON.stringify(bear.value))}`,
           maxOutputTokens: 1200,
           schema: REBUTTAL_SCHEMA as unknown as Record<string, unknown>,
         },
@@ -4440,7 +4448,7 @@ ${postmortem}`,
           const chain = [...panelCfg.chain.slice(i), ...panelCfg.chain.slice(0, i)];
           const req = {
             system: panelSystem(seat),
-            user: `Evidence JSON:\n${evidenceJson}\n\nBull brief:\n${JSON.stringify(checked.bull)}\n\nBear attack:\n${JSON.stringify(bear.value)}${rebuttal ? `\n\nBull rebuttal:\n${JSON.stringify(rebuttal)}` : ""}`,
+            user: `Evidence JSON:\n${untrusted("evidence", evidenceJson)}\n\nBull brief:\n${untrusted("bull", JSON.stringify(checked.bull))}\n\nBear attack:\n${untrusted("bear", JSON.stringify(bear.value))}${rebuttal ? `\n\nBull rebuttal:\n${untrusted("rebuttal", JSON.stringify(rebuttal))}` : ""}`,
             maxOutputTokens: 800,
             schema: PANEL_SCHEMA as unknown as Record<string, unknown>,
           };
@@ -4472,11 +4480,12 @@ ${postmortem}`,
     );
     const synthReq = buildSynth(e, checked.bull, bear.value, { rebuttal, panel: shuffled });
     const est = estimateTokens(synthReq.state, synthReq.questions);
-    if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) {
+    // audit F-A4-05: the court's Clef judge bills its own allocation (tier3_fallback), not Tier 2's
+    if (!this.budget.canSpendNeurons("neurons_tier3_fallback", neuronsFor("clef", est, this.d), now)) {
       this.rejectCandidate(
         cand,
         "BUDGET",
-        ["tier-2 neurons exhausted for synthesis"],
+        ["court Clef neurons exhausted for synthesis"],
         { ...checked.bull },
         now,
       );
@@ -4497,7 +4506,11 @@ ${postmortem}`,
       await close(`❌ Clef judge unavailable: ${errText(e).slice(0, 120)}`, false);
       return 0;
     }
-    this.budget.add("neurons_tier2", neuronsFor("clef", synthRes.usage.input_tokens ?? est, this.d), now);
+    this.budget.add(
+      "neurons_tier3_fallback",
+      neuronsFor("clef", synthRes.usage.input_tokens ?? est, this.d),
+      now,
+    );
     const synth = interpretSynth(synthRes);
     if (!synth) {
       this.rejectCandidate(cand, "SYNTH", ["incomplete Clef synthesis"], { ...checked.bull }, now);

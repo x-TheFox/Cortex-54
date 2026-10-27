@@ -2390,6 +2390,28 @@ describe("Audit fixes (2026-10-24)", () => {
     expect(j.quarantined()).toBe(1); // nothing new: an outage is not a poison pill
   });
 
+  it("outbox: quarantined rows are requeued for another try (audit F-A3-02); a replayed journal row is ignored", async () => {
+    const sql = memorySql();
+    for (const s of HOT_SCHEMA) sql.exec(s);
+    const j = new Journal(sql);
+    sql.exec("INSERT INTO d1_outbox (tbl, row_json, created_at) VALUES ('nope', '{}', ?)", T0);
+    const sqls: string[] = [];
+    const ok = {
+      prepare: (q: string) => {
+        sqls.push(q);
+        return { bind: () => ({}) };
+      },
+      batch: async (s: unknown[]) => s,
+    };
+    await j.flush(ok);
+    expect(j.quarantined()).toBe(1);
+    expect(j.requeueQuarantined(T0 + 1)).toBe(1);
+    expect(j.quarantined()).toBe(0);
+    expect(j.pending()).toBeGreaterThanOrEqual(2); // the row is back, plus the OUTBOX_REQUEUE journal row
+    await j.flush(ok);
+    expect(sqls.some((q) => q.startsWith("INSERT OR IGNORE INTO journal"))).toBe(true);
+  });
+
   it("compacts per-day keys and old contracts but keeps live state", async () => {
     const t = setup();
     const old = T0 - 30 * 86_400_000;

@@ -2,7 +2,7 @@ import type { Doctrine } from "../contracts/doctrine.ts";
 import { BullSchema } from "./court.ts";
 import { buildEvidence, evidenceForModels } from "./evidence.ts";
 import { extractJson, type LlmProvider } from "./llm.ts";
-import { BULL_PROMPT_VERSION, BULL_SCHEMA, BULL_SYSTEM } from "./prompts.ts";
+import { BULL_PROMPT_VERSION, BULL_SCHEMA, BULL_SYSTEM, untrusted } from "./prompts.ts";
 
 /**
  * Model drift canary (ADR-070; dossier MLP0-012). Free models change under us without notice: a silent weight update,
@@ -63,7 +63,7 @@ export async function runCanary(
 ): Promise<{ prompt: string; results: CanaryResult[] }> {
   const e = goldenCase(now);
   if (!e) throw new Error("golden case failed to build");
-  const user = `Evidence JSON (ids for receipts: ${e.receipts.map((r) => r.evidence_id).join(", ")}):\n${JSON.stringify(evidenceForModels(e))}`;
+  const user = `Evidence JSON (ids for receipts: ${e.receipts.map((r) => r.evidence_id).join(", ")}):\n${untrusted("evidence", JSON.stringify(evidenceForModels(e)))}`;
   const results: CanaryResult[] = [];
   for (const h of hops) {
     const p = providers[h.provider];

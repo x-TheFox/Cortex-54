@@ -182,14 +182,27 @@ export class OpenAICompatProvider implements LlmProvider {
   }
 }
 
-/** Pull the first JSON object out of model text (handles ```json fences and stray prose). */
+/**
+ * Pull the JSON object out of model text (handles ```json fences and stray prose). Audit F-A4-03: the model's own
+ * answer is its LAST fenced block; an earlier one may be evidence it echoed (possibly an injected fence), so fenced
+ * blocks are tried from last to first and the first that parses wins.
+ */
 export function extractJson(text: string): unknown {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text);
-  const body = fenced ? (fenced[1] ?? "") : text;
-  const start = body.indexOf("{");
-  const end = body.lastIndexOf("}");
-  if (start === -1 || end <= start) throw new Error("no JSON object in model output");
-  return JSON.parse(body.slice(start, end + 1));
+  const objectIn = (body: string): unknown => {
+    const start = body.indexOf("{");
+    const end = body.lastIndexOf("}");
+    if (start === -1 || end <= start) throw new Error("no JSON object in model output");
+    return JSON.parse(body.slice(start, end + 1));
+  };
+  const blocks = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1] ?? "");
+  for (const b of blocks.reverse()) {
+    try {
+      return objectIn(b);
+    } catch {
+      // try the previous block
+    }
+  }
+  return objectIn(text);
 }
 
 export interface HopAttempt {

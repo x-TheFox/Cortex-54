@@ -14,6 +14,14 @@ import { verifyDiscordRequest } from "./verify.ts";
 
 interface SentinelEnv {
   FLAGS: KVNamespace;
+  /**
+   * Audit F-A5-03: the sentinel's own record of a kill, in a namespace only the sentinel binds. FLAGS is shared with
+   * the brain (which needs to read it); if the brain ever deleted the flag, the sentinel puts it back from here.
+   * Optional: without it the sentinel behaves as before.
+   */
+  STATE?: KVNamespace;
+  /** Audit F-A5-11: a separate secret for HTTP /rearm (falls back to SENTINEL_TICK_SECRET when unset). */
+  SENTINEL_REARM_SECRET?: string;
   /** Bearer secret for POST /tick (GitHub Actions watchdog when no cron slot is free, ADR-021). */
   SENTINEL_TICK_SECRET?: string;
   CORTEX_HEALTH_URL: string;
@@ -66,7 +74,9 @@ async function alert(env: SentinelEnv, content: string): Promise<void> {
 
 /** Cancel all orders and close all positions on the given accounts, then set the kill flag. */
 async function killAll(env: SentinelEnv, accounts: Acct[], by: string, reason: string): Promise<string> {
-  await env.FLAGS.put("killed", JSON.stringify({ at: Date.now(), by, reason, accounts }));
+  const record = JSON.stringify({ at: Date.now(), by, reason, accounts });
+  await env.FLAGS.put("killed", record);
+  await env.STATE?.put("killed", record);
   const results: string[] = [];
   for (const a of accounts) {
     if (!creds(env, a)) {
@@ -172,8 +182,28 @@ async function enforceKill(env: SentinelEnv, raw: string, now: number): Promise<
   }
 }
 
+/** Clear a kill everywhere the sentinel recorded it. */
+async function rearm(env: SentinelEnv): Promise<string | null> {
+  const prev = await env.FLAGS.get("killed");
+  await env.FLAGS.delete("killed");
+  await env.STATE?.delete("killed");
+  return prev;
+}
+
 async function cron(env: SentinelEnv, now: number): Promise<void> {
-  const flag = await env.FLAGS.get("killed");
+  let flag = await env.FLAGS.get("killed");
+  if (flag === null && env.STATE) {
+    // audit F-A5-03: the shared flag vanished while the sentinel's own record says killed → restore it
+    const own = await env.STATE.get("killed");
+    if (own !== null) {
+      await env.FLAGS.put("killed", own);
+      flag = own;
+      await alert(
+        env,
+        "🚨 SENTINEL: the kill flag was removed without a re-arm; restored it. Check the brain.",
+      );
+    }
+  }
   const killed = flag !== null;
   if (flag !== null) await enforceKill(env, flag, now);
 
@@ -260,13 +290,20 @@ async function interactions(request: Request, env: SentinelEnv, ctx: ExecutionCo
     body,
   );
   if (!ok) return new Response("Bad signature", { status: 401 });
-  const i = JSON.parse(body) as {
+  let i: {
     type: number;
     token?: string;
     member?: { user: { id: string } };
     user?: { id: string };
     data?: { name?: string; options?: { name: string; value: string }[] };
   };
+  try {
+    i = JSON.parse(body);
+  } catch {
+    return new Response("Bad interaction", { status: 400 }); // audit F-A5-11
+  }
+  if (typeof i !== "object" || i === null || typeof i.type !== "number")
+    return new Response("Bad interaction", { status: 400 });
   if (i.type === 1) return Response.json({ type: 1 });
   const who = i.member?.user.id ?? i.user?.id;
   if (!env.OPERATOR_DISCORD_ID || who !== env.OPERATOR_DISCORD_ID) return ephemeral("⛔ Operator only.");
@@ -289,8 +326,7 @@ async function interactions(request: Request, env: SentinelEnv, ctx: ExecutionCo
       return Response.json({ type: 5, data: { flags: 64 } });
     }
     case "rearm": {
-      const prev = await env.FLAGS.get("killed");
-      await env.FLAGS.delete("killed");
+      const prev = await rearm(env);
       await alert(env, `🟢 SENTINEL re-armed by discord:${who}. Previous kill: ${prev ?? "none"}`);
       return ephemeral(
         "Kill flag cleared. The brain may enter new trades on its next pulse (respecting its own breakers and dial).",
@@ -313,9 +349,9 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-function bearerOk(request: Request, env: SentinelEnv): boolean {
+function bearerOk(request: Request, env: SentinelEnv, secret = env.SENTINEL_TICK_SECRET): boolean {
   const auth = request.headers.get("authorization") ?? "";
-  return Boolean(env.SENTINEL_TICK_SECRET) && timingSafeEqual(auth, `Bearer ${env.SENTINEL_TICK_SECRET}`);
+  return Boolean(secret) && timingSafeEqual(auth, `Bearer ${secret}`);
 }
 
 export default {
@@ -326,7 +362,11 @@ export default {
 
     // Token-protected HTTP paths for the GitHub Actions watchdog and kill-switch (ADR-021, ADR-022).
     if (request.method === "POST" && ["/tick", "/kill", "/rearm"].includes(url.pathname)) {
-      if (!bearerOk(request, env)) return new Response("unauthorized", { status: 401 });
+      const secret =
+        url.pathname === "/rearm"
+          ? (env.SENTINEL_REARM_SECRET ?? env.SENTINEL_TICK_SECRET)
+          : env.SENTINEL_TICK_SECRET;
+      if (!bearerOk(request, env, secret)) return new Response("unauthorized", { status: 401 });
       if (url.pathname === "/tick") {
         await cron(env, Date.now());
         return new Response("ok");
@@ -335,9 +375,11 @@ export default {
         const reason = (url.searchParams.get("reason") ?? "operator kill (http)").slice(0, 200);
         return new Response(await killAll(env, ["PAPER", "LIVE"], "http", reason));
       }
-      const prev = await env.FLAGS.get("killed");
-      await env.FLAGS.delete("killed");
-      await alert(env, `🟢 SENTINEL re-armed via http. Previous kill: ${prev ?? "none"}`);
+      // audit F-A5-11: a re-arm says why (it is posted to #alarms next to the kill it clears)
+      const why = (url.searchParams.get("reason") ?? "").trim().slice(0, 300);
+      if (why.length < 10) return new Response("re-arm needs ?reason= (10+ characters)", { status: 400 });
+      const prev = await rearm(env);
+      await alert(env, `🟢 SENTINEL re-armed via http: ${why}. Previous kill: ${prev ?? "none"}`);
       return new Response("re-armed");
     }
     return new Response("cortex-sentinel", { status: 200 });

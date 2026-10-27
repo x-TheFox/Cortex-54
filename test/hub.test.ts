@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { type HubDb, handleHub } from "../hub/src/handler.ts";
+import { type HubDb, handleHub, LIMITS } from "../hub/src/handler.ts";
 import { applyPack, exportPack, loadLocalScar, stagePack } from "../local/memory.ts";
 import { Brain } from "../src/cortex/Brain.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
@@ -27,6 +27,7 @@ import { memoryD1, memorySql } from "./sim/sqlite.ts";
 function hubDb(): HubDb & { db: DatabaseSync } {
   const db = new DatabaseSync(":memory:");
   db.exec(readFileSync("hub/migrations/0001_hub.sql", "utf8"));
+  db.exec(readFileSync("hub/migrations/0002_quotas.sql", "utf8"));
   return {
     db,
     all: async <T>(q: string, ...b: unknown[]) => db.prepare(q).all(...(b as never[])) as T[],
@@ -127,6 +128,35 @@ describe("hub API (ADR-068)", () => {
     expect(lb2.agents.map((a) => a.agent_id)).toEqual([k.agentId]);
     // published rows can't be deleted at the database level either
     expect(() => db.db.exec("DELETE FROM rows")).toThrow(/append-only/);
+  });
+
+  it("bounds the open write surface: per-agent row quota, new-agent cap, clean names (audit BL-3)", async () => {
+    const db = hubDb();
+    const now = 5_000_000;
+    const h = call(db, now);
+    const k = await generateAgentKey();
+    const first = chain(6);
+    const ok = await h("/v1/feed", { method: "POST", body: await batch(k, first, now, "**BUY $XYZ** <@1>") });
+    expect(ok.status).toBe(200);
+    expect(db.db.prepare("SELECT name FROM agents").get()).toEqual({ name: "BUY XYZ 1" });
+    const saved = LIMITS.rowsPerAgentPerDay;
+    LIMITS.rowsPerAgentPerDay = 8;
+    try {
+      const more = chain(6, 6, first.at(-1)?.row_sha256);
+      expect((await h("/v1/feed", { method: "POST", body: await batch(k, more, now) })).status).toBe(429);
+    } finally {
+      LIMITS.rowsPerAgentPerDay = saved;
+    }
+    const cap = LIMITS.newAgentsPerDay;
+    LIMITS.newAgentsPerDay = 1;
+    try {
+      const k2 = await generateAgentKey();
+      expect((await h("/v1/feed", { method: "POST", body: await batch(k2, chain(2), now) })).status).toBe(
+        429,
+      );
+    } finally {
+      LIMITS.newAgentsPerDay = cap;
+    }
   });
 
   it("packs: signed publish, browse, download count", async () => {

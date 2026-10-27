@@ -22,6 +22,8 @@ export interface WebEnv {
   SESSION_TTL_MS?: number | undefined;
   /** ADR-076: local phone access over plain HTTP on the user's Wi-Fi (cookie without Secure) */
   COOKIE_INSECURE?: boolean | undefined;
+  /** audit F-A6-02: the request came over the Wi-Fi, not from this computer: destructive commands need a fresh sign-in */
+  REMOTE_DEVICE?: boolean | undefined;
   OPERATOR_DISCORD_ID?: string | undefined;
   DB?:
     | { prepare(sql: string): { bind(...v: unknown[]): { all(): Promise<{ results?: unknown[] }> } } }
@@ -83,6 +85,8 @@ export interface WebBrain extends OperatorBrain {
 
 /** LIVE ratification from the app needs a session this young */
 export const FRESH_LOGIN_MS = 10 * 60_000;
+/** Commands a Wi-Fi device may send only on a fresh sign-in (audit F-A6-02). Pause stays one tap: it only stops entries. */
+const LAN_FRESH_COMMANDS = new Set(["flatten", "kill", "rearm", "resume", "dial", "unlock", "ratify"]);
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
@@ -133,6 +137,8 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
 
   const sess = await session(request, env);
   if (!sess) return json({ error: "sign in with /terminal in Discord" }, 401);
+  // audit F-A5-10: a signed-out cookie can't read either
+  if (await b.isRevoked(`revoked:${sess.n}`)) return json({ error: "signed out; sign in again" }, 401);
 
   if (request.method === "GET") {
     switch (path) {
@@ -319,6 +325,21 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
           ok: false,
           message:
             "LIVE autonomy and LIVE unlocks need a fresh sign-in (within 10 minutes). Sign in again, then retry.",
+        },
+        403,
+      );
+    // audit F-A6-02: over plain-HTTP Wi-Fi a 30-day cookie can be sniffed or copied; commands that close positions or
+    // change autonomy need a sign-in from the last 10 minutes (pair again from the computer's QR)
+    if (
+      env.REMOTE_DEVICE &&
+      LAN_FRESH_COMMANDS.has(String(body.name ?? "")) &&
+      sess.exp - ttl < Date.now() - FRESH_LOGIN_MS
+    )
+      return json(
+        {
+          ok: false,
+          message:
+            "From a phone or another device, this needs a fresh sign-in. Scan the pairing code on your computer again, then retry.",
         },
         403,
       );

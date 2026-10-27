@@ -37,10 +37,17 @@ MIN_OUTCOMES_FOR_MAP = 50  # mirrors doctrine.funnel.calibration.min_outcomes_be
 # ----------------------------------------------------------------------------- I/O
 
 
-def _sign(body: str) -> dict[str, str]:
+def _sign(body: str, route: str) -> dict[str, str]:
+    """Route-bound signature (audit F-A3-03): HMAC over `ts.route.body`, with the route in x-cortex-audience."""
     ts = str(int(time.time()))
-    sig = hmac.new(os.environ["INGEST_HMAC_SECRET"].encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
-    return {"content-type": "application/json", "x-cortex-timestamp": ts, "x-cortex-signature": f"sha256={sig}"}
+    msg = f"{ts}.{route}.{body}".encode()
+    sig = hmac.new(os.environ["INGEST_HMAC_SECRET"].encode(), msg, hashlib.sha256).hexdigest()
+    return {
+        "content-type": "application/json",
+        "x-cortex-timestamp": ts,
+        "x-cortex-audience": route,
+        "x-cortex-signature": f"sha256={sig}",
+    }
 
 
 def export(table: str, limit: int = 100) -> list[dict]:
@@ -49,7 +56,7 @@ def export(table: str, limit: int = 100) -> list[dict]:
     after = 0
     while True:
         body = json.dumps({"table": table, "after": after, "limit": limit}, separators=(",", ":"))
-        r = requests.post(url, data=body.encode(), headers=_sign(body), timeout=30)
+        r = requests.post(url, data=body.encode(), headers=_sign(body, "/governor/export"), timeout=30)
         r.raise_for_status()
         d = r.json()
         rows += d["rows"]
@@ -521,7 +528,7 @@ def main() -> int:
     if a.dry_run:
         return 0
     url = os.environ["CORTEX_URL"].rstrip("/") + "/ingest/batch"
-    r = requests.post(url, data=body.encode(), headers=_sign(body), timeout=60)
+    r = requests.post(url, data=body.encode(), headers=_sign(body, "/ingest/batch"), timeout=60)
     print(f"ingest → HTTP {r.status_code}: {r.text[:300]}")
     return 0 if r.ok else 1
 
