@@ -47,11 +47,11 @@ const STEPS: Step[] = [
     title: "How much the account is worth",
     body: [
       "The big green number is the account's total value right now: cash plus anything it owns, valued at today's prices.",
-      "SINCE $54 is the profit or loss since the start. HWM (high-water mark) is the highest value it has ever reached.",
+      "SINCE shows the profit or loss since the account started (what it held when CORTEX first connected to it). HWM (high-water mark) is the highest value it has ever reached.",
     ],
     terms: [
       ["Equity", "The total value of the account."],
-      ["Profit / loss", "Up or down compared with the $54 it started with."],
+      ["Profit / loss", "Up or down compared with what the account started with."],
     ],
   },
   {
@@ -60,7 +60,7 @@ const STEPS: Step[] = [
     body: [
       "DRAWDOWN shows how far the account has fallen below its best value. The robot slows itself down automatically: from 3% it bets half as much, from 6% it stops buying new things, and at 10% it sells everything and locks itself.",
       "HEAT shows how much money is at risk right now: what it would lose if every trade it holds hit its safety exit at once. It is never allowed above 12%.",
-      "FREE TIER shows how much of today's free computer allowance is used. The whole system runs on free services, so if a limit gets close it stops buying until midnight UTC.",
+      "The third dial is FREE TIER on the cloud version (how much of today's free Cloudflare allowance is used; near the limit it stops buying until midnight UTC) and AI USE TODAY in the app on your computer (how close your AI models are to their daily limits).",
     ],
     terms: [
       ["Stop-loss", "A price set in advance where the robot sells to cap the loss on a trade."],

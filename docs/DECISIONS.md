@@ -1069,3 +1069,21 @@ bundled Node/V8, network client and server). Verified: `codesign --verify --deep
 runs under the new signature, and a quarantined copy keeps a valid signature. Gatekeeper then shows its normal
 "can't verify the developer" prompt (System Settings → Privacy & Security → Open Anyway) until the Apple secrets of
 ADR-079 make releases notarized; `APPLE_SIGNING_IDENTITY` replaces the ad-hoc identity in CI.
+
+## ADR-081 — Any account size, account switches, margin accounts, no Cloudflare meter on your computer (2026-10-27)
+**Context:** the operator connected the app to a default Alpaca paper account ($100,000, margin enabled). The cockpit
+said "SINCE $54 +$99,946", the BTC benchmark started at $54 (the demo's history from before the switch was still in
+the hot store), and the account never traded: the margin multiplier and the "equity ≫ doctrine start" check both held
+it reduce-only. Separately, local mode showed and enforced Cloudflare free-tier quotas that don't exist on a
+user's computer.
+**Decision:** each account's start is its equity when CORTEX first saw it (or since its last fresh start), stored in
+the hot store and sent as `startUsd`; the cockpit, TODAY and the guide use it. A different broker account behind the
+same slot (Alpaca `id` changes: demo → paper, new keys) starts the account fresh (positions, orders, history; RESET is
+journaled); a first run on a home whose history is ≥ 2× off the account and holds no positions does the same. Local
+mode trades the account the user connected, whatever its size (`adoptAccountSize`), inside the same percentage
+limits; the cloud keeps the fail-closed check. A margin account stays reduce-only (U3) unless the broker's own
+configuration caps borrowing at 1x (`/v2/account/configurations`, re-read every 30 min): SETTINGS offers "Make it
+cash-only", which sets `max_margin_multiplier: "1"` and `no_shorting: true` at Alpaca (it only ever tightens) when
+the user presses it. The free-tier meter has a scope: the cloud meters every Workers Free quota; local mode meters only
+the user's own Cloudflare AI allowance when Clef runs there, and nothing when an LLM stands in; the STS page, the
+status memo and the guide say which.

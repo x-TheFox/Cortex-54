@@ -5,7 +5,13 @@ import {
   type MarketDataApi,
   type Quote,
 } from "../broker/types.ts";
-import { DO_MEMORY_GB, FreeTierBudget, SubrequestBudgetExceeded, utcDay } from "../budget/FreeTierBudget.ts";
+import {
+  type BudgetScope,
+  DO_MEMORY_GB,
+  FreeTierBudget,
+  SubrequestBudgetExceeded,
+  utcDay,
+} from "../budget/FreeTierBudget.ts";
 import { CLEF_CONTEXT_TOKENS, type ClefApi, type ClefResult, estimateTokens } from "../clef/ClefClient.ts";
 import { type CatalystFacts, type ClairicApi, FACT_FIELDS, interpretFacts } from "../clef/clairic.ts";
 import { buildTier2, interpretTier2, TIER2_PROMPT_VERSION } from "../clef/tier2.ts";
@@ -323,6 +329,13 @@ export function parseKillFlag(raw: string | null): KillFlag {
 }
 
 export interface BrainDeps {
+  /** ADR-081: what the free-tier meter counts (cloud: everything; local: only the user's Cloudflare AI, or nothing) */
+  budgetScope?: BudgetScope;
+  /**
+   * ADR-081: local mode trades the account the user connected, whatever its size, and measures from where it
+   * started. The cloud keeps the doctrine's fail-closed check for an account far bigger than `starting_equity_usd`.
+   */
+  adoptAccountSize?: boolean;
   sql: SqlLike;
   d: Doctrine;
   c: Constitution;
@@ -397,6 +410,8 @@ export interface StatusView {
     brokerEquityUsd: number | null;
     modeledCostUsd: number;
     hwmUsd: number | null;
+    /** ADR-081: what this account started from (its equity when CORTEX first saw it, or since the last fresh start) */
+    startUsd: number;
     rung: RungName;
     autonomyStop: number;
     breaker: Band;
@@ -467,7 +482,7 @@ export class Brain {
       this.termBuffer.push(line);
       if (this.termBuffer.length > 40) this.termBuffer.shift();
     };
-    this.budget = new FreeTierBudget(deps.sql, deps.d);
+    this.budget = new FreeTierBudget(deps.sql, deps.d, deps.budgetScope ?? "cloudflare");
     this.universe = new Universe(deps.sql, deps.d, deps.c);
     // Audit W2-06: court providers respect per-provider daily call caps (free-tier RPD with margin).
     if (deps.llm) {
@@ -1040,11 +1055,32 @@ export class Brain {
     ]);
     if (acct.trading_blocked || acct.account_blocked)
       throw new Error(`account blocked at broker (${acct.status})`);
+    // ADR-081: a different broker account behind the same slot (demo → paper, new keys) starts fresh: positions,
+    // orders and history from the old one mean nothing here, and mixing them would corrupt P&L and drawdown.
+    const idKey = `broker_account_id:${account}`;
+    const prevId = getKV(this.sql, idKey);
+    if (prevId !== acct.id) {
+      if (prevId !== null)
+        await this.freshStart(
+          account,
+          Number(acct.equity),
+          `the broker account changed (${prevId === "sim" ? "demo" : "previous account"} → ${acct.id === "sim" ? "demo" : "a new account"})`,
+          "auto",
+        );
+      else if (this.deps.adoptAccountSize && this.staleHistory(account, Number(acct.equity)))
+        // first run of this version on a home whose history belongs to another account (an earlier mode switch)
+        await this.freshStart(account, Number(acct.equity), "history from a different account", "auto");
+      setKV(this.sql, idKey, acct.id, now);
+    }
     // Conditions that block entries are re-checked every sync; when they all clear, so does the mode (ADR-025).
     const issues: string[] = [];
     if (acct.multiplier !== undefined && acct.multiplier !== null && Number(acct.multiplier) > 1) {
-      // Constitution U3: cash only. A margin multiplier means the broker would let us borrow; we never do.
-      issues.push("broker reports a margin multiplier > 1; cash-only doctrine");
+      // Constitution U3: cash only. A margin multiplier means the broker would let us borrow; we never do. ADR-081:
+      // an account whose own configuration caps borrowing at 1x (Settings → "make it cash-only") is cash-only.
+      if (!(await this.cashOnlyConfig(account, broker, now)))
+        issues.push(
+          "the broker account allows margin (multiplier > 1); cash-only doctrine. Fix: SETTINGS → Trading account → Make it cash-only",
+        );
     }
 
     // Adopt our own orders the DO lost track of (crash between submit and record).
@@ -1195,7 +1231,13 @@ export class Brain {
     const eff = brokerEq - (account === "PAPER" ? modeled : 0);
     const hwm = Math.max(row?.hwm_cents ?? eff, eff);
     const start = this.d.accounts[account]?.starting_equity_usd;
-    if ((row?.hwm_cents ?? null) === null && start !== undefined && eff > start * 2 * 100) {
+    if ((row?.hwm_cents ?? null) === null) setKV(this.sql, `start_equity:${account}`, String(eff), now);
+    if (
+      !this.deps.adoptAccountSize &&
+      (row?.hwm_cents ?? null) === null &&
+      start !== undefined &&
+      eff > start * 2 * 100
+    ) {
       // First sight of this account and it's far bigger than doctrine expects (e.g. a paper account still at
       // the $100k default). Sizing would be meaningless for the $54 doctrine, so fail closed (U6).
       this.setMode(
@@ -5754,6 +5796,7 @@ ${postmortem}`,
             brokerEquityUsd: row.broker_equity_cents === null ? null : row.broker_equity_cents / 100,
             modeledCostUsd: row.modeled_cost_cents / 100,
             hwmUsd: row.hwm_cents === null ? null : row.hwm_cents / 100,
+            startUsd: this.startEquityUsd(account),
             rung: row.rung,
             autonomyStop: row.autonomy_stop,
             breaker: row.breaker,
@@ -5861,6 +5904,52 @@ ${postmortem}`,
         message: `${account} is not flat at the broker (${positions.length} positions, ${orders.length} open orders)`,
       };
     }
+    const equity = Number(acct.equity);
+    await this.freshStart(account, equity, "fresh start on a new broker account", by);
+    return { ok: true, message: `${account} reset: broker equity $${equity.toFixed(2)}` };
+  }
+
+  /** ADR-081: the broker's own configuration caps borrowing at 1x (re-read at most every 30 min). */
+  private async cashOnlyConfig(account: AccountId, broker: BrokerApi, now: number): Promise<boolean> {
+    if (!broker.configuration) return false;
+    const key = `broker_cash_only:${account}`;
+    const cached = getKV(this.sql, key);
+    if (cached) {
+      const [at, v] = cached.split(",");
+      if (now - Number(at) < 30 * 60_000) return v === "1";
+    }
+    const cfg = await broker.configuration().catch(() => null);
+    if (!cfg) return false; // unknown: fail closed, and ask again next pulse
+    const ok = Number(cfg.max_margin_multiplier) === 1;
+    setKV(this.sql, key, `${now},${ok ? 1 : 0}`, now);
+    return ok;
+  }
+
+  /** ADR-081: this account's starting equity in USD (first sight / last fresh start; else the doctrine's). */
+  startEquityUsd(account: AccountId): number {
+    const v = Number(getKV(this.sql, `start_equity:${account}`));
+    return Number.isFinite(v) && v > 0 ? v / 100 : (this.d.accounts[account]?.starting_equity_usd ?? 0);
+  }
+
+  /** True when the stored equity history can't be this account's: no open positions, first sample ≥ 2× off. */
+  private staleHistory(account: AccountId, equityUsd: number): boolean {
+    if (this.positions(account).length > 0) return false;
+    const first = one<{ equity_cents: number }>(
+      this.sql,
+      "SELECT equity_cents FROM equity_history WHERE account = ? ORDER BY at LIMIT 1",
+      account,
+    );
+    if (!first || !(equityUsd > 0)) return false;
+    const r = first.equity_cents / 100 / equityUsd;
+    return r > 2 || r < 0.5;
+  }
+
+  /**
+   * Wipe one account's hot trading state and re-create its row (ADR-038, ADR-081). The journal is append-only, so
+   * it records RESET and keeps its chain; the Governor counts RESET as the start of the autonomous clock.
+   */
+  private async freshStart(account: AccountId, equity: number, reason: string, by: string): Promise<void> {
+    const now = this.deps.now();
     for (const t of [
       "positions",
       "orders",
@@ -5882,19 +5971,12 @@ ${postmortem}`,
       utcDay(now),
     );
     this.sql.exec("DELETE FROM settings WHERE key IN ('equity_hour', 'day_pulses', 'day_max_gap_s')");
-    const equity = Number(acct.equity);
-    this.journal.append(
-      account,
-      "RESET",
-      null,
-      { by, broker_equity: equity, reason: "fresh start on a new broker account" },
-      now,
-    );
+    this.sql.exec("DELETE FROM settings WHERE key = ?", `start_equity:${account}`);
+    this.journal.append(account, "RESET", null, { by, broker_equity: equity, reason }, now);
     await this.flushJournal();
     await this.deps.notifier.post("alarms", {
-      content: `🔄 ${account} reset to a fresh start by ${by}: broker equity $${equity.toFixed(2)}, history cleared, 30-day clock restarted.`,
+      content: `🔄 ${account} reset to a fresh start (${reason}; by ${by}): equity $${equity.toFixed(2)}, history cleared, 30-day clock restarted.`,
     });
-    return { ok: true, message: `${account} reset: broker equity $${equity.toFixed(2)}` };
   }
 
   unlock(account: AccountId, postmortem: string, by: string): string {

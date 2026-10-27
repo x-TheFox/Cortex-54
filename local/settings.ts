@@ -125,6 +125,10 @@ export interface SettingsDeps {
   pairLink?: () => Promise<string | null>;
   /** ADR-076: stop the service and wipe the CORTEX home */
   wipe?: () => Promise<void>;
+  /** ADR-081: cap the paper account's borrowing at 1x at the broker */
+  cashOnly?: () => Promise<{ ok: boolean; message: string }>;
+  /** ADR-081: the PAPER account's mode and why (so the page can offer the fix) */
+  account?: () => { mode: string; reason: string | null; startUsd: number; equityUsd: number | null } | null;
 }
 
 export class LocalSettings implements WebSettings {
@@ -172,6 +176,7 @@ export class LocalSettings implements WebSettings {
       lan: { enabled: c.lan.enabled, port: c.port },
       secretStore: { mode: c.secret_store, backend: keychainName(this.d.home) },
       license: readLicense(this.d.home),
+      account: this.d.account?.() ?? null,
       discord: {
         connected: Boolean(c.keys.DISCORD_BOT_TOKEN && c.keys.DISCORD_CHANNELS),
         channels: Object.keys(safeJson(c.keys.DISCORD_CHANNELS)),
@@ -453,6 +458,16 @@ export class LocalSettings implements WebSettings {
       ok: true,
       message: `Restoring the backup from ${b.madeAt.slice(0, 10)} (${mode} mode): CORTEX restarts on it in a few seconds.${b.withKeys ? "" : " It had no keys: add them in SETTINGS."} If the old computer still runs CORTEX on the same paper account, stop it there.`,
     };
+  }
+
+  /** ADR-081: make the paper account cash-only at the broker (the user presses the button). */
+  async cashOnly() {
+    if (!this.d.cashOnly) return { ok: false, message: "Not available here." };
+    try {
+      return await this.d.cashOnly();
+    } catch (e) {
+      return { ok: false, message: plain(e) };
+    }
   }
 
   /** ADR-077: install a licence file (checked against this build's publisher key before it is saved). */

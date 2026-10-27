@@ -89,9 +89,37 @@ export function TradingSection({ s, save, saving }: { s: SettingsView; save: Sav
   const [r, setR] = useState<Result | null>(null);
   const k = s.keys ?? {};
   const test = async () => setR(await post<Result>("/api/settings/test", { kind: "alpaca", keyId, secret }));
+  const acct = s.account;
+  const margin = s.mode === "paper" && /margin/i.test(acct?.reason ?? "");
   return (
     <section className="set-sec">
       <h4>Trading account</h4>
+      {s.mode === "paper" && acct?.equityUsd !== null && acct?.equityUsd !== undefined && (
+        <p className="cost">
+          Connected: <b>${acct.equityUsd.toFixed(2)}</b> in the account (started at $
+          {acct.startUsd.toFixed(2)}). The robot sizes every trade from what is really there, inside the same
+          risk limits.
+        </p>
+      )}
+      {margin && (
+        <div className="alert-opt danger-zone">
+          <b>This paper account allows borrowing (margin)</b>
+          <p className="cost">
+            Alpaca's paper accounts start as margin accounts. CORTEX only trades with its own cash, so it
+            holds new trades until borrowing is switched off. This changes one setting at Alpaca (borrowing
+            capped at 1x, shorting off); your money and positions stay as they are.
+          </p>
+          <div className="set-actions">
+            <button
+              type="button"
+              className="chip go"
+              onClick={async () => setR(await post<Result>("/api/settings/cash-only", {}))}
+            >
+              MAKE IT CASH-ONLY
+            </button>
+          </div>
+        </div>
+      )}
       <div className="choice-row" role="radiogroup" aria-label="Mode">
         <button
           type="button"

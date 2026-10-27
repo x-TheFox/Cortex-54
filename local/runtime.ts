@@ -250,7 +250,11 @@ export class LocalCortex {
       dispatcher: cfg.research.enabled ? this.jobs : null,
       http: o.overrides?.http ?? (o.overrides?.market ? null : (u, i) => fetch(u, i)),
       hub: hubFromEnv(k),
+      // ADR-081: on the user's computer only their own Cloudflare AI allowance is a real limit (if they use it)
+      budgetScope: this.clefMode === "cloudflare" ? "workers_ai" : "none",
+      adoptAccountSize: true,
     });
+    this.broker = broker;
     this.brain.init({
       constitution_sha256: CONSTITUTION_SHA256,
       doctrine_sha256: DOCTRINE_SHA256,
@@ -268,6 +272,32 @@ export class LocalCortex {
   /** see resolveClef */
   clefMode = "off";
   private router: LlmRouter | null = null;
+  private broker: BrokerApi | null = null;
+
+  /**
+   * ADR-081: "make it cash-only" — Alpaca's paper accounts allow margin by default, which the constitution forbids,
+   * so the brain holds them in reduce-only. This caps borrowing at 1x and turns shorting off at the broker (it only
+   * ever tightens), then reports what the broker now says.
+   */
+  async makeCashOnly(): Promise<{ ok: boolean; message: string }> {
+    const b = this.broker;
+    if (!b?.configure || !b.configuration)
+      return { ok: false, message: "Only a paper account has this setting." };
+    await b.configure({ max_margin_multiplier: "1", no_shorting: true });
+    const [cfg, acct] = await Promise.all([b.configuration(), b.account()]);
+    this.sql.exec("DELETE FROM settings WHERE key = 'broker_cash_only:PAPER'");
+    const capped = Number(cfg.max_margin_multiplier) === 1;
+    return capped
+      ? {
+          ok: true,
+          message: `Done: borrowing is capped at 1x and shorting is off at Alpaca (the account reports multiplier ${acct.multiplier ?? "?"}). New trades resume at the next pulse.`,
+        }
+      : {
+          ok: false,
+          message:
+            "Alpaca didn't keep the change. Reset the paper account in Alpaca's dashboard and try again.",
+        };
+  }
   private pricing: Record<string, { in: number; out: number; cap?: number }> = {};
 
   /** ADR-075 cost meter: today's tokens and USD for every priced endpoint. */

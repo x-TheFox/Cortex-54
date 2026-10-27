@@ -95,6 +95,8 @@ describe("interaction parsing", () => {
         fractions: {},
         projected: { resource: "none", fraction: 0 },
         resets_in_s: 0,
+        scope: "cloudflare",
+        neurons: {},
       },
       journalHead: { seq: 0, sha: "0".repeat(64) },
       outboxPending: 0,

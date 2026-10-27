@@ -68,7 +68,8 @@ function AccountColumn({ a, s, local = false }: { a: AccountView; s: StatusView;
   }
   const dd = drawdown(a);
   const h = heat(a);
-  const pnl = a.hwmUsd !== null ? a.equityUsd - 54 : null;
+  const start = a.startUsd ?? 54;
+  const pnl = a.hwmUsd !== null ? a.equityUsd - start : null;
   return (
     <div className="acct">
       <div className="acct-head">
@@ -83,7 +84,7 @@ function AccountColumn({ a, s, local = false }: { a: AccountView; s: StatusView;
           {a.equityUsd.toFixed(2)}
         </div>
         <div className="sub">
-          SINCE $54{" "}
+          SINCE {usd(start)}{" "}
           <span className={pnl !== null && pnl < 0 ? "down" : "up"}>
             {pnl === null ? "—" : `${pnl >= 0 ? "+" : "−"}$${Math.abs(pnl).toFixed(2)}`}
           </span>

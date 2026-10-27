@@ -492,5 +492,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
 - 2026-10-27: v0.1.0 released for every platform. ADR-079: MSIX (unsigned, `Add-AppxPackage -AllowUnsigned`), Apple
   signing/notarization when its secrets exist, licence key live (`CORTEX_LICENSE_PUBKEY` variable), demo cockpit on
   GitHub Pages. ADR-080: v0.1.1's macOS app showed as "damaged" (no bundle signature); bundles are now sealed ad-hoc.
+  ADR-081: accounts of any size measured from where they started, fresh start when the broker account changes,
+  "Make it cash-only" for margin paper accounts, no Cloudflare free-tier meter in local mode.
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

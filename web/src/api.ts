@@ -33,6 +33,8 @@ export interface AccountView {
   brokerEquityUsd: number | null;
   modeledCostUsd: number;
   hwmUsd: number | null;
+  /** ADR-081: where this account started (older brains don't send it: $54) */
+  startUsd?: number;
   rung: string;
   autonomyStop: number;
   breaker: Band;
@@ -59,7 +61,14 @@ export interface RegimeView {
 export interface StatusView {
   now: number;
   lastPulseAt: number | null;
-  budget: { mode: string; worst: { resource: string; fraction: number }; fractions: Record<string, number> };
+  budget: {
+    mode: string;
+    worst: { resource: string; fraction: number };
+    fractions: Record<string, number>;
+    /** ADR-081: cloudflare = Workers Free quotas; workers_ai = only your Cloudflare AI allowance; none = not metered */
+    scope?: "cloudflare" | "workers_ai" | "none";
+    neurons?: Record<string, number>;
+  };
   /** ADR-075: model calls today per provider (local mode's gauge) */
   modelUse?: {
     worst: { provider: string; fraction: number };
@@ -362,6 +371,8 @@ export interface SettingsView {
   /** ADR-076 */
   lan?: { enabled: boolean; port: number };
   secretStore?: { mode: "file" | "keychain"; backend: string | null };
+  /** ADR-081: the paper account's mode and why */
+  account?: { mode: string; reason: string | null; startUsd: number; equityUsd: number | null } | null;
   /** ADR-077 */
   license?:
     | { required: false }
