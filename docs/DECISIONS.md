@@ -1041,3 +1041,20 @@ venue; the candidates and what each lacks (no paper mode, or an account to run t
 registry, because an unverified adapter in the order path would be trading on a guess (U6). Brain.ts: the cards and
 terminal lines (~700 lines of pure rendering) moved to `src/cortex/cards.ts` (re-exported, so importers didn't
 change); the next modules follow the same way, one per quiet change, behind the simulated-pulse tests.
+
+## ADR-079 — MSIX, Apple notarization path, licence key live, demo cockpit on Pages (2026-10-27)
+**Context:** operator: do the optional release steps (everything except a Windows code-signing certificate) and ship
+an MSIX too.
+**Decision:** the Windows release job also builds an MSIX (`scripts/msix.ts`): the MSI is unpacked with an
+administrative install, an AppxManifest (full-trust desktop app, internet + private network) and the tile logos are
+added, and the SDK's makeappx packs it. With no certificate it is unsigned: the publisher carries Microsoft's
+unsigned-package OID so Windows 11 installs it with `Add-AppxPackage -AllowUnsigned`; a Store submission sets
+`MSIX_PUBLISHER` / `MSIX_NAME` from Partner Center and the Store signs it. An app running from a package
+(`\WindowsApps\`) turns its own updater off, because it would install a second copy; the next MSIX is the update.
+macOS jobs sign and notarize when the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
+`APPLE_ID`, `APPLE_PASSWORD` (app-specific) and `APPLE_TEAM_ID` secrets exist (an Apple Developer account, the
+operator's purchase); without them the build is unchanged and the notes say how to open an unsigned app. The publisher
+licence key now exists (private half only on the operator's machine, `~/.cortex-publisher/`); its public half is the
+`CORTEX_LICENSE_PUBKEY` repository variable, so release builds check licences from the next release on, and the
+operator holds a perpetual publisher licence. GitHub Pages serves the demo cockpit (https://x-thefox.github.io/Cortex-54/),
+redeployed by every release.

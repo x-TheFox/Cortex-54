@@ -521,3 +521,6 @@ Newest last. Each entry says what landed, how it was tested, and what's left.
   (ADR-075); keychain, encrypted backups, phone access with QR pairing, ntfy QR, reset, tray health (ADR-076); release
   workflow for every platform with changelogs, signed auto-update, licences, demo cockpit (ADR-077); broker conformance
   suite and the first Brain.ts split (ADR-078). The conformance suite caught the sandbox selling what it didn't hold.
+- 2026-10-27: v0.1.0 shipped for every platform. Optional steps (ADR-079): MSIX, Apple notarization path (needs the
+  operator's Apple Developer account), licence key live with a publisher licence, demo cockpit on GitHub Pages. Not
+  done by choice: a Windows code-signing certificate.
