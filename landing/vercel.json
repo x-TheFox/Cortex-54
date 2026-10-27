@@ -1,0 +1,83 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": false,
+  "trailingSlash": true,
+  "redirects": [
+    {
+      "source": "/:path(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.getsavant.pro"
+        }
+      ],
+      "destination": "https://getsavant.pro/:path",
+      "permanent": true
+    },
+    {
+      "source": "/download/v:version/:file",
+      "destination": "https://github.com/x-TheFox/Cortex-54/releases/download/v:version/:file",
+      "permanent": false
+    },
+    {
+      "source": "/download/:file",
+      "destination": "https://github.com/x-TheFox/Cortex-54/releases/latest/download/:file",
+      "permanent": false
+    },
+    {
+      "source": "/updates/latest.json",
+      "destination": "https://github.com/x-TheFox/Cortex-54/releases/latest/download/latest.json",
+      "permanent": false
+    },
+    {
+      "source": "/buy",
+      "destination": "https://whop.com/savant-agent/",
+      "permanent": false
+    },
+    {
+      "source": "/account",
+      "destination": "https://whop.com/@me/settings/orders",
+      "permanent": false
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains; preload"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ]
+}

@@ -61,7 +61,7 @@ function AccountColumn({ a, s, local = false }: { a: AccountView; s: StatusView;
         </div>
         <div className="dormant">
           {a.account === "LIVE"
-            ? "Real money starts after all phases are built, PAPER passes the 30-day gate, a live kill drill, and your RATIFY."
+            ? "Real money starts only when you RATIFY it. The paper record and the graduation gate are shown first."
             : "Waiting for the first reconciliation."}
         </div>
       </div>

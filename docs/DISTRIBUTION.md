@@ -44,7 +44,7 @@ runs it.** We host exactly one service, the community hub, and it never touches 
   build (`CORTEX_LICENSE_PUBKEY` repository variable; `tsx scripts/license.ts keygen | issue`). A storefront (Gumroad,
   Lemon Squeezy) only has to email the file. Without a valid licence demo mode works and paper mode holds new entries
   (open positions keep their stops); nothing unsafe follows from a licence problem. Unset key = builds that never check.
-- **Signed auto-updates (built):** Tauri's updater reads `latest.json` from the latest GitHub release; bundles are
+- **Signed auto-updates (built):** Tauri's updater reads `latest.json` via getsavant.pro/updates (the latest release); bundles are
   signed with the minisign key in `TAURI_SIGNING_PRIVATE_KEY` (repository secret). The tray offers each update.
 - **Demo cockpit (built):** `pnpm web:demo` → static files on synthetic data, attached to every release and on Pages.
 - **MSIX (built, ADR-079):** every release has an unsigned MSIX for Windows 11 (`Add-AppxPackage -AllowUnsigned`);
@@ -52,8 +52,14 @@ runs it.** We host exactly one service, the community hub, and it never touches 
 - **Apple notarization (wired, ADR-079):** add the six `APPLE_*` secrets (Developer ID certificate + notarization
   login) and releases come out signed and notarized. Needs an Apple Developer account.
 - **Not planned: a Windows code-signing certificate** (operator decision); SmartScreen asks once on the installers.
-- **Landing page + demo cockpit (ADR-084):** https://x-thefox.github.io/Savant/ (the product page) with the demo
-  cockpit at https://x-thefox.github.io/Savant/demo/ (GitHub Pages, every release). The page has no prices: pricing
-  is still an operator decision.
+- **Store, checkout and licences (ADR-086):** Whop product `prod_sdzK9Kr4E2Kgz` (https://whop.com/savant-agent/):
+  Monthly $29 and Yearly $249 (7-day trial each) and a free demo plan. Buyers get a licence key in their Whop orders;
+  the app trades a key at the licence server (`workers/license`, `pnpm deploy:license`) for a machine-bound token that
+  lasts 14 days and renews daily. Only the paid plans unlock trading.
+- **Landing page (ADR-090):** https://getsavant.pro on Vercel (`pnpm deploy:landing`), with pricing, the demo cockpit at
+  `/demo/`, the post-purchase page at `/welcome/`, the legal set at `/legal/`, and stable redirects:
+  `/download/<file>` → the latest release asset, `/updates/latest.json` → the updater manifest. Installed apps and the
+  site only ever name getsavant.pro, so moving where releases are hosted is a one-line change in `landing/vercel.json`.
+  The old GitHub Pages copy is no longer deployed.
 - **The repo going private:** when it does, GitHub Actions minutes stop being free; the operator's own deployment
   should switch to `RUNNER_MODE=queue` with a desktop runner (ADR-065), which needs no Actions at all.

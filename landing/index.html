@@ -9,6 +9,16 @@
       name="description"
       content="Savant is an autonomous trading agent you run on your own computer. Models argue over ideas; deterministic code sizes every trade; eight rules no model can change decide what is allowed."
     />
+    <link rel="canonical" href="https://getsavant.pro/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Savant" />
+    <meta property="og:url" content="https://getsavant.pro/" />
+    <meta property="og:title" content="Savant — Let the models argue. Let code decide." />
+    <meta property="og:description" content="An autonomous trading agent you run on your own computer. Models argue; code sizes every trade; eight rules no model can change." />
+    <meta property="og:image" content="https://getsavant.pro/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
     <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#efebe3" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
@@ -18,13 +28,15 @@
     <a class="skip" href="#main">Skip to content</a>
 
     <header class="masthead" data-masthead>
-      <a class="wordmark" href="#top" aria-label="Savant, back to top">Savant<span>-54</span></a>
+      <a class="wordmark" href="#top" aria-label="Savant, back to top">Savant</a>
       <nav class="nav" aria-label="Sections">
         <a href="#process">Process</a>
         <a href="#rules">Rules</a>
         <a href="#record">Record</a>
         <a href="#yours">Run it</a>
+        <a href="#pricing">Pricing</a>
         <a href="#risk">Risks</a>
+        <a href="%%ORDERS_URL%%" rel="noopener">Sign in</a>
       </nav>
       <button class="btn btn-ink btn-sm" type="button" data-demo-open>Live demo</button>
     </header>
@@ -87,11 +99,11 @@
           </div>
           <div class="docket-cell">
             <dt>Real money</dt>
-            <dd><strong>Stop 0</strong> dormant until paper earns it, then you ratify</dd>
+            <dd><strong>Stop 0</strong> off until you ratify it; the paper record is shown first</dd>
           </div>
           <div class="docket-cell">
             <dt>Running cost</dt>
-            <dd><strong>$0</strong> a month on free tiers by default</dd>
+            <dd><strong>$0</strong> extra a month: free AI tiers by default</dd>
           </div>
           <div class="docket-cell">
             <dt>Constitution</dt>
@@ -483,7 +495,8 @@
           <h2 id="grad-title">Paper and live, side by side. <em>One is allowed to trade.</em></h2>
           <p class="lede">
             Both run the same brain and the same contracts, each sized for its own balance — whatever that balance is.
-            Nobody approves trades; there is no mode for it. Real money has to earn its autonomy instead.
+            Nobody approves trades; there is no mode for it. Real money starts only when you ratify it, with the paper
+            record in front of you.
           </p>
         </header>
 
@@ -500,14 +513,15 @@
             <p class="twin-tag"><span class="dot" aria-hidden="true"></span>LIVE · dormant at Stop 0</p>
             <p class="twin-num">Live</p>
             <p>
-              Real money. It joins at Stop 0 and places nothing until the gate below is met and a person ratifies it.
+              Real money. It joins at Stop 0 and places nothing until a person ratifies it. The gate below is what the
+              app checks for you first.
             </p>
           </article>
         </div>
 
         <div class="gate" data-reveal>
           <h3>The graduation gate</h3>
-          <p class="gate-sub">Tracked from data by the Governor. Every box, at once:</p>
+          <p class="gate-sub">Tracked from data by the Governor and shown beside the ratify control:</p>
           <ul class="gate-list">
             <li>Every roadmap phase built</li>
             <li>30 straight days of fully autonomous paper trading</li>
@@ -525,7 +539,8 @@
           </p>
           <p class="note">
             On your own install you decide: you can connect a live account at any time. It joins dormant at Stop 0,
-            and the ratify screen shows this gate's verdict as a warning, not a block. Everything else still binds it.
+            and the ratify screen shows this gate's verdict as a warning, not a block: you decide. Everything else still
+            binds it.
           </p>
         </div>
       </section>
@@ -630,8 +645,8 @@
           </li>
           <li data-reveal>
             <h3>Go to paper</h3>
-            <p>Connect your free Alpaca paper account when you're ready, then a live account of any size when it has
-              earned it. Keys can live in your system keychain, and backups are encrypted.</p>
+            <p>Connect your free Alpaca paper account when you're ready, then a live account of any size when you
+              decide it has earned it. Keys can live in your system keychain, and backups are encrypted.</p>
           </li>
           <li data-reveal>
             <h3>Pick its minds</h3>
@@ -640,17 +655,43 @@
           </li>
         </ol>
 
-        <div class="get" id="get">
-          <a class="btn btn-ink btn-lg" href="%%CHECKOUT_HREF%%" data-checkout>
-            Get Savant <span aria-hidden="true">→</span>
-          </a>
-          <button class="btn btn-line btn-lg" type="button" data-demo-open>Try the demo first</button>
+        <div class="plans" id="pricing">
+          <h3 class="plans-title">One app, every platform. <em>Start with %%TRIAL_DAYS%% days free.</em></h3>
+          <div class="plans-grid" id="get">
+            <article class="plan" data-reveal>
+              <p class="plan-name">Demo</p>
+              <p class="plan-price">Free</p>
+              <p>The full app on simulated money and live crypto prices. No broker account, no card.</p>
+              <a class="btn btn-line" href="%%CHECKOUT_DEMO%%" rel="noopener">Download the demo</a>
+            </article>
+            <article class="plan plan-main" data-reveal>
+              <p class="plan-name">Yearly</p>
+              <p class="plan-price">%%PRICE_YEARLY%%<span> a year</span></p>
+              <p>Paper and live trading, every update, every platform. About 30% less than monthly.</p>
+              <a class="btn btn-ink" href="%%CHECKOUT_YEARLY%%" data-checkout-plan rel="noopener">Start %%TRIAL_DAYS%% days free <span aria-hidden="true">→</span></a>
+            </article>
+            <article class="plan" data-reveal>
+              <p class="plan-name">Monthly</p>
+              <p class="plan-price">%%PRICE_MONTHLY%%<span> a month</span></p>
+              <p>Everything in yearly, month to month. Cancel any time from your Whop account.</p>
+              <a class="btn btn-line" href="%%CHECKOUT_MONTHLY%%" data-checkout-plan rel="noopener">Start %%TRIAL_DAYS%% days free</a>
+            </article>
+          </div>
+          <p class="fine get-fine">
+            Checkout, your licence key and your downloads are handled by Whop. You aren't charged during the trial;
+            cancel before it ends and you pay nothing. A full refund within 14 days of your first payment, no questions
+            (<a href="./legal/refunds.html">refund policy</a>). Prices in USD; tax may apply.
+          </p>
+          <p class="fine get-fine">
+            <a href="%%CHECKOUT_HREF%%" data-checkout>All plans on Whop</a> ·
+            <button class="linklike" type="button" data-demo-open>Try the browser demo first</button>
+          </p>
         </div>
         %%CHECKOUT_NOTE%%
         <p class="fine get-fine">
-          Updates are signed and never install without your click. The licence is checked offline: without one the demo
-          always works, and paper mode keeps its stops but opens nothing new. macOS builds are ad-hoc signed and Windows
-          SmartScreen asks once.
+          Updates are signed and never install without your click. Your licence is renewed with our licence server about
+          once a day and keeps working offline for up to 14 days; without one the demo always works, and a paper or live
+          account keeps its stops but opens nothing new. macOS builds are ad-hoc signed and Windows SmartScreen asks once.
         </p>
       </section>
 
@@ -688,16 +729,23 @@
 
     <footer class="foot">
       <div class="foot-row">
-        <p class="wordmark">Savant<span>-54</span></p>
+        <p class="wordmark">Savant</p>
         <p class="foot-motto">Models reason, code computes, the risk engine decides, the operator governs.</p>
       </div>
       <div class="foot-row foot-small">
         <p>
           <button class="linklike" type="button" data-demo-open>Live demo</button> ·
           <a href="%%CHECKOUT_HREF%%" data-checkout>Get Savant</a> ·
+          <a href="#pricing">Pricing</a> ·
+          <a href="%%ORDERS_URL%%" rel="noopener">Your licence and downloads</a> ·
           <a href="#risk">Risks</a>
         </p>
-        <p>Set in Newsreader and IBM Plex (SIL Open Font License). Alpaca is a trademark of its owner; Savant is not
+        <p>
+          <a href="./legal/terms.html">Terms</a> · <a href="./legal/eula.html">Licence (EULA)</a> ·
+          <a href="./legal/privacy.html">Privacy</a> · <a href="./legal/refunds.html">Refunds</a> ·
+          <a href="./legal/risk.html">Risk disclosure</a> · <a href="./legal/third-party.html">Third-party notices</a>
+        </p>
+        <p>© 2026 Savant. Cortex is the agent inside Savant. Set in Newsreader and IBM Plex (SIL Open Font License). Alpaca is a trademark of its owner; Savant is not
           affiliated with or endorsed by Alpaca or any model provider.</p>
       </div>
     </footer>

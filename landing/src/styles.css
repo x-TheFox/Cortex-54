@@ -2094,3 +2094,76 @@ html.has-dialog {
     border-radius: 18px;
   }
 }
+
+/* ADR-086: pricing (prices printed from landing/checkout.ts) */
+.plans {
+  margin-top: clamp(48px, 7vw, 96px);
+}
+.plans-title {
+  font: 360 clamp(1.8rem, 3.4vw, 2.8rem) / 1.1 var(--serif);
+  letter-spacing: -0.02em;
+  margin: 0 0 24px;
+}
+.plans-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: clamp(22px, 2.6vw, 34px);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+}
+.plan .btn {
+  margin-top: auto;
+  justify-content: center;
+}
+.plan-main {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.plan-main .btn-ink {
+  background: var(--paper);
+  color: var(--ink);
+}
+.plan-name {
+  font: 500 12px / 1 var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+.plan-price {
+  font: 320 clamp(2.6rem, 5vw, 3.8rem) / 1 var(--serif);
+  letter-spacing: -0.03em;
+}
+.plan-price span {
+  font: 400 15px / 1 var(--sans);
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+@media (max-width: 860px) {
+  .plans-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* welcome and 404 */
+.welcome {
+  min-height: 70vh;
+  padding: 0 16px;
+}
+.welcome-title {
+  font: 360 clamp(2.2rem, 5vw, 4rem) / 1.05 var(--serif);
+  letter-spacing: -0.03em;
+  margin: 0 0 16px;
+}
+.welcome-steps .dl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 12px 0;
+}

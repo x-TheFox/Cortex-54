@@ -11,7 +11,10 @@ describe("landing page claims (ADR-084)", () => {
     [/notari[sz]ed/i, "notarization is conditional on secrets"],
     [/approve (each )?trades?\b(?! — there is no)/i, "no approve-each-trade mode exists"],
     [/guarantee[sd]? (returns|profit)/i, "no return promises"],
-    [/\bper month\b|\/mo\b|pricing|free trial/i, "no prices exist yet"],
+    [
+      /\$\d[\d,.]* (a|per) (month|year)/i,
+      "prices come from landing/checkout.ts tokens, never typed into the page",
+    ],
     [/testimonial|trusted by|customers love/i, "no invented social proof"],
     [/docker/i, "the headless image has never run in a container"],
     [/community hub/i, "the hub is not deployed"],
@@ -32,6 +35,19 @@ describe("landing page claims (ADR-084)", () => {
     expect(llms).not.toMatch(/github/i);
     expect(html).not.toMatch(/download the latest release/i);
     expect(html.match(/href="%%CHECKOUT_HREF%%"/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+  });
+
+  it("sells through Whop: plan buttons, the trial, the refund policy and the legal pages", () => {
+    for (const t of [
+      "%%PRICE_MONTHLY%%",
+      "%%PRICE_YEARLY%%",
+      "%%CHECKOUT_MONTHLY%%",
+      "%%CHECKOUT_YEARLY%%",
+      "%%ORDERS_URL%%",
+    ])
+      expect(html).toContain(t);
+    for (const d of ["terms", "eula", "privacy", "refunds", "risk"])
+      expect(html).toContain(`./legal/${d}.html`);
   });
 
   it("sells any account size, not only $54", () => {

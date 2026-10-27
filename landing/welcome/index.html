@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--CSP-->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Welcome to Savant</title>
+    <meta name="description" content="Download Savant, then paste your licence key from your Whop account to start trading." />
+    <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#efebe3" />
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <script type="module" src="../src/plain.ts"></script>
+  </head>
+  <body>
+    <header class="masthead">
+      <a class="wordmark" href="../">Savant</a>
+      <nav class="nav" aria-label="Help">
+        <a href="%%ORDERS_URL%%" rel="noopener">Your licence and downloads</a>
+      </nav>
+    </header>
+    <main id="main" class="welcome">
+      <section class="chapter">
+        <header class="chapter-head">
+          <p class="kicker">Welcome</p>
+          <h1 class="welcome-title">You're in. <em>Three steps and it's running.</em></h1>
+          <p class="lede">
+            Your trial has started. Nothing is charged until it ends, and you can cancel from your Whop account at any
+            time before that.
+          </p>
+        </header>
+        <ol class="steps welcome-steps">
+          <li>
+            <h3>1 · Download</h3>
+            <p>Pick your computer. The app updates itself after this.</p>
+            <p class="dl">
+              <a class="btn btn-ink" href="/download/Savant_darwin-aarch64.dmg">macOS · Apple silicon</a>
+              <a class="btn btn-line" href="/download/Savant_darwin-x86_64.dmg">macOS · Intel</a>
+              <a class="btn btn-line" href="/download/Savant_windows-x86_64-setup.exe">Windows</a>
+              <a class="btn btn-line" href="/download/Savant_linux-x86_64.AppImage">Linux · x64</a>
+              <a class="btn btn-line" href="/download/Savant_linux-aarch64.AppImage">Linux · arm64</a>
+            </p>
+            <p class="fine">
+              Also on <a href="/download/Savant_linux-x86_64.deb">.deb</a>,
+              <a href="/download/Savant_windows-x86_64.msi">.msi</a> and
+              <a href="/download/Savant_windows-x86_64.msix">.msix</a>. macOS: if it says the app can't be checked,
+              right-click it and choose Open once. Windows: SmartScreen asks once; choose "More info", then "Run anyway".
+            </p>
+          </li>
+          <li>
+            <h3>2 · Open it and watch</h3>
+            <p>
+              The first launch opens the cockpit in a keyless demo on live crypto prices, and asks you to read and accept
+              the terms before it may touch a real account.
+            </p>
+          </li>
+          <li>
+            <h3>3 · Paste your licence key</h3>
+            <p>
+              Copy the key from <a href="%%ORDERS_URL%%" rel="noopener">your Whop orders</a>, then in Savant open
+              Settings → Licence and paste it. That unlocks paper and live trading on this computer. Moving to another
+              computer? Release it there first, or reset it from your Whop orders.
+            </p>
+          </li>
+        </ol>
+        <p class="fine">
+          Live trading stays off until you ratify it in the app. Trading can lose all the money in the account; read the
+          <a href="../legal/risk.html">risk disclosure</a>.
+        </p>
+      </section>
+    </main>
+    <footer class="foot">
+      <div class="foot-row foot-small">
+        <p>
+          <a href="../legal/terms.html">Terms</a> · <a href="../legal/eula.html">Licence (EULA)</a> ·
+          <a href="../legal/privacy.html">Privacy</a> · <a href="../legal/refunds.html">Refunds</a> ·
+          <a href="../legal/risk.html">Risk disclosure</a>
+        </p>
+        <p>© 2026 Savant</p>
+      </div>
+    </footer>
+  </body>
+</html>

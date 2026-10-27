@@ -29,7 +29,7 @@ export function AcctPage({ s, now }: { s: StatusView; now: number }) {
             </h4>
             {!a.configured ? (
               <p className="empty">
-                No keys. LIVE stays dormant until the paper gate passes and you ratify it.
+                No live account connected. When one is, it stays dormant until you ratify it.
               </p>
             ) : a.positions.length === 0 ? (
               <p className="empty">Flat. Nothing at risk on this account.</p>

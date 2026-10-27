@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import { CONSTITUTION, CONSTITUTION_SHA256, DOCTRINE, DOCTRINE_SHA256 } from "../src/generated/config.ts";
-import { CHECKOUT_URL } from "./checkout.ts";
+import { CHECKOUT_URL, ORDERS_URL, PLANS, TRIAL_DAYS } from "./checkout.ts";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
@@ -90,6 +90,13 @@ function tokens(): Record<string, string> {
   return {
     CHECKOUT_HREF: co.href,
     CHECKOUT_NOTE: co.note,
+    PRICE_MONTHLY: PLANS.monthly.price,
+    PRICE_YEARLY: PLANS.yearly.price,
+    CHECKOUT_MONTHLY: esc(PLANS.monthly.url),
+    CHECKOUT_YEARLY: esc(PLANS.yearly.url),
+    CHECKOUT_DEMO: esc(PLANS.demo.url),
+    TRIAL_DAYS: String(TRIAL_DAYS),
+    ORDERS_URL: esc(ORDERS_URL),
     RUNG_ROWS: rungRows(),
     CONSTITUTION_ARTICLES: constitutionHtml(),
     CONST_SHA: CONSTITUTION_SHA256.slice(0, 12),
@@ -176,6 +183,13 @@ export default defineConfig({
   preview: { port: 5176, strictPort: true },
   build: {
     outDir: fileURLToPath(new URL("../landing-dist", import.meta.url)),
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        welcome: fileURLToPath(new URL("./welcome/index.html", import.meta.url)),
+        notfound: fileURLToPath(new URL("./404.html", import.meta.url)),
+      },
+    },
     emptyOutDir: true,
     sourcemap: false,
     target: "es2022",

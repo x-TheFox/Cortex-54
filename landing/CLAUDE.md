@@ -1,18 +1,19 @@
-# landing/ — the CORTEX-54 product page (ADR-084)
+# landing/ — the Savant product page (ADR-084, ADR-090)
 
 Read the root `CLAUDE.md` first (it is the law), then `CORTEX_LEDGER.md` (§14 is the claims law, §18 is this page).
 After a compaction: re-read this file, the task list below and ledger §18 before touching anything.
 
 ## What it is
-A static, vanilla-TypeScript page whose one job is to sell CORTEX-54. No framework. Built by `landing/vite.config.ts`.
+A static, vanilla-TypeScript page whose one job is to sell Savant. No framework. Built by `landing/vite.config.ts`.
 
 ```bash
 pnpm landing:dev       # http://localhost:5175 (the demo iframe needs a build: use preview for that)
 pnpm landing:build     # landing-dist/ + the demo cockpit in landing-dist/demo/ (scripts/build-landing.ts)
 pnpm landing:preview   # http://localhost:5176 — serves landing-dist/ (launch.json profile "landing")
 ```
-Deployed by `.github/workflows/release.yml` (job `pages`) to https://x-thefox.github.io/Cortex-54/ ; the demo cockpit
-lives at `/demo/` (it used to be the site root).
+Deployed to https://getsavant.pro on Vercel with `pnpm deploy:landing` (ADR-090; project `savant`). `landing/vercel.json`
+travels into `landing-dist/` and carries the security headers and the `/download/*` and `/updates/*` redirects. The demo
+cockpit lives at `/demo/`, the post-purchase page at `/welcome/`, the legal set at `/legal/`.
 
 ## Direction (decided, keep it)
 - **A public record on paper.** Warm paper `#efebe3`, ink `#15130f`, Newsreader (display, italic for the counterpoint
@@ -65,6 +66,6 @@ lives at `/demo/` (it used to be the site root).
 - [x] ADR-084, NOTICE.md, CLAUDE.md, DISTRIBUTION.md, release.yml Pages job, test/landing.test.ts, ledger §18
 - [x] Any-account-size message; sizer account/market switches; rung ladder from config
 - [x] GitHub/release links removed; checkout placeholder (`landing/checkout.ts`)
-- [ ] **Next:** add the Whop checkout link (and pricing, if the operator wants it shown) when the operator sends it
-- [ ] Operator: a custom domain (Pages CNAME) if wanted; Open Graph image
+- [x] Whop checkout and pricing (prices from `landing/checkout.ts`), sign-in link to Whop orders, legal footer
+- [x] getsavant.pro on Vercel; Open Graph image; sitemap; 404; welcome page
 - [ ] Later: re-take `cockpit.webp` when the cockpit changes; consider a recorded hearing replay once real transcripts exist
