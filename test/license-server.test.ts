@@ -105,6 +105,20 @@ describe("licence server (ADR-086)", () => {
     expect(
       (await handle(post("/v1/activate", { key: "KEY-1234-5678", machine: M1 }), env(), other.f)).status,
     ).toBe(403);
+    // the free demo plan is a membership too, but it never unlocks trading
+    const paidOnly = env({ WHOP_PAID_PLAN_IDS: "plan_monthly,plan_yearly" });
+    const demo = fakeWhop({ ...member(), plan: { id: "plan_free_demo" } });
+    const refused = await handle(
+      post("/v1/activate", { key: "KEY-1234-5678", machine: M1 }),
+      paidOnly,
+      demo.f,
+    );
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { code: string }).code).toBe("free_plan");
+    const monthly = fakeWhop({ ...member(), plan: { id: "plan_monthly" } });
+    expect(
+      (await handle(post("/v1/activate", { key: "KEY-1234-5678", machine: M1 }), paidOnly, monthly.f)).status,
+    ).toBe(200);
     const soon = fakeWhop({
       ...member("trialing"),
       current_period_end: new Date(Date.now() + 2 * 86_400_000).toISOString(),

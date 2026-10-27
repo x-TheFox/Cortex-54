@@ -37,7 +37,7 @@ export const LICENSE_SERVER =
   process.env.SAVANT_LICENSE_URL_BUILTIN || "https://savant-license.samplayz2ks.workers.dev";
 
 /** Where people buy and manage Savant (the Whop store), injected by the release build. */
-export const STORE_URL = process.env.SAVANT_STORE_URL_BUILTIN || "https://whop.com/savant/";
+export const STORE_URL = process.env.SAVANT_STORE_URL_BUILTIN || "https://whop.com/savant-agent/";
 
 export type LicenseState =
   | { required: false }
@@ -205,7 +205,15 @@ export async function refreshLicense(
     return "offline";
   }
   if (!r.ok) {
-    if (["membership_inactive", "unknown_key", "bound_to_another_machine", "wrong_product"].includes(r.code))
+    if (
+      [
+        "membership_inactive",
+        "unknown_key",
+        "bound_to_another_machine",
+        "wrong_product",
+        "free_plan",
+      ].includes(r.code)
+    )
       rmSync(p, { force: true });
     return r.code === "rate_limited" ? "offline" : "revoked";
   }

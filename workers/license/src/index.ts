@@ -26,6 +26,9 @@ export interface Env {
   LICENSE_SIGNING_KEY: string;
   /** only memberships of these products count (comma-separated prod_ ids); empty = any product of the account */
   WHOP_PRODUCT_IDS?: string;
+  /** only memberships on these plans unlock trading (comma-separated plan_ ids); empty = any plan. The free demo plan
+   * is a Whop membership too, so production lists only the paid (monthly, yearly) plans. */
+  WHOP_PAID_PLAN_IDS?: string;
   WHOP_API_BASE?: string;
   /** Workers rate-limiting binding (optional; wrangler.jsonc) */
   RL?: { limit(o: { key: string }): Promise<{ success: boolean }> };
@@ -43,6 +46,7 @@ interface Membership {
   product_id?: string;
   product?: { id: string; title: string };
   plan_id?: string;
+  plan?: { id: string } | null;
   metadata?: Record<string, unknown>;
   user_id?: string | null;
   current_period_end?: string | null;
@@ -107,6 +111,17 @@ async function lookup(env: Env, f: Fetch, key: string): Promise<Membership | Res
   const product = m.product_id ?? m.product?.id ?? "";
   if (allowed.length && !allowed.includes(product))
     return fail("wrong_product", "That key belongs to a different product.", 403);
+  const paid = (env.WHOP_PAID_PLAN_IDS ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const plan = m.plan_id ?? m.plan?.id ?? "";
+  if (paid.length && !paid.includes(plan))
+    return fail(
+      "free_plan",
+      "That key is for the free demo, which runs without a licence. Start the 7-day trial or a subscription to trade a real account.",
+      403,
+    );
   return m;
 }
 

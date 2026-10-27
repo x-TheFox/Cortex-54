@@ -9,8 +9,9 @@
   "workers_dev": true,
   "observability": { "enabled": true },
   "vars": {
-    // only memberships of the Savant product count (set after the Whop product exists)
-    "WHOP_PRODUCT_IDS": ""
+    // only memberships of the Savant product count, and only its paid plans (monthly, yearly; trials included)
+    "WHOP_PRODUCT_IDS": "prod_sdzK9Kr4E2Kgz",
+    "WHOP_PAID_PLAN_IDS": "plan_4bBHwmIccRi3d,plan_1uDX0TPE2wKea"
   },
   "ratelimits": [{ "name": "RL", "namespace_id": "5401", "simple": { "limit": 20, "period": 60 } }]
 }

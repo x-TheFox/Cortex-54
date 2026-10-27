@@ -1395,7 +1395,7 @@ export function LicenseSection({ s, reload }: { s: SettingsView; reload: () => v
   const [busy, setBusy] = useState(false);
   const lic = s.license;
   if (!lic?.required) return null; // builds without a publisher key (source checkouts) don't sell licences
-  const store = s.storeUrl ?? "https://whop.com/savant/";
+  const store = s.storeUrl ?? "https://whop.com/savant-agent/";
   const call = async (body: Record<string, unknown>) => {
     setBusy(true);
     const res = await post<Result>("/api/settings/license", body);
