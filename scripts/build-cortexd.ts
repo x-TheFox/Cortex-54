@@ -61,10 +61,11 @@ if (process.argv.includes("--with-cloud-deploy")) {
 }
 copy("research", "research", (p) => !/(\.venv|\.vendor|__pycache__|\.pytest_cache|tests)(\/|$)/.test(p));
 // ADR-087: the legal texts, the licence and every third-party notice ship inside each installer
-execFileSync("tsx", ["scripts/build-legal.ts", join(out, "legal")], { stdio: "inherit" });
-execFileSync("tsx", ["scripts/third-party.ts", join(out, "legal", "THIRD_PARTY_NOTICES.md")], {
-  stdio: "inherit",
-});
+// run through this Node with the tsx loader: a bare `tsx` is a .cmd shim on Windows that execFileSync can't start
+const tsx = (args: string[]) =>
+  execFileSync(process.execPath, ["--import", "tsx", ...args], { stdio: "inherit" });
+tsx(["scripts/build-legal.ts", join(out, "legal")]);
+tsx(["scripts/third-party.ts", join(out, "legal", "THIRD_PARTY_NOTICES.md")]);
 // ADR-089: shipped builds are obfuscated and carry research bytecode only (--no-protect for quick local builds)
 if (!process.argv.includes("--no-protect")) {
   const t = Date.now();

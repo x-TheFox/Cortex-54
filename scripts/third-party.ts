@@ -47,7 +47,12 @@ const WEB_RUNTIME = [
 
 function npmItems(): Item[] {
   const prod = JSON.parse(
-    execFileSync("pnpm", ["licenses", "list", "--prod", "--json"], { encoding: "utf8" }),
+    // pnpm is a .cmd shim on Windows, which only starts through a shell
+    execFileSync("pnpm", ["licenses", "list", "--prod", "--json"], {
+      encoding: "utf8",
+      shell: process.platform === "win32",
+      maxBuffer: 64 * 1024 * 1024,
+    }),
   ) as Record<string, { name: string; versions: string[]; paths: string[] }[]>;
   const out: Item[] = [];
   for (const [license, pkgs] of Object.entries(prod))
