@@ -297,7 +297,7 @@ landing/                  the product's landing page (ADR-084/090): static vanil
 workers/license/          Whop licence-key server (ADR-086): machine-bound Ed25519 tokens (`pnpm deploy:license`)
 workers/downloads/        permanent download links to the newest installers (ADR-094, `pnpm deploy:downloads`)
 desktop/                  Tauri v2 app (ADR-066): src-tauri/ shell; bundles dist/cortexd + an official Node runtime
-hub/                      community hub Worker + D1 migrations (ADR-068), hosted by the publisher
+hub/                      community hub Worker + D1 migrations (ADR-068/095) at hub.getsavant.pro (`pnpm deploy:hub`)
 src/universe/ src/portfolio/ src/hub/   dynamic universe + scout (058), exits/lateness/book (059–061), hub protocol (068)
 test/                     vitest in Node: pure risk tests + full pulses against test/sim (FakeBroker + node:sqlite
                           with the real D1 migrations) — ADR-019
@@ -512,6 +512,7 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   protection (obfuscation, bytecode, tamper check). ADR-090 getsavant.pro on Vercel, downloads/updates via the domain.
   ADR-091 Governor proposals approved in the app on customer installs (U8 reworded). ADR-092 private source repo,
   public binary releases, no git for customers. ADR-093 accounts on getsavant.pro (Sign in with Whop), app device
-  sign-in, docs. ADR-094 downloads at getsavant.pro/download/<target> (savant-downloads Worker), SETTINGS in groups. Licence server live at savant-license.samplayz2ks.workers.dev (also getsavant.pro/api).
+  sign-in, docs. ADR-094 downloads at getsavant.pro/download/<target> (savant-downloads Worker), SETTINGS in groups. ADR-095 community
+  hub live (hub.getsavant.pro, SETTINGS → Community, getsavant.pro/community). Licence server live at savant-license.samplayz2ks.workers.dev (also getsavant.pro/api).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

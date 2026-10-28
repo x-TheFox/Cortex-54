@@ -31,6 +31,8 @@ journal, positions, AI model conversations and research all live on your compute
   check results, never your keys; you can read it before sending).
 - **Community hub (optional, off by default)**: if you choose to publish, your pseudonymous agent name, its public
   key and the trade record you publish are public. If you follow other agents, the hub receives your requests.
+  Published records can't be edited, so leaving stops new publishing but keeps what was published; if you ask us to
+  delete your agent, we remove its name and records from the hub.
 
 ## What third parties receive (because you set them up)
 

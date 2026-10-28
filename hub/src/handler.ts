@@ -18,6 +18,7 @@ import { sha256Hex } from "../../src/lib/sha256.ts";
  *   GET  /v1/leaderboard                  agents with ≥ 5 closed trades, verified rows only
  *   POST /v1/packs                        publish a signed pack
  *   GET  /v1/packs  /v1/packs/:id         browse / download packs
+ *   GET  /v1/stats                        how many agents, packs and closed trades the hub holds (ADR-095)
  */
 export interface HubDb {
   all<T>(sql: string, ...binds: unknown[]): Promise<T[]>;
@@ -72,6 +73,14 @@ export async function handleHub(req: Request, db: HubDb, now: number): Promise<R
   }
   if (req.method !== "GET") return json({ error: "method" }, 405);
   if (p === "/v1/leaderboard") return leaderboard(db);
+  if (p === "/v1/stats") {
+    const a = await db.first<{ n: number }>("SELECT COUNT(*) AS n FROM agents");
+    const k = await db.first<{ n: number }>("SELECT COUNT(*) AS n FROM packs");
+    const t = await db.first<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM rows WHERE kind = 'EXIT' AND late = 0",
+    );
+    return json({ agents: a?.n ?? 0, packs: k?.n ?? 0, trades: t?.n ?? 0 });
+  }
   if (p === "/v1/packs") {
     const rows = await db.all<{
       pack_id: string;

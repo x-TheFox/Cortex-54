@@ -28,7 +28,7 @@ import {
   DOCTRINE_SHA256,
   SCAR_TISSUE,
 } from "../src/generated/config.ts";
-import { hubFromEnv } from "../src/hub/client.ts";
+import { DEFAULT_HUB_URL, hubFromEnv } from "../src/hub/client.ts";
 import { TERMS_VERSION } from "../src/legal/version.ts";
 import { verifyRoute } from "../src/lib/hmac.ts";
 import type { AccountId } from "../src/lib/ids.ts";
@@ -272,7 +272,8 @@ export class LocalCortex {
       scar: mergeScar(SCAR_TISSUE, loadLocalScar(home)), // + memory packs the operator applied (ADR-068)
       dispatcher: cfg.research.enabled ? this.jobs : null,
       http: o.overrides?.http ?? (o.overrides?.market ? null : (u, i) => fetch(u, i)),
-      hub: hubFromEnv(k),
+      // ADR-095: on only after the user joins in the app; a demo robot's simulated trades are never published
+      hub: cfg.mode === "demo" ? null : hubFromEnv({ HUB_URL: DEFAULT_HUB_URL, ...k }),
       // ADR-081: on the user's computer only their own Cloudflare AI allowance is a real limit (if they use it)
       budgetScope: this.clefMode === "cloudflare" ? "workers_ai" : "none",
       adoptAccountSize: true,

@@ -42,6 +42,11 @@
       "source": "/welcome",
       "destination": "/welcome/",
       "permanent": true
+    },
+    {
+      "source": "/community",
+      "destination": "/community/",
+      "permanent": true
     }
   ],
   "headers": [
@@ -96,6 +101,10 @@
     {
       "source": "/downloads.json",
       "destination": "https://dl.getsavant.pro/info"
+    },
+    {
+      "source": "/hub/:path*",
+      "destination": "https://hub.getsavant.pro/:path*"
     }
   ]
 }

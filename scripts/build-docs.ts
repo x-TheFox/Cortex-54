@@ -12,6 +12,7 @@ const ORDER = [
   "getting-started",
   "account",
   "live-trading",
+  "community",
   "troubleshooting",
   "uninstall",
 ];

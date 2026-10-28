@@ -1,5 +1,8 @@
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { AlpacaClient } from "../src/broker/AlpacaClient.ts";
 import { CloudflareRestAi } from "../src/clef/portable.ts";
+import type { SqlLike } from "../src/cortex/store.ts";
 import { type ApiFormat, listModels, normalizeUrl, PRESETS, presetForKey } from "../src/court/models.ts";
 import {
   type Endpoint,
@@ -9,10 +12,12 @@ import {
   type PoolReport,
 } from "../src/court/pool.ts";
 import { discordSetup } from "../src/discord/setup.ts";
-import { DOCTRINE } from "../src/generated/config.ts";
+import { DOCTRINE, SCAR_TISSUE } from "../src/generated/config.ts";
+import { DEFAULT_HUB_URL } from "../src/hub/client.ts";
+import { agentIdOf, canonical, generateAgentKey, publicKeyOf } from "../src/hub/protocol.ts";
 import { TERMS_VERSION } from "../src/legal/version.ts";
 import { ntfyUrl } from "../src/notify/push.ts";
-import type { WebSettings } from "../src/web/api.ts";
+import type { HubAction, WebSettings } from "../src/web/api.ts";
 import { AGENT_PROMPT } from "./agent-prompt.ts";
 import {
   backupFileName,
@@ -34,6 +39,7 @@ import {
   STORE_URL,
   startDeviceSignIn,
 } from "./license.ts";
+import { applyPack, exportPack, loadLocalScar, mergeScar, stagePack } from "./memory.ts";
 import { decideProposal, readProposals } from "./proposals.ts";
 
 /**
@@ -117,6 +123,8 @@ function num(
 
 export interface SettingsDeps {
   home: string;
+  /** ADR-095: the brain's hot store (memory packs read beliefs from it and merge into it) */
+  sql?: () => SqlLike;
   cfg: () => LocalConfig;
   /** apply saved settings (the CLI rebuilds the brain in-process) */
   reload: () => void;
@@ -193,6 +201,7 @@ export class LocalSettings implements WebSettings {
       lan: { enabled: c.lan.enabled, port: c.port },
       secretStore: { mode: c.secret_store, backend: keychainName(this.d.home) },
       proposals: readProposals(this.d.home),
+      hub: await this.hubView(),
       terms: {
         current: TERMS_VERSION,
         accepted: c.terms?.version === TERMS_VERSION,
@@ -599,6 +608,192 @@ export class LocalSettings implements WebSettings {
   }
 
   /** ADR-076: a one-time login link for a phone on this Wi-Fi. */
+  // ------------------------------------------------------------------ community hub (ADR-095)
+
+  private hubUrl(): string {
+    return (this.d.cfg().keys.HUB_URL ?? DEFAULT_HUB_URL).replace(/\/$/, "");
+  }
+
+  private async hubView() {
+    const k = this.d.cfg().keys;
+    const agentId = k.HUB_AGENT_KEY ? agentIdOf(await publicKeyOf(k.HUB_AGENT_KEY)).toString() : null;
+    const site = this.hubUrl() === DEFAULT_HUB_URL ? "https://getsavant.pro/community/" : null;
+    return {
+      url: this.hubUrl(),
+      joined: Boolean(agentId),
+      agentId,
+      name: k.HUB_AGENT_NAME ?? null,
+      publish: Boolean(agentId) && k.HUB_PUBLISH !== "false",
+      follow: (k.HUB_FOLLOW ?? "").split(",").filter((x) => /^[0-9a-f]{16}$/.test(x)),
+      profileUrl: agentId && site ? `${site}agent/?id=${agentId}` : null,
+      communityUrl: site,
+      demo: this.d.cfg().mode === "demo",
+      staged: this.stagedPacks(),
+    };
+  }
+
+  private stagedPacks(): { id: string; title: string; author: string; rules: number; beliefs: number }[] {
+    const dir = join(this.d.home, "proposals");
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => /^[0-9a-f]{16}\.json$/.test(f))
+      .flatMap((f) => {
+        try {
+          const { pack, content } = JSON.parse(readFileSync(join(dir, f), "utf8")) as {
+            pack: { title: string; public_key: string };
+            content: { scar_rules: unknown[]; beliefs: unknown[] };
+          };
+          return [
+            {
+              id: f.slice(0, 16),
+              title: pack.title,
+              author: agentIdOf(pack.public_key),
+              rules: content.scar_rules.length,
+              beliefs: content.beliefs.length,
+            },
+          ];
+        } catch {
+          return [];
+        }
+      });
+  }
+
+  async hub(q: HubAction): Promise<{ ok: boolean; message: string; [k: string]: unknown }> {
+    const c = this.d.cfg();
+    const keys = c.keys;
+    const setKeys = async (patch: Record<string, string | null>, message: string) => {
+      const r = await this.save({ keys: patch });
+      return r.ok ? { ok: true, message } : r;
+    };
+    const cleanName = (n: string) =>
+      n
+        .normalize("NFKC")
+        .replace(/[^\p{L}\p{N} ._-]/gu, "")
+        .trim()
+        .slice(0, 32);
+    try {
+      if (q.join) {
+        if (keys.HUB_AGENT_KEY) return { ok: true, message: "This computer is already in the community." };
+        if (c.mode === "demo")
+          return {
+            ok: false,
+            message:
+              "Demo trades are simulated, so they can't go on the leaderboard. Switch to paper trading first.",
+          };
+        const k = await generateAgentKey();
+        const name = cleanName(q.name ?? "");
+        return setKeys(
+          {
+            HUB_AGENT_KEY: k.privateKey,
+            HUB_PUBLISH: q.publish === false ? "false" : "true",
+            ...(name.length >= 2 ? { HUB_AGENT_NAME: name } : {}),
+          },
+          `Joined as agent ${k.agentId}. Your record is published every 30 minutes from now on.`,
+        );
+      }
+      if (q.leave !== undefined) {
+        if (q.leave !== "LEAVE") return { ok: false, message: "Type LEAVE to confirm." };
+        return setKeys(
+          { HUB_AGENT_KEY: null, HUB_AGENT_NAME: null, HUB_PUBLISH: null, HUB_FOLLOW: null },
+          "Left the community. What was already published stays on the hub (published records can't be edited); nothing new is sent.",
+        );
+      }
+      if (!keys.HUB_AGENT_KEY) return { ok: false, message: "Join the community first." };
+      if (q.name !== undefined) {
+        const name = cleanName(q.name);
+        if (name.length < 2) return { ok: false, message: "Use at least 2 letters or numbers." };
+        return setKeys(
+          { HUB_AGENT_NAME: name },
+          `Your name on the hub is now "${name}" (from the next publish).`,
+        );
+      }
+      if (q.publish !== undefined)
+        return setKeys(
+          { HUB_PUBLISH: q.publish ? "true" : "false" },
+          q.publish ? "Sharing your record again." : "Stopped sharing. Nothing new is sent to the hub.",
+        );
+      const follow = (keys.HUB_FOLLOW ?? "").split(",").filter(Boolean);
+      if (q.follow !== undefined) {
+        const a = q.follow.trim().toLowerCase();
+        if (!/^[0-9a-f]{16}$/.test(a))
+          return { ok: false, message: "An agent id is 16 characters (0-9, a-f)." };
+        if (a === agentIdOf(await publicKeyOf(keys.HUB_AGENT_KEY)))
+          return { ok: false, message: "That's this computer's own agent." };
+        const r = await this.f(`${this.hubUrl()}/v1/agents/${a}`).catch(() => null);
+        if (r && r.status === 404) return { ok: false, message: "No agent with that id on the hub." };
+        return setKeys(
+          { HUB_FOLLOW: [...new Set([...follow, a])].join(",") },
+          `Following ${a}. Its court approvals become ideas for your own robot, which still judges them itself.`,
+        );
+      }
+      if (q.unfollow !== undefined) {
+        const rest = follow.filter((x) => x !== q.unfollow);
+        return setKeys(
+          { HUB_FOLLOW: rest.length ? rest.join(",") : null },
+          `Stopped following ${q.unfollow}.`,
+        );
+      }
+      if (q.share) {
+        const sql = this.d.sql?.();
+        if (!sql) return { ok: false, message: "Start the robot first." };
+        const title = q.share.title.trim().slice(0, 80);
+        if (title.length < 3) return { ok: false, message: "Give the pack a title." };
+        const pack = await exportPack(
+          sql,
+          mergeScar(SCAR_TISSUE, loadLocalScar(this.d.home)),
+          keys.HUB_AGENT_KEY,
+          title,
+          q.share.description.trim().slice(0, 500),
+          Date.now(),
+        );
+        const r = await this.f(`${this.hubUrl()}/v1/packs`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: canonical(pack),
+        });
+        const j = (await r.json().catch(() => ({}))) as { pack_id?: string; error?: string };
+        return r.ok && j.pack_id
+          ? {
+              ok: true,
+              message: `Published pack ${j.pack_id}. Others can import it by that id.`,
+              packId: j.pack_id,
+            }
+          : { ok: false, message: `The hub refused the pack: ${j.error ?? r.status}` };
+      }
+      if (q.importPack !== undefined) {
+        const id = q.importPack.trim().toLowerCase();
+        if (!/^[0-9a-f]{16}$/.test(id))
+          return { ok: false, message: "A pack id is 16 characters (0-9, a-f)." };
+        const r = await this.f(`${this.hubUrl()}/v1/packs/${id}`);
+        if (!r.ok)
+          return {
+            ok: false,
+            message: r.status === 404 ? "No pack with that id." : `Hub error ${r.status}.`,
+          };
+        const st = await stagePack(this.d.home, await r.json());
+        return {
+          ok: true,
+          message: `Pack ready to review: ${st.rules} rule(s) and ${st.beliefs} belief(s) from agent ${st.author}. Nothing changed yet.`,
+          staged: st,
+        };
+      }
+      if (q.applyPack !== undefined) {
+        const sql = this.d.sql?.();
+        if (!sql) return { ok: false, message: "Start the robot first." };
+        const r = applyPack(this.d.home, sql, q.applyPack, Date.now());
+        rmSync(join(this.d.home, "proposals", `${q.applyPack}.json`), { force: true });
+        setTimeout(() => this.d.reload(), 250);
+        return {
+          ok: true,
+          message: `Added ${r.rules} rule(s) (rules only ever skip trades) and ${r.beliefs} belief(s) at half confidence.`,
+        };
+      }
+      return { ok: false, message: "Nothing to do." };
+    } catch (e) {
+      return { ok: false, message: plain(e) };
+    }
+  }
+
   async pair() {
     if (!this.d.cfg().lan.enabled) return { ok: false, message: "Turn on phone access first." };
     const url = await this.d.pairLink?.();

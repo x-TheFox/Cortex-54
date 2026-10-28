@@ -211,6 +211,7 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
     clef: () => clefNotice(c.clefMode),
     spend: () => c.spend(),
     snapshot: () => c.snapshot(),
+    sql: () => c.sql, // ADR-095: memory packs
     pairLink: () => c.pairLink(),
     cashOnly: (acct) => c.makeCashOnly(acct),
     liveAccount: () => {
