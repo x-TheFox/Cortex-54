@@ -1274,8 +1274,9 @@ the version and sizes the site shows. Storage stays the release assets of the pu
 bandwidth cap), which people never see; switching storage changes only `assetUrl`. getsavant.pro redirects
 `/download/*` to the Worker (bytes never pass through Vercel, so its bandwidth allowance is untouched) and rewrites the
 two small JSON files. The release workflow no longer uploads a second, version-less copy of every installer. Old
-`/download/Savant_<platform>.<ext>` links still resolve. Until getsavant.pro's DNS moves to Cloudflare the Worker answers
-on its workers.dev address; afterwards it gets `dl.getsavant.pro` and only the redirect changes.
+`/download/Savant_<platform>.<ext>` links still resolve. getsavant.pro's DNS moved from Vercel to Cloudflare
+(2026-10-28; apex A 216.198.79.1 and www CNAME cname.vercel-dns.com, both DNS-only, so Vercel still serves the site) and
+the Worker answers on `dl.getsavant.pro`.
 The app's SETTINGS page had grown into one 2,700 px column; it is now a list of groups (Licence, Trading, AI models,
 Governor, Alerts and phone, Keys and backups, Health) with one group open at a time, each part a card, and a badge
 on any group that wants a look (no models, unsigned licence, proposals waiting).

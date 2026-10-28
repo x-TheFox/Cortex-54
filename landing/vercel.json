@@ -15,7 +15,7 @@
     },
     {
       "source": "/download/:path*",
-      "destination": "https://savant-downloads.samplayz2ks.workers.dev/download/:path*",
+      "destination": "https://dl.getsavant.pro/download/:path*",
       "permanent": false
     },
     {
@@ -91,11 +91,11 @@
     },
     {
       "source": "/updates/latest.json",
-      "destination": "https://savant-downloads.samplayz2ks.workers.dev/updates/latest.json"
+      "destination": "https://dl.getsavant.pro/updates/latest.json"
     },
     {
       "source": "/downloads.json",
-      "destination": "https://savant-downloads.samplayz2ks.workers.dev/info"
+      "destination": "https://dl.getsavant.pro/info"
     }
   ]
 }
