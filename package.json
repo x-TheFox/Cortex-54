@@ -21,6 +21,7 @@
     "deploy:landing": "pnpm config:build && pnpm landing:build && VERCEL_ORG_ID=team_qP6t36jhM9C6cqQkDridBX5B VERCEL_PROJECT_ID=prj_bnGZCJvhHNic8U36fy01GDyN2fj2 vercel deploy landing-dist --prod --yes",
     "deploy:license": "wrangler deploy -c workers/license/wrangler.jsonc",
     "deploy:downloads": "wrangler deploy -c workers/downloads/wrangler.jsonc",
+    "deploy:hub": "wrangler d1 migrations apply savant-hub --remote -c hub/wrangler.jsonc && wrangler deploy -c hub/wrangler.jsonc",
     "deploy:sentinel": "wrangler deploy -c workers/sentinel/wrangler.jsonc",
     "db:migrate:local": "wrangler d1 migrations apply cortex-journal --local",
     "db:migrate:remote": "wrangler d1 migrations apply cortex-journal --remote",

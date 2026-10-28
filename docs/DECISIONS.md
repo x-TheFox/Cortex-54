@@ -1280,3 +1280,16 @@ the Worker answers on `dl.getsavant.pro`.
 The app's SETTINGS page had grown into one 2,700 px column; it is now a list of groups (Licence, Trading, AI models,
 Governor, Alerts and phone, Keys and backups, Health) with one group open at a time, each part a card, and a badge
 on any group that wants a look (no models, unsigned licence, proposals waiting).
+
+## ADR-095 — The community hub goes live, in the app and on getsavant.pro (2026-10-28)
+**Context:** ADR-068 built the hub (signed, hash-linked journal rows, leaderboard, following, memory packs) but it was
+never deployed, the app had no screen for it (CLI only) and the site said nothing about it.
+**Decision:** the hub runs as the `savant-hub` Worker on `hub.getsavant.pro` with D1 `savant-hub` (`pnpm deploy:hub`
+applies the migrations first) and gains `/v1/stats`. The desktop app uses it by default (`DEFAULT_HUB_URL`; HUB_URL still
+overrides), but nothing is published until the user joins. SETTINGS → Community: join (creates the agent's key, an
+optional leaderboard name), stop sharing / share again, leave (typed LEAVE; deletes the identity, published rows stay),
+follow and unfollow agents (checked against the hub), and memory packs: fetch one for review, add it to the robot
+(rules only skip trades, beliefs at half confidence), publish one's own. getsavant.pro/community shows the counts, the
+leaderboard and the packs; /community/agent/?id= an agent's record and recent public rows; /docs/community/ explains
+what a record proves and what is shared. The site reads the hub through a `/hub/*` rewrite (CSP stays 'self'). The
+privacy policy now says a user can ask for their agent to be removed (published rows are otherwise permanent).

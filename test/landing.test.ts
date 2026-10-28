@@ -17,7 +17,6 @@ describe("landing page claims (ADR-084)", () => {
     ],
     [/testimonial|trusted by|customers love/i, "no invented social proof"],
     [/docker/i, "the headless image has never run in a container"],
-    [/community hub/i, "the hub is not deployed"],
   ])("does not claim %s (%s)", (re) => {
     expect(text).not.toMatch(re);
   });

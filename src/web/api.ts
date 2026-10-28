@@ -34,6 +34,18 @@ export interface WebEnv {
  * Settings the app can change (ADR-071). Only local mode implements this: there the brain owns its config file. A
  * cloud brain's keys are Worker secrets, changed by `savant deploy` from the desktop app, so the page says so.
  */
+export interface HubAction {
+  join?: boolean;
+  leave?: string;
+  name?: string;
+  publish?: boolean;
+  follow?: string;
+  unfollow?: string;
+  share?: { title: string; description: string };
+  importPack?: string;
+  applyPack?: string;
+}
+
 export interface WebSettings {
   view(): Promise<unknown>;
   /** BYOK model discovery: an empty key means "use the key already saved for this side" */
@@ -73,6 +85,8 @@ export interface WebSettings {
     approve: boolean;
     id?: string;
   }): Promise<{ ok: boolean; message: string }>;
+  /** ADR-095: the community hub (join, share, follow, memory packs) */
+  hub?(q: HubAction): Promise<{ ok: boolean; message: string; [k: string]: unknown }>;
   /** ADR-087: accept the current terms, EULA and risk disclosure (first launch, and again when they change) */
   terms?(q: { accept: boolean }): Promise<{ ok: boolean; message: string }>;
   /** ADR-076: stop the service and delete everything Savant keeps on this computer */
@@ -307,6 +321,30 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
               })
             : { ok: false, message: "Not available here." },
         );
+      case "/api/settings/hub": {
+        if (!b.settings.hub) return json({ ok: false, message: "Not available here." });
+        const share = body.share as { title?: unknown; description?: unknown } | undefined;
+        return json(
+          await b.settings.hub({
+            ...(body.join === true ? { join: true } : {}),
+            ...(str("leave") ? { leave: str("leave") } : {}),
+            ...(typeof body.name === "string" ? { name: body.name } : {}),
+            ...(typeof body.publish === "boolean" ? { publish: body.publish } : {}),
+            ...(str("follow") ? { follow: str("follow") } : {}),
+            ...(str("unfollow") ? { unfollow: str("unfollow") } : {}),
+            ...(share && typeof share.title === "string"
+              ? {
+                  share: {
+                    title: share.title,
+                    description: typeof share.description === "string" ? share.description : "",
+                  },
+                }
+              : {}),
+            ...(str("importPack") ? { importPack: str("importPack") } : {}),
+            ...(str("applyPack") ? { applyPack: str("applyPack") } : {}),
+          }),
+        );
+      }
       case "/api/settings/proposal":
         return json(
           b.settings.proposal

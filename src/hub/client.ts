@@ -1,5 +1,8 @@
 import { agentIdOf, canonical, type FeedBatch, type FeedRow, publicKeyOf, signPayload } from "./protocol.ts";
 
+/** The publisher's hub (ADR-095). The desktop app uses it unless HUB_URL points elsewhere. */
+export const DEFAULT_HUB_URL = "https://hub.getsavant.pro";
+
 /** Hub settings an agent runs with (ADR-068). Off unless a hub URL and an agent key exist. */
 export interface HubConfig {
   url: string;

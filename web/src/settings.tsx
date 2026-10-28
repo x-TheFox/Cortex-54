@@ -1812,6 +1812,274 @@ export function HealthSection() {
   );
 }
 
+// ------------------------------------------------------------------ community hub (ADR-095)
+
+export function CommunitySection({ s, reload }: { s: SettingsView; reload: () => void }) {
+  const hub = s.hub;
+  const [r, setR] = useState<Result | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState(hub?.name ?? "");
+  const [follow, setFollow] = useState("");
+  const [pack, setPack] = useState("");
+  const [title, setTitle] = useState("");
+  if (!hub) return null;
+  const act = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    const res = await post<Result>("/api/settings/hub", body);
+    setBusy(false);
+    setR(res);
+    if (res.ok) {
+      await waitForBrain();
+      reload();
+    }
+    return res;
+  };
+  if (!hub.joined)
+    return (
+      <section className="set-sec">
+        <h4>Join the community</h4>
+        <p className="cost">
+          Share your robot's track record on the public leaderboard, follow other robots, and swap lessons.
+          Your robot signs what it publishes, so nobody can fake or backdate a record.
+        </p>
+        <ul className="plain-list">
+          <li>
+            <b>Shared:</b> each trade's symbol, entry, exit, result in dollars, and the court's verdict,
+            published every 30 minutes from now on.
+          </li>
+          <li>
+            <b>Never shared:</b> your keys, your broker account, your balance, your settings or anything
+            before you join.
+          </li>
+        </ul>
+        <div className="set-grid">
+          <label className="set-field">
+            <span className="label dim">NAME ON THE LEADERBOARD (OPTIONAL)</span>
+            <input
+              className="field plain"
+              value={name}
+              maxLength={32}
+              placeholder="e.g. Night Owl"
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+        </div>
+        {hub.demo && (
+          <p className="note-line amber">
+            Demo trades are simulated, so they can't go on the leaderboard. Switch to paper trading (Settings
+            → Trading) to join.
+          </p>
+        )}
+        <div className="set-actions">
+          <button
+            type="button"
+            className="chip go"
+            disabled={busy || hub.demo}
+            onClick={() => void act({ join: true, name })}
+          >
+            {busy ? "JOINING…" : "JOIN AND SHARE MY RECORD"}
+          </button>
+          {hub.communityUrl && <Ext href={hub.communityUrl}>See the leaderboard →</Ext>}
+        </div>
+        <Note r={r} />
+      </section>
+    );
+  return (
+    <>
+      <section className="set-sec">
+        <h4>Your agent</h4>
+        <p className={`note-line ${hub.publish ? "green" : "amber"}`} role="status">
+          {hub.publish
+            ? "Sharing your record. New trades are published every 30 minutes."
+            : "Not sharing. Your agent is still in the community, but nothing new is published."}
+        </p>
+        <p className="cost">
+          Agent id <code className="mono">{hub.agentId}</code>
+          {hub.profileUrl && (
+            <>
+              {" · "}
+              <Ext href={hub.profileUrl}>Your public page →</Ext>
+            </>
+          )}
+        </p>
+        <div className="set-grid">
+          <label className="set-field">
+            <span className="label dim">NAME ON THE LEADERBOARD</span>
+            <input
+              className="field plain"
+              value={name}
+              maxLength={32}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="set-actions">
+          <button
+            type="button"
+            className="chip"
+            disabled={busy || name.trim() === (hub.name ?? "")}
+            onClick={() => void act({ name })}
+          >
+            SAVE NAME
+          </button>
+          <button
+            type="button"
+            className="chip"
+            disabled={busy}
+            onClick={() => void act({ publish: !hub.publish })}
+          >
+            {hub.publish ? "STOP SHARING" : "SHARE AGAIN"}
+          </button>
+          <button
+            type="button"
+            className="chip danger"
+            disabled={busy}
+            onClick={() => {
+              const t = prompt(
+                "Leave the community? This computer's agent identity is deleted. Records already published stay on the hub. Type LEAVE to confirm.",
+              );
+              if (t) void act({ leave: t });
+            }}
+          >
+            LEAVE
+          </button>
+        </div>
+      </section>
+      <section className="set-sec">
+        <h4>Follow other robots</h4>
+        <p className="cost">
+          When a robot you follow wins its own court hearing, the idea comes to yours. Your robot still runs
+          its own checks, court and risk limits on it; following never copies a trade. Find agents on the{" "}
+          {hub.communityUrl ? <Ext href={hub.communityUrl}>leaderboard</Ext> : "leaderboard"}.
+        </p>
+        {hub.follow.length > 0 && (
+          <ul className="ep-list">
+            {hub.follow.map((a) => (
+              <li key={a} className="ep">
+                <div className="ep-head">
+                  <code className="mono">{a}</code>
+                  {hub.communityUrl && <Ext href={`${hub.communityUrl}agent/?id=${a}`}>Record →</Ext>}
+                  <button
+                    type="button"
+                    className="chip"
+                    disabled={busy}
+                    onClick={() => void act({ unfollow: a })}
+                  >
+                    UNFOLLOW
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="set-grid">
+          <label className="set-field">
+            <span className="label dim">AGENT ID</span>
+            <input
+              className="field plain"
+              value={follow}
+              placeholder="16 characters, e.g. 3f9a0c2b7d1e4a55"
+              onChange={(e) => setFollow(e.target.value)}
+            />
+          </label>
+        </div>
+        <div className="set-actions">
+          <button
+            type="button"
+            className="chip go"
+            disabled={busy || follow.trim().length !== 16}
+            onClick={async () => {
+              if ((await act({ follow })).ok) setFollow("");
+            }}
+          >
+            FOLLOW
+          </button>
+        </div>
+      </section>
+      <section className="set-sec">
+        <h4>Memory packs</h4>
+        <p className="cost">
+          A pack is a robot's lessons: the patterns it learned to avoid and what it believes about the market.
+          Importing one can only make your robot skip more trades, never take new ones, and its beliefs start
+          at half confidence.
+        </p>
+        <div className="alert-opt">
+          <b>Use a pack</b>
+          <div className="set-grid">
+            <label className="set-field">
+              <span className="label dim">PACK ID</span>
+              <input
+                className="field plain"
+                value={pack}
+                placeholder="16 characters"
+                onChange={(e) => setPack(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="set-actions">
+            <button
+              type="button"
+              className="chip"
+              disabled={busy || pack.trim().length !== 16}
+              onClick={async () => {
+                if ((await act({ importPack: pack })).ok) setPack("");
+              }}
+            >
+              GET IT FOR REVIEW
+            </button>
+          </div>
+          {hub.staged.map((p) => (
+            <div key={p.id} className="ep">
+              <div className="ep-head">
+                <b>{p.title}</b>
+                <span className="dimtext">
+                  {p.rules} rule(s) · {p.beliefs} belief(s) · from {p.author}
+                </span>
+                <button
+                  type="button"
+                  className="chip go"
+                  disabled={busy}
+                  onClick={() => void act({ applyPack: p.id })}
+                >
+                  ADD TO MY ROBOT
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="alert-opt">
+          <b>Share your lessons</b>
+          <div className="set-grid">
+            <label className="set-field">
+              <span className="label dim">TITLE</span>
+              <input
+                className="field plain"
+                value={title}
+                maxLength={80}
+                placeholder="e.g. Crypto lessons, October"
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="set-actions">
+            <button
+              type="button"
+              className="chip"
+              disabled={busy || title.trim().length < 3}
+              onClick={async () => {
+                if ((await act({ share: { title, description: "" } })).ok) setTitle("");
+              }}
+            >
+              PUBLISH A PACK
+            </button>
+          </div>
+        </div>
+        <Note r={r} />
+      </section>
+    </>
+  );
+}
+
 // ------------------------------------------------------------------ page
 
 type Tone = "green" | "amber" | "red" | "cyan";
@@ -1865,6 +2133,12 @@ function tabsFor(s: SettingsView): Tab[] {
       label: "Governor",
       blurb: "Changes the robot proposes to itself. They only ever make it more careful.",
       status: n ? { tone: "cyan", text: String(n) } : null,
+    },
+    {
+      id: "community",
+      label: "Community",
+      blurb: "The public leaderboard, following other robots, and sharing lessons.",
+      status: s.hub && !s.hub.joined ? null : s.hub?.publish ? { tone: "green", text: "Sharing" } : null,
     },
     {
       id: "alerts",
@@ -1954,6 +2228,7 @@ export function SettingsPage({
               </p>
             </section>
           ))}
+        {cur.id === "community" && <CommunitySection s={s} reload={reload} />}
         {cur.id === "alerts" && (
           <>
             <AlertsSection {...props} />

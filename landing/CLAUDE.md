@@ -14,7 +14,8 @@ pnpm landing:preview   # http://localhost:5176 — serves landing-dist/ (launch.
 Deployed to https://getsavant.pro on Vercel with `pnpm deploy:landing` (ADR-090; project `savant`). `landing/vercel.json`
 travels into `landing-dist/` and carries the security headers, the `/download/*` redirect and the `/updates/*` rewrite to the savant-downloads Worker
 (ADR-094). The demo
-cockpit lives at `/demo/`, the post-purchase page at `/welcome/`, the legal set at `/legal/`.
+cockpit lives at `/demo/`, the post-purchase page at `/welcome/`, the legal set at `/legal/`, the community at
+`/community/` (reads the hub through the `/hub/*` rewrite, ADR-095).
 
 ## Direction (decided, keep it)
 - **A public record on paper.** Warm paper `#efebe3`, ink `#15130f`, Newsreader (display, italic for the counterpoint

@@ -24,7 +24,7 @@ const TITLES: Record<string, string> = {
   U5: "The kill switch is sacred.",
   U6: "Fail closed.",
   U7: "The journal can't be rewritten.",
-  U8: "Changing itself takes a pull request.",
+  U8: "Changing itself needs your approval.",
 };
 const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
 
@@ -175,12 +175,19 @@ function csp(): Plugin {
   };
 }
 
+const HUB_PROXY = {
+  target: "https://hub.getsavant.pro",
+  changeOrigin: true,
+  rewrite: (p: string) => p.replace(/^\/hub/, ""),
+};
+
 export default defineConfig({
   root,
   base: "./",
   plugins: [fromConfig(), csp()],
-  server: { port: 5175, strictPort: true },
-  preview: { port: 5176, strictPort: true },
+  // /hub mirrors the vercel.json rewrite to the community hub (ADR-095), so the community pages work locally too
+  server: { port: 5175, strictPort: true, proxy: { "/hub": HUB_PROXY } },
+  preview: { port: 5176, strictPort: true, proxy: { "/hub": HUB_PROXY } },
   build: {
     outDir: fileURLToPath(new URL("../landing-dist", import.meta.url)),
     rollupOptions: {
@@ -190,6 +197,8 @@ export default defineConfig({
         notfound: fileURLToPath(new URL("./404.html", import.meta.url)),
         account: fileURLToPath(new URL("./account/index.html", import.meta.url)),
         activate: fileURLToPath(new URL("./activate/index.html", import.meta.url)),
+        community: fileURLToPath(new URL("./community/index.html", import.meta.url)),
+        communityAgent: fileURLToPath(new URL("./community/agent/index.html", import.meta.url)),
       },
     },
     emptyOutDir: true,

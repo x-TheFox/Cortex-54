@@ -387,6 +387,19 @@ export interface SettingsView {
     } | null;
     scars: { id: string; kind: string; rule: string }[];
   };
+  /** ADR-095: the community hub */
+  hub?: {
+    url: string;
+    joined: boolean;
+    agentId: string | null;
+    name: string | null;
+    publish: boolean;
+    follow: string[];
+    profileUrl: string | null;
+    communityUrl: string | null;
+    demo: boolean;
+    staged: { id: string; title: string; author: string; rules: number; beliefs: number }[];
+  };
   /** ADR-087: the legal set the user accepted */
   terms?: { current: string; accepted: boolean; acceptedAt: number | null };
   /** ADR-086 */

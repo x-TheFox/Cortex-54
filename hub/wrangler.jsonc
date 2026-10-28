@@ -1,18 +1,20 @@
-// CORTEX community hub (ADR-068) — hosted by the publisher. Create the D1 database, paste its id, then:
-//   pnpm wrangler d1 migrations apply cortex-hub --remote -c hub/wrangler.jsonc && pnpm wrangler deploy -c hub/wrangler.jsonc
+// Savant community hub (ADR-068, ADR-095), hosted by the publisher at hub.getsavant.pro.
+// Deploy: pnpm deploy:hub (applies the D1 migrations first).
 {
   "$schema": "../node_modules/wrangler/config-schema.json",
-  "name": "cortex-hub",
+  "name": "savant-hub",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  "workers_dev": true,
   "observability": { "enabled": true },
+  "routes": [{ "pattern": "hub.getsavant.pro", "custom_domain": true }],
   // audit BL-3: per-IP limit on POSTs (feed and packs)
   "ratelimits": [{ "name": "RL", "namespace_id": "5403", "simple": { "limit": 30, "period": 60 } }],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "cortex-hub",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_name": "savant-hub",
+      "database_id": "d53e16e1-c84c-4269-86d4-6fd6f2630b9c",
       "migrations_dir": "migrations"
     }
   ]

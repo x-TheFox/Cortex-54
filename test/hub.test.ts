@@ -159,6 +159,16 @@ describe("hub API (ADR-068)", () => {
     }
   });
 
+  it("stats count agents, packs and closed trades", async () => {
+    const h = call(hubDb(), 1);
+    const r = (await (await h("https://hub.test/v1/stats")).json()) as {
+      agents: number;
+      packs: number;
+      trades: number;
+    };
+    expect(r).toEqual({ agents: 0, packs: 0, trades: 0 });
+  });
+
   it("packs: signed publish, browse, download count", async () => {
     const db = hubDb();
     const h = call(db, 1);

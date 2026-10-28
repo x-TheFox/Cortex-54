@@ -2233,3 +2233,69 @@ html.has-dialog {
   letter-spacing: 0.08em;
   margin: 18px 0;
 }
+
+/* ADR-095: community */
+.comm-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin: 20px 0 8px;
+  font: 400 15px / 1.4 var(--mono);
+}
+.comm-stats b {
+  font: 400 1.9rem / 1 var(--serif);
+  margin-right: 6px;
+}
+.comm-scroll {
+  overflow-x: auto;
+  margin: 12px 0;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+.comm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 400 15px / 1.4 var(--sans, system-ui);
+}
+.comm-table th {
+  font: 500 12px / 1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 12px 14px;
+  opacity: 0.7;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+.comm-table td {
+  color: var(--ink);
+  opacity: 1;
+  font-family: var(--sans);
+  font-variant-numeric: tabular-nums;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: middle;
+}
+.comm-table tr:last-child td {
+  border-bottom: 0;
+}
+.comm-table code {
+  font: 400 13px var(--mono);
+}
+.comm-board td:first-child {
+  font-family: var(--mono);
+  opacity: 0.6;
+  width: 3ch;
+}
+.comm .pos {
+  color: var(--pass, #2f7d4f);
+}
+.comm .neg {
+  color: var(--veto, #b3261e);
+}
+.comm-steps {
+  display: grid;
+  gap: 8px;
+  padding-left: 20px;
+  max-width: 62ch;
+}
