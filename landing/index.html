@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--CSP-->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Savant — Let the models argue. Let code decide.</title>
+    <meta
+      name="description"
+      content="Savant is an autonomous trading agent you run on your own computer. Models argue over ideas; deterministic code sizes every trade; eight rules no model can change decide what is allowed."
+    />
+    <link rel="canonical" href="https://getsavant.pro/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Savant" />
+    <meta property="og:url" content="https://getsavant.pro/" />
+    <meta property="og:title" content="Savant — Let the models argue. Let code decide." />
+    <meta property="og:description" content="An autonomous trading agent you run on your own computer. Models argue; code sizes every trade; eight rules no model can change." />
+    <meta property="og:image" content="https://getsavant.pro/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#efebe3" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <script type="module" src="./src/main.ts"></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="masthead" data-masthead>
+      <a class="wordmark" href="#top" aria-label="Savant, back to top">Savant</a>
+      <nav class="nav" aria-label="Sections">
+        <a href="#process">Process</a>
+        <a href="#rules">Rules</a>
+        <a href="#record">Record</a>
+        <a href="#yours">Run it</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#risk">Risks</a>
+        <a href="/account/">Sign in</a>
+      </nav>
+      <button class="btn btn-ink btn-sm" type="button" data-demo-open>Live demo</button>
+    </header>
+
+    <main id="main">
+      <!-- ───────────────────────────── HERO ───────────────────────────── -->
+      <section class="hero" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">An autonomous trading agent · v0.1 for macOS, Windows, Linux</p>
+          <h1 class="hero-title" id="hero-title">
+            <span class="line"><span>Let the models argue.</span></span>
+            <span class="line"><span><em>Let code decide.</em></span></span>
+          </h1>
+          <p class="lede hero-lede">
+            Savant trades on its own, on an account of any size — ten dollars or ten figures. Language models find ideas and fight over them — an
+            advocate, a prosecutor from a different model family, a panel and a judge. Then plain code sizes the trade,
+            eight rules no model can change decide what is allowed, and a kill switch sits outside all of it.
+          </p>
+          <div class="hero-actions">
+            <button class="btn btn-ink btn-lg" type="button" data-demo-open>
+              Open the live demo <span aria-hidden="true">→</span>
+            </button>
+            <a class="btn btn-line btn-lg" href="%%CHECKOUT_HREF%%" data-checkout>Get Savant</a>
+          </div>
+          <p class="fine">
+            The demo is the real cockpit on synthetic data, in your browser. No sign-up, no real money.
+            <a href="#risk">Not financial advice — read the risks.</a>
+          </p>
+        </div>
+
+        <div class="hero-file" aria-hidden="true" data-hero-file>
+          <div class="slip slip-a">
+            <p class="slip-kicker">Matter before the court</p>
+            <p class="slip-serif">“SOL reclaims its 20-day high on rising spot volume after the ETF filing headline.”</p>
+            <p class="slip-meta">advocate · google family</p>
+          </div>
+          <div class="slip slip-b">
+            <p class="slip-kicker">The bull is wrong if…</p>
+            <p class="slip-serif">“…a loss of 180 invalidates the breakout and the weekend book is thin.”</p>
+            <p class="slip-meta">prosecutor · openai-oss family</p>
+          </div>
+          <div class="slip slip-c">
+            <p class="slip-kicker">DecisionContract · COURT</p>
+            <dl class="slip-kv">
+              <div><dt>win_prob raw</dt><dd>0.68</dd></div>
+              <div><dt>calibrated</dt><dd>0.554</dd></div>
+              <div><dt>bear_lethality</dt><dd>0.31</dd></div>
+              <div><dt>cognitive_cost</dt><dd>literal(0)</dd></div>
+              <div><dt>quantity</dt><dd class="k-code">PositionSizer</dd></div>
+            </dl>
+            <p class="stamp">Sized by code</p>
+          </div>
+          <p class="slip-note">Synthetic hearing from the demo fixtures</p>
+        </div>
+
+        <dl class="docket" aria-label="Savant at a glance">
+          <div class="docket-cell">
+            <dt>Account size</dt>
+            <dd><strong>$10+</strong> no upper limit; every limit is a share of the account</dd>
+          </div>
+          <div class="docket-cell">
+            <dt>Real money</dt>
+            <dd><strong>Stop 0</strong> off until you ratify it; the paper record is shown first</dd>
+          </div>
+          <div class="docket-cell">
+            <dt>Running cost</dt>
+            <dd><strong>$0</strong> extra a month: free AI tiers by default</dd>
+          </div>
+          <div class="docket-cell">
+            <dt>Constitution</dt>
+            <dd><strong>8</strong> rules no model can change</dd>
+          </div>
+        </dl>
+      </section>
+
+      <!-- ──────────────────────────── I · INTAKE ─────────────────────────── -->
+      <section class="chapter intake" id="process" aria-labelledby="intake-title">
+        <header class="chapter-head">
+          <p class="kicker"><span>I</span> Intake</p>
+          <h2 id="intake-title">Thinking costs money. <em>It spends it like money.</em></h2>
+          <p class="lede">
+            Cheap code reads everything. Small models read what is left. The expensive hearing is kept for the few
+            ideas that survive — at most %%T3_PER_DAY%% a day. Every idea that dies gets a written reason.
+          </p>
+        </header>
+
+        <div class="funnel" data-funnel>
+          <ol class="tiers" aria-label="The four tiers">
+            <li class="tier" data-tier-step="0">
+              <p class="tier-name"><span class="tier-n">0</span> Reflex <small>TypeScript · free</small></p>
+              <p>
+                Noise, duplicates, stale quotes, spreads, fee hurdles. All arithmetic happens here, in code. At most
+                %%T0_INTAKE%% headlines a day reach the queue.
+              </p>
+            </li>
+            <li class="tier" data-tier-step="1">
+              <p class="tier-name"><span class="tier-n">1</span> Triage <small>clef-flash</small></p>
+              <p>
+                One headline per call, because batching distorted the scores. Promoted only at P(material) ≥
+                %%T1_BAR%% and priority ≥ %%T1_ESC%%; at most %%T1_PER_PULSE%% a pulse.
+              </p>
+            </li>
+            <li class="tier" data-tier-step="2">
+              <p class="tier-name"><span class="tier-n">2</span> Structure <small>Clef 27B</small></p>
+              <p>
+                Long-favoured? Fits the regime? How lethal is the bear case? Passes at %%T2_BAR%% with quality ≥
+                %%T2_QUALITY%%; at most %%T2_PER_DAY%% a day.
+              </p>
+            </li>
+            <li class="tier" data-tier-step="3">
+              <p class="tier-name"><span class="tier-n">3</span> Court <small>model pool + judge</small></p>
+              <p>A full hearing with a cross-family prosecutor. At most %%T3_PER_DAY%% a day.</p>
+            </li>
+          </ol>
+
+          <div class="wire">
+            <div class="wire-head">
+              <span>The wire · illustrative headlines</span>
+              <span class="wire-count" aria-hidden="true"><b data-wire-count>13</b> alive</span>
+            </div>
+            <ul class="wire-list">
+              <li class="hl" data-dies="0">
+                <span class="hl-t"><span>10 crypto coins that could 10x before Christmas</span></span>
+                <span class="hl-r">T0 · noise: listicle</span>
+              </li>
+              <li class="hl hl-win" data-dies="court">
+                <span class="hl-t"><span>SOL/USD · ETF filing lands; spot volume rising</span></span>
+                <span class="hl-r">→ convened: the court</span>
+              </li>
+              <li class="hl" data-dies="0">
+                <span class="hl-t"><span>Bitcoin price today: live updates</span></span>
+                <span class="hl-r">T0 · noise: live blog</span>
+              </li>
+              <li class="hl" data-dies="1">
+                <span class="hl-t"><span>NVDA edges higher in premarket trading</span></span>
+                <span class="hl-r">T1 · material 0.18 &lt; %%T1_BAR%%</span>
+              </li>
+              <li class="hl" data-dies="0">
+                <span class="hl-t"><span>SOL ETF filing lands with the SEC, report says</span></span>
+                <span class="hl-r">T0 · near-duplicate</span>
+              </li>
+              <li class="hl" data-dies="1">
+                <span class="hl-t"><span>Fed minutes: officials split on pace of cuts</span></span>
+                <span class="hl-r">T1 · priority 0.6 &lt; %%T1_ESC%%</span>
+              </li>
+              <li class="hl" data-dies="2">
+                <span class="hl-t"><span>LINK/USD · bank pilot integration announced</span></span>
+                <span class="hl-r">T2 · regime fit 0.41</span>
+              </li>
+              <li class="hl" data-dies="0">
+                <span class="hl-t"><span>Streamer endorses new meme coin</span></span>
+                <span class="hl-r">T0 · no tradable symbol</span>
+              </li>
+              <li class="hl" data-dies="2">
+                <span class="hl-t"><span>AAPL · services headline; nine-day base</span></span>
+                <span class="hl-r">T2 · quality 61 &lt; %%T2_QUALITY%%</span>
+              </li>
+              <li class="hl" data-dies="1">
+                <span class="hl-t"><span>AMD outlines data-centre accelerator roadmap</span></span>
+                <span class="hl-r">T1 · material 0.38 &lt; %%T1_BAR%%</span>
+              </li>
+              <li class="hl" data-dies="1">
+                <span class="hl-t"><span>LTC network upgrade scheduled for Q1</span></span>
+                <span class="hl-r">T1 · priority 0.9 &lt; %%T1_ESC%%</span>
+              </li>
+              <li class="hl" data-dies="2">
+                <span class="hl-t"><span>COIN · outage resolved after two hours</span></span>
+                <span class="hl-r">T2 · bear lethality 0.68</span>
+              </li>
+              <li class="hl" data-dies="0">
+                <span class="hl-t"><span>Why you should buy the dip, says analyst</span></span>
+                <span class="hl-r">T0 · noise: opinion</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────── II · HEARING ─────────────────────────── -->
+      <section class="chapter hearing" aria-labelledby="hearing-title">
+        <header class="chapter-head">
+          <p class="kicker"><span>II</span> The hearing</p>
+          <h2 id="hearing-title">Every idea that reaches the court <em>is cross-examined.</em></h2>
+          <p class="lede">
+            The prosecutor must come from a different model family than the advocate. If none is available, the case
+            is not traded. Below is a synthetic hearing built from the demo fixtures; real hearings post the same
+            transcript.
+          </p>
+        </header>
+
+        <div class="court" data-court>
+          <ol class="court-index" aria-hidden="true">
+            <li>Matter</li>
+            <li>Advocate</li>
+            <li>Code check</li>
+            <li>Prosecutor</li>
+            <li>Rebuttal</li>
+            <li>Panel</li>
+            <li>Judge</li>
+          </ol>
+          <ol class="transcript">
+            <li class="entry">
+              <p class="entry-role">I · Matter before the court</p>
+              <p class="entry-quote">SOL/USD — an ETF filing headline crosses the wire; spot volume is rising.</p>
+              <p class="entry-meta">Exhibits: 20-day range · spot volume · funding · research dossier</p>
+            </li>
+            <li class="entry">
+              <p class="entry-role">II · The advocate <span class="fam">gemini-3.5-flash · google</span></p>
+              <p class="entry-quote">
+                “SOL reclaims its 20-day high on rising spot volume after the ETF filing headline; the move holds above
+                182.”
+              </p>
+              <p class="entry-meta">Conviction 6/10. Its instructions say: “If there is no clean long, set no_trade=true
+                (that is a good answer).”</p>
+            </li>
+            <li class="entry entry-code">
+              <p class="entry-role">III · Code checks the advocate</p>
+              <ul class="checks">
+                <li><span class="ok">✓</span> Entry zone brackets the bid</li>
+                <li><span class="ok">✓</span> Stop below entry, at least %%MIN_STOP_ATR%% × ATR away</li>
+                <li><span class="cut">✂</span> Targets clipped to 3·ATR·√(h/24)</li>
+              </ul>
+              <p class="entry-meta">When a model's numbers disagree with arithmetic, the arithmetic wins.</p>
+            </li>
+            <li class="entry entry-bear">
+              <p class="entry-role">IV · The prosecutor <span class="fam">gpt-oss-120b · openai-oss</span></p>
+              <p class="entry-quote">
+                “Funding is already positive and the headline may be priced in; a loss of 180 invalidates the breakout
+                and the weekend book is thin.”
+              </p>
+              <p class="entry-meta">Bear lethality 0.31. Three rotating personas: skeptic, macro, quant.</p>
+            </li>
+            <li class="entry">
+              <p class="entry-role">V · Rebuttal</p>
+              <p class="entry-quote">The advocate stands firm. Conviction after cross: 6 → 6.</p>
+              <p class="entry-meta">Conviction can hold or fall here, never rise. If the advocate withdraws, the hearing
+                ends with no trade.</p>
+            </li>
+            <li class="entry">
+              <p class="entry-role">VI · Expert panel <span class="fam">advisory only</span></p>
+              <ul class="panel">
+                <li><b>Quant</b> supports — range reclaimed on volume</li>
+                <li><b>Risk</b> supports — stop is wide of the weekend noise</li>
+                <li><b>Macro</b> abstains</li>
+              </ul>
+            </li>
+            <li class="entry entry-judge">
+              <p class="entry-role">VII · Clef 27B, presiding</p>
+              <div class="prob">
+                <div><span>raw</span><b>0.68</b></div>
+                <span class="prob-arrow" aria-hidden="true">→</span>
+                <div><span>calibrated</span><b>0.554</b></div>
+              </div>
+              <p class="entry-meta">Until %%CAL_N%% outcomes resolve, every probability is pulled hard toward 0.5. A
+                judge's confidence is not a win rate.</p>
+              <p class="ruling">Ruling — sent to the risk engine</p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────── III · SIZING ─────────────────────────── -->
+      <section class="chapter sizing" aria-labelledby="sizing-title">
+        <header class="chapter-head">
+          <p class="kicker"><span>III</span> Sentencing</p>
+          <h2 id="sizing-title">Models never size.</h2>
+          <p class="lede">
+            The court only says how sure it is. How much to buy comes from one pure function. This is that function —
+            the engine's own code, not a copy — running in your browser. Change the account from ten dollars to a
+            billion and watch the same rules scale.
+          </p>
+        </header>
+
+        <form class="sizer" data-sizer aria-describedby="sizer-note" novalidate>
+          <fieldset class="sizer-inputs">
+            <legend class="sr-only">Inputs to the position sizer</legend>
+            <div class="seg">
+              <span class="range-l">Account size <output data-out="rung">rung R1</output></span>
+              <div class="seg-row seg-6">
+                <label><input type="radio" name="equity" value="10" /><span>$10</span></label>
+                <label><input type="radio" name="equity" value="54" checked /><span>$54</span></label>
+                <label><input type="radio" name="equity" value="5000" /><span>$5k</span></label>
+                <label><input type="radio" name="equity" value="250000" /><span>$250k</span></label>
+                <label><input type="radio" name="equity" value="10000000" /><span>$10M</span></label>
+                <label><input type="radio" name="equity" value="1000000000" /><span>$1B</span></label>
+              </div>
+            </div>
+            <div class="seg">
+              <span class="range-l">Market</span>
+              <div class="seg-row seg-2">
+                <label><input type="radio" name="arena" value="CRYPTO" checked /><span>Crypto</span></label>
+                <label><input type="radio" name="arena" value="EQUITIES" /><span>Stocks</span></label>
+              </div>
+            </div>
+            <label class="range">
+              <span class="range-l">Conviction <output data-out="conviction">7</output><small>/10</small></span>
+              <input type="range" name="conviction" min="1" max="10" step="1" value="7" />
+            </label>
+            <label class="range">
+              <span class="range-l">Calibrated win probability <output data-out="pWin">0.66</output></span>
+              <input type="range" name="pWin" min="0.5" max="0.8" step="0.01" value="0.66" />
+            </label>
+            <label class="range">
+              <span class="range-l">Bear lethality <output data-out="bear">0.40</output></span>
+              <input type="range" name="bear" min="0" max="1" step="0.01" value="0.4" />
+            </label>
+            <label class="range">
+              <span class="range-l">Stop distance <output data-out="stop">4.0%</output></span>
+              <input type="range" name="stop" min="1.5" max="8" step="0.1" value="4" />
+            </label>
+            <div class="seg">
+              <span class="range-l">Circuit breaker</span>
+              <div class="seg-row">
+                <label><input type="radio" name="band" value="GREEN" checked /><span>Green</span></label>
+                <label><input type="radio" name="band" value="YELLOW" /><span>Yellow</span></label>
+                <label><input type="radio" name="band" value="ORANGE" /><span>Orange</span></label>
+              </div>
+            </div>
+          </fieldset>
+
+          <div class="sizer-out" aria-live="polite">
+            <p class="out-label">Position</p>
+            <p class="out-big" data-res="notional">$12.23</p>
+            <dl class="out-grid">
+              <div><dt>Max loss if stopped</dt><dd data-res="risk">$0.54</dd></div>
+              <div><dt>Binding limit</dt><dd data-res="binding">risk</dd></div>
+              <div><dt>Effective risk r<sub>eff</sub></dt><dd data-res="reff">1.01%</dd></div>
+              <div><dt>Stop + fees + ½ spread</dt><dd data-res="dstop">4.45%</dd></div>
+              <div><dt>Largest position allowed</dt><dd data-res="cap">$18.90</dd></div>
+              <div><dt>Positions at once</dt><dd data-res="maxpos">3</dd></div>
+            </dl>
+            <p class="out-reason" data-res="reason" hidden></p>
+            <p class="out-code" id="sizer-note">
+              The engine's own <code>sizePosition()</code> with the shipped doctrine (<code>%%DOCT_SHA%%…</code>).
+              <span data-res="fees">Crypto fees 0.40% round trip</span>, half-spread 0.05%. There is no input for a
+              model's opinion of size.
+            </p>
+          </div>
+        </form>
+
+        <div class="rungs" data-reveal>
+          <div class="rungs-head">
+            <h3>Ten dollars or ten figures. <em>Same rules.</em></h3>
+            <p>
+              Every limit is a share of the account, and the share shrinks as the account grows. The top rung has no
+              ceiling: at very large sizes, market liquidity — not the software — is what sets the limit.
+            </p>
+          </div>
+          <div class="table-wrap rungs-table">
+            <table>
+              <thead>
+                <tr><th scope="col">Rung</th><th scope="col">Account</th><th scope="col">Risk per trade</th><th scope="col">Largest position</th><th scope="col">Positions</th><th scope="col">Total risk</th></tr>
+              </thead>
+              <tbody>
+                %%RUNG_ROWS%%
+              </tbody>
+            </table>
+          </div>
+          <p class="note">
+            Why 54? Our own reference account started with $54 — the hardest size there is, where every cent of fees
+            shows. If the rules hold there, they hold anywhere. Targets must clear %%HURDLE%%× fees and spread at every size.
+          </p>
+        </div>
+      </section>
+
+      <!-- ──────────────────────────── IV · RULES ─────────────────────────── -->
+      <section class="chapter rules" id="rules" aria-labelledby="rules-title">
+        <header class="chapter-head">
+          <p class="kicker"><span>IV</span> The constitution</p>
+          <h2 id="rules-title">Eight rules <em>no model can change.</em></h2>
+          <p class="lede">
+            Enforced in code and covered by tests. They change only by a git commit from the operator, and a tunable
+            value looser than the constitution fails the build. Printed here straight from the
+            constitution the engine loads (sha256 <code>%%CONST_SHA%%…</code>).
+          </p>
+        </header>
+        <ol class="articles">
+          %%CONSTITUTION_ARTICLES%%
+        </ol>
+        <dl class="limits" aria-label="Hard limits in the constitution">
+          <div><dt>Per-trade risk</dt><dd>≤ %%HL_RISK%%</dd></div>
+          <div><dt>One position</dt><dd>≤ %%HL_NOTIONAL%%</dd></div>
+          <div><dt>Daily loss</dt><dd>≤ %%HL_DAILY%%</dd></div>
+          <div><dt>Drawdown lock</dt><dd>≤ %%HL_DD%%</dd></div>
+          <div><dt>Orders a day</dt><dd>≤ %%HL_ORDERS%%</dd></div>
+          <div><dt>Quote age</dt><dd>≤ %%HL_STALE%%</dd></div>
+        </dl>
+        <p class="note">Ceilings. The working doctrine runs tighter, and it may only ever tighten them.</p>
+      </section>
+
+      <!-- ─────────────────────────── V · WHEN IT'S WRONG ─────────────────────────── -->
+      <section class="chapter wrong" aria-labelledby="wrong-title">
+        <header class="chapter-head">
+          <p class="kicker"><span>V</span> When it is wrong</p>
+          <h2 id="wrong-title">Losing makes it smaller. <em>Losing more makes it stop.</em></h2>
+        </header>
+
+        <div class="ladder" data-ladder>
+          <div class="ladder-track" aria-hidden="true">
+            <div class="ladder-fill" data-ladder-fill></div>
+            <div class="ladder-mark" data-ladder-mark><span data-ladder-val>0.0%</span></div>
+          </div>
+          <ol class="bands" aria-label="Circuit breakers by drawdown from the high-water mark">
+            <li class="band band-green">
+              <p class="band-name">Green</p>
+              <p class="band-range">under %%B_YELLOW%%</p>
+              <p>Full size, %%B_GREEN_X%%</p>
+            </li>
+            <li class="band band-yellow">
+              <p class="band-name">Yellow</p>
+              <p class="band-range">%%B_YELLOW%% – %%B_ORANGE%%</p>
+              <p>Half size, %%B_YELLOW_X%%</p>
+            </li>
+            <li class="band band-orange">
+              <p class="band-name">Orange</p>
+              <p class="band-range">%%B_ORANGE%% – %%B_RED%%</p>
+              <p>No new entries. Exits only.</p>
+            </li>
+            <li class="band band-red">
+              <p class="band-name">Red</p>
+              <p class="band-range">%%B_RED%%+, a %%B_RED_DAILY%% day, or %%B_STOPOUTS%% stop-outs in 24 h</p>
+              <p>Sell everything and lock. Real money unlocks only with a written postmortem.</p>
+            </li>
+          </ol>
+        </div>
+
+        <div class="trio">
+          <article data-reveal>
+            <h3>Every position has an exit.</h3>
+            <p>
+              A stop at the broker wherever it accepts one, and a stop checked by the brain on every pulse wherever it
+              doesn't. Stops only ever move up.
+            </p>
+          </article>
+          <article data-reveal>
+            <h3>It fails closed.</h3>
+            <p>
+              Stale data, an order it doesn't recognise, a position it didn't open, a budget at %%HL_BUDGET%%: new
+              entries stop. A kill flag it can't read counts as killed.
+            </p>
+          </article>
+          <article data-reveal>
+            <h3>A watchdog with none of its code.</h3>
+            <p>
+              In the cloud edition a separate sentinel, deployed on its own, checks the heartbeat every minute and can
+              sell everything — even if the brain itself is broken. On the desktop the kill switch is in the tray.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────── VI · GRADUATION ─────────────────────────── -->
+      <section class="chapter grad" aria-labelledby="grad-title">
+        <header class="chapter-head">
+          <p class="kicker"><span>VI</span> Graduation</p>
+          <h2 id="grad-title">Paper and live, side by side. <em>One is allowed to trade.</em></h2>
+          <p class="lede">
+            Both run the same brain and the same contracts, each sized for its own balance — whatever that balance is.
+            Nobody approves trades; there is no mode for it. Real money starts only when you ratify it, with the paper
+            record in front of you.
+          </p>
+        </header>
+
+        <div class="twins">
+          <article class="twin twin-paper" data-reveal>
+            <p class="twin-tag"><span class="dot dot-on" aria-hidden="true"></span>PAPER · trading on its own</p>
+            <p class="twin-num">Paper</p>
+            <p>
+              Pretend money, real prices. It charges itself modelled fees and slippage that the paper broker doesn't,
+              so the record isn't flattered.
+            </p>
+          </article>
+          <article class="twin twin-live" data-reveal>
+            <p class="twin-tag"><span class="dot" aria-hidden="true"></span>LIVE · dormant at Stop 0</p>
+            <p class="twin-num">Live</p>
+            <p>
+              Real money. It joins at Stop 0 and places nothing until a person ratifies it. The gate below is what the
+              app checks for you first.
+            </p>
+          </article>
+        </div>
+
+        <div class="gate" data-reveal>
+          <h3>The graduation gate</h3>
+          <p class="gate-sub">Tracked from data by the Governor and shown beside the ratify control:</p>
+          <ul class="gate-list">
+            <li>Every roadmap phase built</li>
+            <li>30 straight days of fully autonomous paper trading</li>
+            <li>25 or more closed trades</li>
+            <li>Positive expectancy after fees, profit factor above 1.2</li>
+            <li>Zero rail violations</li>
+            <li>Heartbeat at 99.9% or better</li>
+            <li>Calibrated Brier score under 0.25</li>
+            <li>Every red breaker recovered and reviewed</li>
+            <li>A live kill-switch drill that passes</li>
+          </ul>
+          <p class="gate-then">
+            Then a person types <code>RATIFY</code> — and confirms it again, 10 minutes to 24 hours later, on a fresh
+            sign-in.
+          </p>
+          <p class="note">
+            On your own install you decide: you can connect a live account at any time. It joins dormant at Stop 0,
+            and the ratify screen shows this gate's verdict as a warning, not a block: you decide. Everything else still
+            binds it.
+          </p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────── VII · THE RECORD ─────────────────────────── -->
+      <section class="chapter record" id="record" aria-labelledby="record-title">
+        <header class="chapter-head">
+          <p class="kicker"><span>VII</span> The record</p>
+          <h2 id="record-title">Trust the record, <em>not the pitch.</em></h2>
+        </header>
+
+        <div class="exhibit chain" data-chain>
+          <div class="exhibit-copy">
+            <p class="exhibit-tag">Exhibit A · the journal</p>
+            <h3>Change one character. Watch the chain break.</h3>
+            <p>
+              Every journal row is hashed with the one before it. SQL triggers refuse to update or delete. The daily
+              head is posted outside the system. These hashes are computed live by the journal's own
+              <code>rowHash()</code>. Edit the payload of row 3.
+            </p>
+            <button class="btn btn-line btn-sm" type="button" data-chain-reset>Restore the original</button>
+          </div>
+          <ol class="chain-rows" aria-live="polite"></ol>
+        </div>
+
+        <div class="exhibit tests" data-reveal>
+          <p class="exhibit-tag">Exhibit B · the tests</p>
+          <ul class="stats">
+            <li><b>350+</b><span>test cases, deterministic, no network</span></li>
+            <li><b>300 × 4</b><span>simulated pulses × seeds of random broker failures, state still agrees</span></li>
+            <li><b>54</b><span>the seed for every property test that proves the caps hold</span></li>
+            <li><b>14</b><span>SQL triggers that refuse to edit or delete a journal row</span></li>
+          </ul>
+        </div>
+
+        <div class="exhibit lab" data-reveal>
+          <p class="exhibit-tag">Exhibit C · the backtest lab</p>
+          <h3>We publish the losers too.</h3>
+          <p>
+            Three years of history, fees and slippage modelled, multiple-testing corrected. Only what passes may trade
+            on the paper account; the rest are watched in a separate lab account. This is our own research, not live
+            performance — and a backtest that agrees with the literature is still a backtest.
+          </p>
+          <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable table must be reachable by keyboard -->
+          <section class="table-wrap" tabindex="0" aria-label="Backtest results">
+            <table>
+              <thead>
+                <tr><th scope="col">Strategy</th><th scope="col">Trades</th><th scope="col">Win</th><th scope="col">Expectancy</th><th scope="col">Profit factor</th><th scope="col">Verdict</th></tr>
+              </thead>
+              <tbody>
+                <tr class="v-pass"><th scope="row">RSI(2) pullback · equities</th><td>104</td><td>78%</td><td>+0.27R</td><td>2.51</td><td>Passes → trades on paper</td></tr>
+                <tr><th scope="row">Breakout baseline · crypto</th><td>545</td><td>47%</td><td>+0.05R</td><td>1.17</td><td>Unproven · kept as plumbing</td></tr>
+                <tr class="v-lose"><th scope="row">Inverse-ETF breakout</th><td>109</td><td>46%</td><td>−0.06R</td><td>0.85</td><td>Loses → lab only</td></tr>
+                <tr class="v-lose"><th scope="row">Oversold bounce · crypto</th><td>184</td><td>44%</td><td>−0.08R</td><td>0.68</td><td>Loses → lab only</td></tr>
+                <tr class="v-lose"><th scope="row">Trend · crypto</th><td>174</td><td>43%</td><td>−0.08R</td><td>0.83</td><td>Loses → lab only</td></tr>
+                <tr class="v-lose"><th scope="row">Turn of month · crypto</th><td>70</td><td>46%</td><td>−0.14R</td><td>0.59</td><td>Loses → lab only</td></tr>
+              </tbody>
+            </table>
+          </section>
+          <p class="note">Run 2026-10-24. Past and simulated results do not predict future results.</p>
+        </div>
+      </section>
+
+      <!-- ─────────────────────────── VIII · YOURS ─────────────────────────── -->
+      <section class="chapter yours" id="yours" aria-labelledby="yours-title">
+        <header class="chapter-head">
+          <p class="kicker"><span>VIII</span> Yours</p>
+          <h2 id="yours-title">It runs on your computer. <em>We never see your keys.</em></h2>
+          <p class="lede">
+            We ship software and you run it. No hosted brain, and no server of ours ever holds your broker keys or your
+            money.
+          </p>
+        </header>
+
+        <div class="window" data-window>
+          <button class="window-frame" type="button" data-demo-open>
+            <span class="window-bar" aria-hidden="true"><i></i><i></i><i></i><span>Savant · demo cockpit</span></span>
+            <img
+              class="window-shot"
+              src="./cockpit.webp"
+              width="1600"
+              height="1000"
+              loading="lazy"
+              decoding="async"
+              alt="The Savant cockpit showing synthetic paper and live account panels, a trend chart and the plain-English TODAY line."
+            />
+            <span class="window-cta"><span>Open the live demo</span></span>
+          </button>
+          <p class="window-cap">Screenshot of the demo cockpit · synthetic data</p>
+        </div>
+
+        <ol class="steps">
+          <li data-reveal>
+            <h3>Get it</h3>
+            <p>One licence, one app for macOS (Apple silicon and Intel), Windows and Linux (x64 and arm64). It lives in the tray; closing
+              the window doesn't stop it.</p>
+          </li>
+          <li data-reveal>
+            <h3>Watch it first</h3>
+            <p>First launch opens a working cockpit in a keyless demo: a simulated $54 on live crypto prices. No accounts,
+              nothing to set up.</p>
+          </li>
+          <li data-reveal>
+            <h3>Go to paper</h3>
+            <p>Connect your free Alpaca paper account when you're ready, then a live account of any size when you
+              decide it has earned it. Keys can live in your system keychain, and backups are encrypted.</p>
+          </li>
+          <li data-reveal>
+            <h3>Pick its minds</h3>
+            <p>Free model tiers by default. Add any OpenAI- or Anthropic-compatible endpoint — including local models
+              through Ollama or LM Studio — and it rotates through them.</p>
+          </li>
+        </ol>
+
+        <div class="plans" id="pricing">
+          <h3 class="plans-title">One app, every platform. <em>Start with %%TRIAL_DAYS%% days free.</em></h3>
+          <div class="plans-grid" id="get">
+            <article class="plan" data-reveal>
+              <p class="plan-name">Demo</p>
+              <p class="plan-price">Free</p>
+              <p>The full app on simulated money and live crypto prices. No broker account, no card.</p>
+              <a class="btn btn-line" href="%%CHECKOUT_DEMO%%" rel="noopener">Download the demo</a>
+            </article>
+            <article class="plan plan-main" data-reveal>
+              <p class="plan-name">Yearly</p>
+              <p class="plan-price">%%PRICE_YEARLY%%<span> a year</span></p>
+              <p>Paper and live trading, every update, every platform. About 29% less than paying monthly.</p>
+              <a class="btn btn-ink" href="%%CHECKOUT_YEARLY%%" data-checkout-plan rel="noopener">Start %%TRIAL_DAYS%% days free <span aria-hidden="true">→</span></a>
+            </article>
+            <article class="plan" data-reveal>
+              <p class="plan-name">Monthly</p>
+              <p class="plan-price">%%PRICE_MONTHLY%%<span> a month</span></p>
+              <p>Everything in yearly, month to month. Cancel any time from your Whop account.</p>
+              <a class="btn btn-line" href="%%CHECKOUT_MONTHLY%%" data-checkout-plan rel="noopener">Start %%TRIAL_DAYS%% days free</a>
+            </article>
+          </div>
+          <p class="fine get-fine">
+            Checkout and payments are handled by Whop; your plan, computers and downloads live in
+            <a href="/account/">your account</a> here. You aren't charged during the trial;
+            cancel before it ends and you pay nothing. A full refund within 14 days of your first payment, no questions
+            (<a href="./legal/refunds.html">refund policy</a>). Prices in USD; tax may apply.
+          </p>
+          <p class="fine get-fine">
+            <a href="%%CHECKOUT_HREF%%" data-checkout>All plans on Whop</a> ·
+            <button class="linklike" type="button" data-demo-open>Try the browser demo first</button>
+          </p>
+        </div>
+        %%CHECKOUT_NOTE%%
+        <p class="fine get-fine">
+          Updates are signed and never install without your click. Your licence is renewed with our licence server about
+          once a day and keeps working offline for up to 14 days; without one the demo always works, and a paper or live
+          account keeps its stops but opens nothing new. macOS builds are ad-hoc signed and Windows SmartScreen asks once.
+        </p>
+      </section>
+
+      <!-- ─────────────────────────── RISK ─────────────────────────── -->
+      <section class="risk" id="risk" aria-labelledby="risk-title">
+        <div class="risk-inner">
+          <h2 id="risk-title">Read this before you run it.</h2>
+          <div class="risk-cols">
+            <p>
+              <b>Savant is software, not advice.</b> Nothing on this page or in the app is financial, investment, tax
+              or legal advice, or a recommendation to buy or sell anything. We are not a broker or an adviser, and we
+              never hold your money or your keys.
+            </p>
+            <p>
+              <b>Trading can lose money — all of the money you put in.</b> Crypto and stocks move fast and gaps can jump
+              straight past a stop. An autonomous system acts without asking you, and software, data feeds, brokers and
+              model providers can fail.
+            </p>
+            <p>
+              <b>Paper is not live.</b> Paper accounts use pretend money against real prices; real fills, fees and
+              slippage differ. Backtests and paper results are simulated, describe the past, and do not predict the
+              future. No result on this page is a promise of any return.
+            </p>
+            <p>
+              <b>You are in charge.</b> You choose whether to connect a live account and when to ratify it. Only trade
+              money you can afford to lose entirely. Check that automated trading is legal and suitable for you where
+              you live.
+            </p>
+          </div>
+          <p class="risk-demo">The live demo on this page runs on synthetic data. It is not a real account, real money or
+            real trading results.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="foot-row">
+        <p class="wordmark">Savant</p>
+        <p class="foot-motto">Models reason, code computes, the risk engine decides, the operator governs.</p>
+      </div>
+      <div class="foot-row foot-small">
+        <p>
+          <button class="linklike" type="button" data-demo-open>Live demo</button> ·
+          <a href="%%CHECKOUT_HREF%%" data-checkout>Get Savant</a> ·
+          <a href="#pricing">Pricing</a> ·
+          <a href="/account/">Your account</a> · <a href="/docs/">Docs</a> ·
+          <a href="#risk">Risks</a>
+        </p>
+        <p>
+          <a href="./legal/terms.html">Terms</a> · <a href="./legal/eula.html">Licence (EULA)</a> ·
+          <a href="./legal/privacy.html">Privacy</a> · <a href="./legal/refunds.html">Refunds</a> ·
+          <a href="./legal/risk.html">Risk disclosure</a> · <a href="./legal/third-party.html">Third-party notices</a>
+        </p>
+        <p>© 2026 Savant. Cortex is the agent inside Savant. Set in Newsreader and IBM Plex (SIL Open Font License). Alpaca is a trademark of its owner; Savant is not
+          affiliated with or endorsed by Alpaca or any model provider.</p>
+      </div>
+    </footer>
+
+    <dialog class="demo" data-demo aria-labelledby="demo-title">
+      <div class="demo-bar">
+        <p class="demo-title" id="demo-title">
+          <span class="demo-badge">Demo</span> The real Savant cockpit on synthetic data. Nothing here is real money.
+        </p>
+        <fieldset class="demo-tabs">
+          <legend class="sr-only">Scenario</legend>
+          <button type="button" data-scenario="" aria-pressed="true">Normal day</button>
+          <button type="button" data-scenario="alert" aria-pressed="false">Caution lit</button>
+          <button type="button" data-scenario="empty" aria-pressed="false">Day one</button>
+        </fieldset>
+        <div class="demo-actions">
+          <a class="linklike" data-demo-newtab href="./demo/" target="_blank" rel="noopener">New tab ↗</a>
+          <button class="demo-close" type="button" data-demo-close aria-label="Close the demo">Close <kbd>Esc</kbd></button>
+        </div>
+      </div>
+      <div class="demo-stage">
+        <p class="demo-loading" data-demo-loading>Waking the cockpit…</p>
+        <iframe title="Savant demo cockpit" data-demo-frame></iframe>
+      </div>
+      <p class="demo-hint">Press <kbd>?</kbd> inside for a guided tour. Keys 1–9 switch pages.</p>
+    </dialog>
+  </body>
+</html>

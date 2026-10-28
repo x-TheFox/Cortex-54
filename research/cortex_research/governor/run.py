@@ -30,6 +30,23 @@ from . import exits as EX
 from . import metrics as M
 
 REPO = Path(__file__).resolve().parents[3]
+# ADR-091: on a customer's install the app runs the Governor with GOVERNOR_STATE_DIR = the Savant home. Proposals then go
+# to <home>/proposals/ (the app shows them for approval) instead of config/ (a pull request on the publisher's repo),
+# and the approved local calibration map (<home>/calibration.json) is the incumbent.
+STATE = Path(os.environ["GOVERNOR_STATE_DIR"]) if os.environ.get("GOVERNOR_STATE_DIR") else None
+
+
+def _calibration_path() -> Path:
+    if STATE and (STATE / "calibration.json").exists():
+        return STATE / "calibration.json"
+    return REPO / "config" / "calibration.json"
+
+
+def _local_scar_rules() -> list:
+    p = STATE / "scar-tissue.local.json" if STATE else None
+    if p and p.exists():
+        return (json.loads(p.read_text()) or {}).get("rules") or []
+    return []
 DATA = "https://data.alpaca.markets"
 MIN_OUTCOMES_FOR_MAP = 50  # mirrors doctrine.funnel.calibration.min_outcomes_before_trusting
 
@@ -37,10 +54,17 @@ MIN_OUTCOMES_FOR_MAP = 50  # mirrors doctrine.funnel.calibration.min_outcomes_be
 # ----------------------------------------------------------------------------- I/O
 
 
-def _sign(body: str) -> dict[str, str]:
+def _sign(body: str, route: str) -> dict[str, str]:
+    """Route-bound signature (audit F-A3-03): HMAC over `ts.route.body`, with the route in x-cortex-audience."""
     ts = str(int(time.time()))
-    sig = hmac.new(os.environ["INGEST_HMAC_SECRET"].encode(), f"{ts}.{body}".encode(), hashlib.sha256).hexdigest()
-    return {"content-type": "application/json", "x-cortex-timestamp": ts, "x-cortex-signature": f"sha256={sig}"}
+    msg = f"{ts}.{route}.{body}".encode()
+    sig = hmac.new(os.environ["INGEST_HMAC_SECRET"].encode(), msg, hashlib.sha256).hexdigest()
+    return {
+        "content-type": "application/json",
+        "x-cortex-timestamp": ts,
+        "x-cortex-audience": route,
+        "x-cortex-signature": f"sha256={sig}",
+    }
 
 
 def export(table: str, limit: int = 100) -> list[dict]:
@@ -49,7 +73,7 @@ def export(table: str, limit: int = 100) -> list[dict]:
     after = 0
     while True:
         body = json.dumps({"table": table, "after": after, "limit": limit}, separators=(",", ":"))
-        r = requests.post(url, data=body.encode(), headers=_sign(body), timeout=30)
+        r = requests.post(url, data=body.encode(), headers=_sign(body, "/governor/export"), timeout=30)
         r.raise_for_status()
         d = r.json()
         rows += d["rows"]
@@ -268,7 +292,8 @@ def calibration_pairs(trades: list[dict], rejections: list[dict], grades: list[d
     return [(it["p"], it["y"]) for it in M.purge_overlaps(items)]
 
 
-def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict], brier_value: float | None, n_pairs: int, now: int) -> list[dict]:
+def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict], brier_value: float | None, n_pairs: int, now: int,
+                calibrated: bool = False) -> list[dict]:
     """RISK_DOCTRINE §7 LIVE gate (b)+(c) from data; (a) phases and (d) ratification are manual."""
     def ok(cond, value):
         return {"status": "PASS" if cond else "FAIL", "value": value}
@@ -299,7 +324,7 @@ def gate_status(journal: list[dict], trades: list[dict], rejections: list[dict],
         {"criterion": "(b) profit factor > 1.2", **(ok((st["profit_factor"] or 0) > 1.2, st["profit_factor"]) if st["n"] else {"status": "WAIT", "value": None})},
         {"criterion": "(b) zero rail violations", **ok(rail == 0, rail)},
         {"criterion": "(b) heartbeat (max daily gap ≤ 10 min)", **(ok(max(gaps) <= 600, f"worst {max(gaps):.0f}s over {len(gaps)} day(s)") if gaps else {"status": "WAIT", "value": "no full day yet"})},
-        {"criterion": "(b) calibrated Brier < 0.25 (≥20 pairs)", **(ok(brier_value < 0.25, round(brier_value, 4)) if brier_value is not None and n_pairs >= 20 else {"status": "WAIT", "value": f"{n_pairs} pairs"})},
+        {"criterion": "(b) calibrated Brier < 0.25 (≥20 pairs)", **(ok(brier_value < 0.25, round(brier_value, 4) if calibrated else f"{round(brier_value, 4)} (raw: no calibration map yet)") if brier_value is not None and n_pairs >= 20 else {"status": "WAIT", "value": f"{n_pairs} pairs"})},
         {"criterion": "(b) RED trips self-recovered", **{"status": "INFO", "value": reds}},
         {"criterion": "(c) live kill drill", **{"status": "MANUAL", "value": "after LIVE keys exist"}},
         {"criterion": "(d) operator RATIFY", **{"status": "MANUAL", "value": "/dial account:LIVE stop:3 confirm:RATIFY"}},
@@ -368,6 +393,12 @@ def main() -> int:
     ]
     pairs = calibration_pairs(trades, rejections, graded_rows + new_grades, contracts)
     b_raw = M.brier(pairs)
+    # audit F-B1-08: the LIVE gate asks for a *calibrated* Brier, so score the probabilities through the map the
+    # brain actually applies (config/calibration.json); with no map yet the brain shrinks toward 0.5, so raw is the
+    # honest stand-in and the criterion says so
+    live_map = (json.loads(_calibration_path().read_text()).get("maps", {}).get("court.win_prob")
+                or {}).get("points")
+    b_gate = M.brier([(M.apply_map([tuple(x) for x in live_map], x), o) for x, o in pairs]) if live_map else b_raw
 
     # strategy fitness (+ BH-FDR across strategies with enough trades)
     by_strat: dict[str, list[float]] = defaultdict(list)
@@ -400,7 +431,7 @@ def main() -> int:
     llm_ok = defaultdict(lambda: [0, 0])
     for c in llm:
         llm_ok[f"{c['role']} {c['provider']}"][0 if c["outcome"] == "OK" else 1] += 1
-    gate = gate_status(journal, trades, rejections, b_raw, len(pairs), now)
+    gate = gate_status(journal, trades, rejections, b_gate, len(pairs), now, calibrated=bool(live_map))
     gate += options_gate(options)
     fills = []
     for r in journal:
@@ -432,8 +463,17 @@ def main() -> int:
     facts = {r["ref_id"]: (jload(r["payload_json"], {}) or {}).get("facts", {}) for r in journal if r["kind"] == "ENTRY_FACTS" and r.get("ref_id")}
     scar_path = REPO / "config" / "scar-tissue.yaml"
     scar_doc = yaml.safe_load(scar_path.read_text()) or {}
-    new_scars = MEM.scar_proposals(trades, facts, scar_doc.get("rules") or [], datetime.now(timezone.utc).date())
-    if a.weekly and new_scars:
+    known = (scar_doc.get("rules") or []) + _local_scar_rules()
+    new_scars = MEM.scar_proposals(trades, facts, known, datetime.now(timezone.utc).date())
+    if a.weekly and new_scars and STATE:
+        (STATE / "proposals").mkdir(parents=True, exist_ok=True)
+        out = STATE / "proposals" / "scar-tissue.json"
+        pending = (json.loads(out.read_text()) if out.exists() else {}).get("rules") or []
+        ids = {r["id"] for r in pending}
+        pending += [r for r in new_scars if r["id"] not in ids]
+        out.write_text(json.dumps({"version": 1, "rules": pending, "proposed_at": now}, indent=2) + "\n")
+        print(f"scar proposals: {len(new_scars)} rule(s) waiting in the app")
+    elif a.weekly and new_scars:
         text = scar_path.read_text()
         header = "".join(line + "\n" for line in text.splitlines() if line.startswith("#") and not line.startswith("# -") and not line.startswith("#   "))
         scar_doc["rules"] = (scar_doc.get("rules") or []) + new_scars
@@ -458,7 +498,7 @@ def main() -> int:
         {"name": "Options shadow lab", "value": options_summary(options)},
         {"name": "Regime gate (ADR-039)", "value": gate_cost(rejections, graded_rows + new_grades)},
         {"name": "Memory", "value": ("reputation: " + ("; ".join(f"{r['source']} n={r['signals']} E[R] {r['expectancy_r_30d']:+.2f} w={r['weight']}" for r in rep) or "no attributed outcomes yet")
-                                    + f" · beliefs {len(bel)} · scar proposals {len(new_scars)}" + (" (PR)" if a.weekly and new_scars else ""))},
+                                    + f" · beliefs {len(bel)} · scar proposals {len(new_scars)}" + ((" (in the app)" if STATE else " (PR)") if a.weekly and new_scars else ""))},
         {"name": "Funnel", "value": f"Tier 1 items {sum(len(jload(x['candidate_ids'], [])) for x in t1)} · Tier 2 {len(t2)} · court sessions {sum(1 for r in journal if r['kind'] == 'COURT')} · contracts {len(contracts)}"},
         {"name": "LLM providers (ok/fail)", "value": "; ".join(f"{k} {v[0]}/{v[1]}" for k, v in sorted(llm_ok.items())) or "no calls yet"},
         {"name": "Shadow ledger (72h, new grades)", "value": "; ".join(f"{s}: n={len(v)} avg R {sum(v) / len(v):+.2f}" for s, v in ledger.items()) or f"{len(new_grades)} new grade(s); none at 72h yet"},
@@ -488,7 +528,10 @@ def main() -> int:
     # calibration map → file (the workflow turns a changed file into a PR)
     if a.weekly and len(pairs) >= MIN_OUTCOMES_FOR_MAP:
         method, pts = M.calibration_map(pairs)
-        cal_path = REPO / "config" / "calibration.json"
+        # audit F-A2-03: maps only ever shrink confidence above a coin flip (the TS schema refuses anything else);
+        # min of two non-decreasing curves stays non-decreasing
+        pts = [(x, min(y, max(x, 0.5))) for x, y in pts]
+        cal_path = _calibration_path()
         cal = json.loads(cal_path.read_text())
         incumbent = (cal.get("maps", {}).get("court.win_prob") or {}).get("points")
         check = M.map_beats_incumbent(pairs, M.calibration_map, [tuple(x) for x in incumbent] if incumbent else None)
@@ -499,8 +542,13 @@ def main() -> int:
             "brier_calibrated": round(M.brier([(M.apply_map(pts, x), o) for x, o in pairs]) or 0, 4),
         }
         cal["generated_at"] = now
-        cal_path.write_text(json.dumps(cal, indent=2) + "\n")
-        print("calibration.json updated")
+        if STATE:
+            (STATE / "proposals").mkdir(parents=True, exist_ok=True)
+            (STATE / "proposals" / "calibration.json").write_text(json.dumps(cal, indent=2) + "\n")
+            print("calibration proposal waiting in the app")
+        else:
+            cal_path.write_text(json.dumps(cal, indent=2) + "\n")
+            print("calibration.json updated")
 
     items = [
         P.item("rejection-ledger-grader", "gov-v1", now, P.dumps(new_grades).encode(), {"grades": new_grades}),
@@ -518,7 +566,7 @@ def main() -> int:
     if a.dry_run:
         return 0
     url = os.environ["CORTEX_URL"].rstrip("/") + "/ingest/batch"
-    r = requests.post(url, data=body.encode(), headers=_sign(body), timeout=60)
+    r = requests.post(url, data=body.encode(), headers=_sign(body, "/ingest/batch"), timeout=60)
     print(f"ingest → HTTP {r.status_code}: {r.text[:300]}")
     return 0 if r.ok else 1
 

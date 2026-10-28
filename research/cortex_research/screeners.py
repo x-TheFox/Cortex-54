@@ -1,7 +1,7 @@
 """Setup screeners (research.yml job=screeners, ADR-035).
 
 Runs the pinned tradermonty Stockbee screeners (momentum burst, exhaustion hammer) in offline mode on Alpaca daily
-bars for CORTEX's tradeable universe. Hits scoring ≥ 70 go to the brain as Tier 2 candidates. The screeners
+bars for Savant's tradeable universe. Hits scoring ≥ 70 go to the brain as Tier 2 candidates. The screeners
 only *propose*: Clef 27B, the court, scar tissue and every risk rail still decide.
 """
 

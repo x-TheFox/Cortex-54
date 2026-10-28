@@ -26,7 +26,11 @@ def test_turn_of_month_enters_on_the_second_to_last_day():
 def test_verdict_needs_edge_significance_and_a_good_latest_third():
     assert B.verdict({"n": 5}) == "TOO FEW TRADES"
     assert B.verdict({"n": 50, "expectancy_r": -0.1}) == "LOSES"
-    assert B.verdict({"n": 50, "expectancy_r": 0.2, "q_value": 0.01, "last_third_r": 0.1}) == "PASS"
+    good = {"n": 50, "expectancy_r": 0.2, "q_value": 0.01, "last_third_r": 0.1, "dsr": 0.97}
+    assert B.verdict(good) == "PASS"
+    assert B.verdict({**good, "dsr": None}) == "UNPROVEN"  # audit F-B1-04: no DSR, no pass
+    assert B.verdict(good, pbo=0.7) == "UNPROVEN"  # the lab looks overfit
+    assert "survivorship" in B.SURVIVORSHIP_NOTE
     assert B.verdict({"n": 50, "expectancy_r": 0.2, "q_value": 0.01, "last_third_r": -0.1}) == "UNPROVEN"
 
 

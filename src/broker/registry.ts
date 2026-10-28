@@ -1,5 +1,5 @@
 /**
- * Brokers CORTEX can trade through (ADR-078, MLP4-027). `BrokerApi` is the seam: the brain only ever talks to it, and
+ * Brokers Savant can trade through (ADR-078, MLP4-027). `BrokerApi` is the seam: the brain only ever talks to it, and
  * every adapter must pass the same conformance suite (test/broker-conformance.test.ts): idempotent client order ids,
  * lookups by client id, no selling more than is held (no shorting), cancels, fills reported as activities.
  *
@@ -32,7 +32,7 @@ export const BROKERS: readonly BrokerInfo[] = [
   },
   {
     id: "sandbox",
-    name: "CORTEX sandbox (simulated, live public crypto prices)",
+    name: "Savant sandbox (simulated, live public crypto prices)",
     arenas: ["CRYPTO"],
     paper: true,
     brokerStops: { CRYPTO: false, EQUITIES: false },

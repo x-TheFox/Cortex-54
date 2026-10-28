@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /welcome/
+
+Sitemap: https://getsavant.pro/sitemap.xml

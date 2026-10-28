@@ -22,6 +22,8 @@ export interface WebEnv {
   SESSION_TTL_MS?: number | undefined;
   /** ADR-076: local phone access over plain HTTP on the user's Wi-Fi (cookie without Secure) */
   COOKIE_INSECURE?: boolean | undefined;
+  /** audit F-A6-02: the request came over the Wi-Fi, not from this computer: destructive commands need a fresh sign-in */
+  REMOTE_DEVICE?: boolean | undefined;
   OPERATOR_DISCORD_ID?: string | undefined;
   DB?:
     | { prepare(sql: string): { bind(...v: unknown[]): { all(): Promise<{ results?: unknown[] }> } } }
@@ -30,7 +32,7 @@ export interface WebEnv {
 
 /**
  * Settings the app can change (ADR-071). Only local mode implements this: there the brain owns its config file. A
- * cloud brain's keys are Worker secrets, changed by `cortex deploy` from the desktop app, so the page says so.
+ * cloud brain's keys are Worker secrets, changed by `savant deploy` from the desktop app, so the page says so.
  */
 export interface WebSettings {
   view(): Promise<unknown>;
@@ -40,7 +42,7 @@ export interface WebSettings {
   discord(q: { token: string; guildId: string }): Promise<unknown>;
   /** models already running on this computer (Ollama, LM Studio) */
   detect(): Promise<unknown>;
-  /** HEALTH: plain-word checks (same as `cortex doctor`) */
+  /** HEALTH: plain-word checks (same as `savant doctor`) */
   checks(): Promise<unknown>;
   /** a redacted support file (no secrets) the user can send for help */
   support(): Promise<Record<string, unknown>>;
@@ -58,8 +60,22 @@ export interface WebSettings {
   /** ADR-081: cap the paper account's borrowing at 1x at the broker */
   cashOnly?(account: "PAPER" | "LIVE"): Promise<{ ok: boolean; message: string }>;
   /** ADR-077: install a licence file */
-  license?(q: { file: string }): Promise<{ ok: boolean; message: string }>;
-  /** ADR-076: stop the service and delete everything CORTEX keeps on this computer */
+  license?(q: {
+    file?: string;
+    key?: string;
+    release?: boolean;
+    signin?: boolean;
+    poll?: boolean;
+  }): Promise<{ ok: boolean; message: string; url?: string; code?: string; status?: string }>;
+  /** ADR-091: approve or dismiss a Governor proposal */
+  proposal?(q: {
+    which: "calibration" | "scar";
+    approve: boolean;
+    id?: string;
+  }): Promise<{ ok: boolean; message: string }>;
+  /** ADR-087: accept the current terms, EULA and risk disclosure (first launch, and again when they change) */
+  terms?(q: { accept: boolean }): Promise<{ ok: boolean; message: string }>;
+  /** ADR-076: stop the service and delete everything Savant keeps on this computer */
   reset?(q: { confirm: string }): Promise<{ ok: boolean; message: string }>;
 }
 
@@ -83,6 +99,8 @@ export interface WebBrain extends OperatorBrain {
 
 /** LIVE ratification from the app needs a session this young */
 export const FRESH_LOGIN_MS = 10 * 60_000;
+/** Commands a Wi-Fi device may send only on a fresh sign-in (audit F-A6-02). Pause stays one tap: it only stops entries. */
+const LAN_FRESH_COMMANDS = new Set(["flatten", "kill", "rearm", "resume", "dial", "unlock", "ratify"]);
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
   Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
@@ -133,6 +151,8 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
 
   const sess = await session(request, env);
   if (!sess) return json({ error: "sign in with /terminal in Discord" }, 401);
+  // audit F-A5-10: a signed-out cookie can't read either
+  if (await b.isRevoked(`revoked:${sess.n}`)) return json({ error: "signed out; sign in again" }, 401);
 
   if (request.method === "GET") {
     switch (path) {
@@ -156,7 +176,7 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
           : json({
               managed: "cloud",
               message:
-                "This brain runs in your cloud. Change its keys from the CORTEX app (Deploy), which pushes them as Worker secrets.",
+                "This brain runs in your cloud. Change its keys from the Savant app (Deploy), which pushes them as Worker secrets.",
             });
       case "/api/forecast": {
         const sym = (url.searchParams.get("symbol") ?? "BTC/USD").toUpperCase();
@@ -278,7 +298,29 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
       case "/api/settings/license":
         return json(
           b.settings.license
-            ? await b.settings.license({ file: str("file") })
+            ? await b.settings.license({
+                ...(str("file") ? { file: str("file") } : {}),
+                ...(str("key") ? { key: str("key") } : {}),
+                ...(body.release === true ? { release: true } : {}),
+                ...(body.signin === true ? { signin: true } : {}),
+                ...(body.poll === true ? { poll: true } : {}),
+              })
+            : { ok: false, message: "Not available here." },
+        );
+      case "/api/settings/proposal":
+        return json(
+          b.settings.proposal
+            ? await b.settings.proposal({
+                which: body.which === "scar" ? "scar" : "calibration",
+                approve: body.approve === true,
+                ...(str("id") ? { id: str("id") } : {}),
+              })
+            : { ok: false, message: "Not available here." },
+        );
+      case "/api/settings/terms":
+        return json(
+          b.settings.terms
+            ? await b.settings.terms({ accept: body.accept === true })
             : { ok: false, message: "Not available here." },
         );
       case "/api/settings/pair":
@@ -319,6 +361,21 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
           ok: false,
           message:
             "LIVE autonomy and LIVE unlocks need a fresh sign-in (within 10 minutes). Sign in again, then retry.",
+        },
+        403,
+      );
+    // audit F-A6-02: over plain-HTTP Wi-Fi a 30-day cookie can be sniffed or copied; commands that close positions or
+    // change autonomy need a sign-in from the last 10 minutes (pair again from the computer's QR)
+    if (
+      env.REMOTE_DEVICE &&
+      LAN_FRESH_COMMANDS.has(String(body.name ?? "")) &&
+      sess.exp - ttl < Date.now() - FRESH_LOGIN_MS
+    )
+      return json(
+        {
+          ok: false,
+          message:
+            "From a phone or another device, this needs a fresh sign-in. Scan the pairing code on your computer again, then retry.",
         },
         403,
       );

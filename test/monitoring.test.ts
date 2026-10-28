@@ -144,7 +144,7 @@ describe("ntfy push alerts (ADR-062)", () => {
     });
     await n.post("court", {
       embeds: [
-        { title: "⚖️ CORTEX COURT" },
+        { title: "⚖️ Savant COURT" },
         {
           title: "🔨 RULING — trade approved",
           fields: [{ name: "Accounts", value: "PAPER: entry order placed" }],

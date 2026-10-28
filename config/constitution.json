@@ -1,5 +1,5 @@
 {
-  "$comment": "CORTEX-54 constitution. Operator-only. Changed exclusively by git commit + deploy. Doctrine may tighten, never loosen, these values. Validated at boot by src/contracts/constitution.ts; its SHA-256 is journaled on every boot.",
+  "$comment": "Savant constitution. Operator-only. Changed exclusively by git commit + deploy. Doctrine may tighten, never loosen, these values. Validated at boot by src/contracts/constitution.ts; its SHA-256 is journaled on every boot.",
   "version": 2,
   "untouchables": [
     {
@@ -39,8 +39,8 @@
     },
     {
       "id": "U8",
-      "name": "self-modification-is-a-pr",
-      "rule": "The Governor may only propose changes as pull requests. There is no approve-each-trade mode: LIVE stays dormant (Stop 0) until every roadmap phase is built and the fully autonomous PAPER account has passed the graduation gate, and then trades only after the operator ratifies (RATIFY). Capital-ladder promotions also need ratification."
+      "name": "self-modification-needs-approval",
+      "rule": "The Governor may only propose changes; the operator approves them (a pull request on the publisher's own deployment, an approval in the app on a customer's install). Proposals can only tighten: calibration maps may only lower confidence, scar rules may only reject. There is no approve-each-trade mode. LIVE joins at Stop 0 and trades only after the operator ratifies it (RATIFY on a fresh sign-in); the paper graduation gate is shown to the operator as advice before ratifying. Capital-ladder promotions also need ratification."
     }
   ],
   "hard_limits": {

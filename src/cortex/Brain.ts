@@ -84,6 +84,7 @@ import {
   REBUTTAL_PROMPT_VERSION,
   REBUTTAL_SCHEMA,
   REBUTTAL_SYSTEM,
+  untrusted,
 } from "../court/prompts.ts";
 import { COLORS, type Notifier } from "../discord/notifier.ts";
 import { fetchFeed, type HubConfig, publishBatch } from "../hub/client.ts";
@@ -156,7 +157,7 @@ import {
   kronosSignal,
 } from "../strategy/KronosForecast.ts";
 import { prefilter } from "../universe/prefilter.ts";
-import { normalizeSymbol, screenAsset } from "../universe/screen.ts";
+import { isLeveragedOrInverse, normalizeSymbol, screenAsset } from "../universe/screen.ts";
 import { Universe } from "../universe/Universe.ts";
 import {
   addBusinessDays,
@@ -412,7 +413,7 @@ export interface StatusView {
     brokerEquityUsd: number | null;
     modeledCostUsd: number;
     hwmUsd: number | null;
-    /** ADR-081: what this account started from (its equity when CORTEX first saw it, or since the last fresh start) */
+    /** ADR-081: what this account started from (its equity when Savant first saw it, or since the last fresh start) */
     startUsd: number;
     rung: RungName;
     autonomyStop: number;
@@ -713,13 +714,36 @@ export class Brain {
     const quotes = await this.quotesFor(this.symbolsInPlay()).catch(() => ({}) as Record<string, Quote>);
     for (const account of ACCOUNTS) {
       const broker = this.deps.brokers[account];
-      if (!broker || report.accounts[account]?.ok !== true) continue;
+      if (!broker) continue;
+      if (report.accounts[account]?.ok !== true) {
+        // Audit BL-4 / F-A1-02: the sync failed, so broker state is unknown — no new orders, but the exits (synthetic
+        // stops, targets, time stops) still run from the last known positions: protection is what matters most when
+        // things go wrong. A refused exit (the broker really is down) just retries next pulse.
+        try {
+          report.exits += await this.manageExits(account, broker, quotes);
+        } catch (e) {
+          if (!(e instanceof SubrequestBudgetExceeded))
+            await this.alertOnce(
+              `manage:${account}`,
+              `⚠️ ${account} exits during a broker outage: ${errText(e).slice(0, 300)}`,
+            );
+        }
+        continue;
+      }
       try {
         report.exits += await this.manageExits(account, broker, quotes);
         await this.manageOrders(account, broker);
         await this.ensureProtectiveStops(account, broker);
         await this.applyBreaker(account, broker);
         if (this.killedFor(account)) await this.cancelEntries(account, broker, "KILLED by sentinel");
+        // audit F-A2-01R: every path into REDUCE_ONLY or PAUSED (auto issues, oversized equity, budget, operator)
+        // takes resting entries down at once, not only the flatten path
+        const mode = this.account(account)?.mode;
+        if (
+          (mode === "REDUCE_ONLY" || mode === "PAUSED") &&
+          this.openOrders(account).some((o) => o.role === "ENTRY" && o.state !== "pending_cancel")
+        )
+          await this.cancelEntries(account, broker, mode);
       } catch (e) {
         if (!(e instanceof SubrequestBudgetExceeded)) {
           await this.alertOnce(
@@ -874,6 +898,12 @@ export class Brain {
     kronos: { job: "kronos", within_min: 90 },
     governor: { job: "governor", within_min: 60 },
     "governor-weekly": { job: "governor", within_min: 90 },
+    // audit F-A1-06: every dispatched job kind is watched, not 6 of 11
+    world: { job: "world-intel", within_min: 60 },
+    "options-open": { job: "options-lab", within_min: 60 },
+    "options-close": { job: "options-lab", within_min: 60 },
+    screeners: { job: "screeners", within_min: 90 },
+    backtest: { job: "backtest", within_min: 180 },
   };
 
   private async checkDispatchReceipts(now: number): Promise<void> {
@@ -1002,7 +1032,13 @@ export class Brain {
         content: `🔗 Journal anchor ${day}: seq ${head.seq} · \`${head.sha}\``,
       });
       this.sql.exec("DELETE FROM seen_activities WHERE at < ?", now - 7 * 86_400_000);
-      this.sql.exec("DELETE FROM seen_items WHERE at < ?", now - 3 * 86_400_000);
+      // audit F-A5-06: sign-out revocations must outlive the longest session (30 days locally), or a copied
+      // "signed-out" cookie revives
+      this.sql.exec(
+        "DELETE FROM seen_items WHERE at < ? AND id NOT LIKE 'web:revoked:%'",
+        now - 3 * 86_400_000,
+      );
+      this.sql.exec("DELETE FROM seen_items WHERE at < ? AND id LIKE 'web:revoked:%'", now - 31 * 86_400_000);
       this.budget.prune(now);
       this.sql.exec("DELETE FROM equity_history WHERE at < ?", now - 35 * 86_400_000);
       this.compactHotState(now);
@@ -1035,6 +1071,7 @@ export class Brain {
       now - 180 * day,
     );
     this.sql.exec("DELETE FROM d1_outbox_dead WHERE dead_at < ?", now - 90 * day);
+    this.journal.requeueQuarantined(now); // audit F-A3-02: dead rows get another chance once a day
     // ADR-051: dossiers are only used while fresh (≤ 12 h); keep a week for the web terminal and debugging
     this.sql.exec("DELETE FROM dossiers WHERE received_at < ?", now - 7 * day);
     this.sql.exec("DELETE FROM court_waits WHERE until_at < ?", now - day);
@@ -1106,7 +1143,7 @@ export class Brain {
 
     // Fills and fees, oldest first.
     let lastTs = cursor;
-    // First sync of an account: history before CORTEX existed isn't ours. Start the cursor now instead of
+    // First sync of an account: history before Savant existed isn't ours. Start the cursor now instead of
     // replaying (and alerting on) every past fill.
     const backlog = cursor === null ? activities : [];
     if (cursor === null) {
@@ -1222,7 +1259,7 @@ export class Brain {
       issues.push(`orphan position ${symbol} at broker`);
       await this.alertOnce(
         `orphan-pos:${account}:${symbol}`,
-        `🧩 ${account}: broker holds ${bp.qty} ${symbol} that CORTEX didn't open. Entries blocked until it's gone (close it in Alpaca or /flatten); CORTEX resumes by itself.`,
+        `🧩 ${account}: broker holds ${bp.qty} ${symbol} that Savant didn't open. Entries blocked until it's gone (close it in Alpaca or /flatten); Savant resumes by itself.`,
       );
     }
 
@@ -1384,12 +1421,18 @@ export class Brain {
       this.journal.append(account, "UNKNOWN_FILL", act.order_id ?? null, act, now);
       void this.alertOnce(
         `unknown-fill:${act.id}`,
-        `🧩 ${account}: fill for an order CORTEX didn't place (${act.symbol} ${act.side} ${act.qty}).`,
+        `🧩 ${account}: fill for an order Savant didn't place (${act.symbol} ${act.side} ${act.qty}).`,
       );
       return;
     }
     const notional = qty * price;
-    const liquidity = order.role === "ENTRY" ? "maker" : "taker";
+    // audit F-A1-05: only an entry limit that rested before filling earned the maker fee; one that filled on arrival
+    // (it crossed the spread), an IOC or a market order paid taker. Stops and exits are taker.
+    const rested = ts - order.created_at > 30_000;
+    const liquidity =
+      order.role === "ENTRY" && order.order_type === "limit" && order.tif !== "ioc" && rested
+        ? "maker"
+        : "taker";
     let feeCents = 0;
     let slipBps = 0;
     if (account === "PAPER" && this.d.accounts.PAPER?.apply_fee_model) {
@@ -2255,7 +2298,11 @@ export class Brain {
       )
         continue;
       const crypto = pos.arena === "CRYPTO";
-      if (!crypto && !(await broker.clock()).is_open) continue; // equity fractional stops: regular hours, TIF day
+      // Audit BL-4 / F-A1-01: a whole-share equity stop rests GTC at the broker, so it also protects overnight, on
+      // weekends and holidays. Alpaca takes fractional stops only as day orders in regular hours: a fractional position
+      // is watched by the synthetic stop outside them (shown as SYNTHETIC in the cockpit).
+      const wholeShares = !crypto && Number.isInteger(Number(pos.qty)) && Number(pos.qty) >= 1;
+      if (!crypto && !wholeShares && !(await broker.clock()).is_open) continue;
       const stop = Number(pos.stop_price);
       const tick = defaultTick(stop, pos.arena);
       const attempt =
@@ -2275,7 +2322,7 @@ export class Brain {
         symbol: pos.symbol,
         arena: pos.arena,
         type: crypto ? "stop_limit" : "stop",
-        tif: crypto ? "gtc" : "day",
+        tif: crypto || wholeShares ? "gtc" : "day",
         qty: pos.qty,
         limitPrice: crypto
           ? roundPrice(stop * (1 - this.d.execution.exit_collar_bps / 10_000), tick, "down")
@@ -2298,7 +2345,25 @@ export class Brain {
   /** Unfilled passive entries are cancelled after N pulses (no chasing). */
   private async manageOrders(account: AccountId, broker: BrokerApi): Promise<void> {
     const now = this.deps.now();
-    for (const o of this.openOrders(account).filter((x) => x.role === "ENTRY" && x.state !== "PLANNED")) {
+    // Audit F-A1-03: a position closed outside the robot (by hand at the broker, or reconciled away) can leave its
+    // protective stop resting; a later trigger would be a refused sell, or worse. Cancel stops with no position.
+    const held = new Set(this.positions(account).map((p) => p.symbol));
+    for (const o of this.openOrders(account).filter(
+      (x) => x.role === "STOP" && !held.has(x.symbol) && x.broker_order_id && x.state !== "pending_cancel",
+    )) {
+      await broker.cancelOrder(o.broker_order_id as string);
+      this.sql.exec(
+        "UPDATE orders SET state = 'pending_cancel', updated_at = ? WHERE client_order_id = ?",
+        now,
+        o.client_order_id,
+      );
+      this.logOrder(account, o, "CANCEL_ORPHAN_STOP", now);
+    }
+    // Audit F-A1-04: an equity EXIT rests as a day limit; when it hasn't filled after N pulses it is cancelled, and the
+    // exit engine re-submits it next pulse at a fresh price (a new attempt id).
+    for (const o of this.openOrders(account).filter(
+      (x) => (x.role === "ENTRY" || x.role === "EXIT") && x.state !== "PLANNED",
+    )) {
       const pulses = o.pulses_unfilled + 1;
       this.sql.exec(
         "UPDATE orders SET pulses_unfilled = ? WHERE client_order_id = ?",
@@ -3290,9 +3355,23 @@ ${postmortem}`,
     }
     const insane = await this.sanityVeto(contract, now);
     if (insane) return insane;
-    const held = this.positions(account)
-      .map((p) => p.symbol)
-      .filter((s) => s !== contract.symbol);
+    // audit F-A2-02: "held" includes resting entry orders and live risk reservations, so two correlated entries in
+    // the same pulse (or one resting, one new) can't both pass
+    const held = [
+      ...new Set([
+        ...this.positions(account).map((p) => p.symbol),
+        ...this.openOrders(account)
+          .filter((o) => o.role === "ENTRY")
+          .map((o) => o.symbol),
+        ...this.sql
+          .exec<{ symbol: string }>(
+            "SELECT symbol FROM risk_reservations WHERE account = ? AND expires_at >= ?",
+            account,
+            now,
+          )
+          .map((r) => r.symbol),
+      ]),
+    ].filter((s) => s !== contract.symbol);
     const m = this.deps.market;
     if (held.length === 0 || !m) return null;
     const g = this.d.sizing.correlation_guard;
@@ -3917,8 +3996,7 @@ ${postmortem}`,
     if (kill !== "CLEAR") return `Kill flag is ${kill}; no court sessions.`;
     if (this.budget.snapshot(now).mode === "REDUCE_ONLY")
       return "Budget is in REDUCE_ONLY; no court sessions.";
-    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day)
-      return "Daily court cap reached.";
+    if (this.daily("court", now) >= this.courtCap()) return "Daily court cap reached.";
     const id = `operator:${target.symbol}:${now}`;
     this.sql.exec(
       "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 3, ?, ?, ?)",
@@ -3973,8 +4051,7 @@ ${postmortem}`,
     }
     if (!target) return `${symbolInput} isn't in the tradeable universe.`;
     if ((await this.readKill()) !== "CLEAR") return "Kill flag is set; no court sessions.";
-    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day)
-      return "Daily court cap reached.";
+    if (this.daily("court", now) >= this.courtCap()) return "Daily court cap reached.";
     const id = `roast:${target.symbol}:${now}`;
     this.sql.exec(
       "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 3, ?, ?, ?)",
@@ -4188,12 +4265,22 @@ ${postmortem}`,
    * Tier 3 court: bull (chain A) → bear (chain B, different family) → Clef 27B synthesis → calibrated COURT
    * contract → the same validator/sizer as everything else. One sprint per pulse, capped per day.
    */
+  /**
+   * Daily court sessions allowed today. RISK_DOCTRINE §4 (audit doc-vs-code): halved while any trading account sits in
+   * the YELLOW band or worse, so a drawdown spends less model time on new ideas.
+   */
+  private courtCap(): number {
+    const max = this.d.funnel.tier3.max_sprints_per_day;
+    const bands = this.sql.exec<{ breaker: string }>("SELECT breaker FROM accounts");
+    return bands.some((b) => b.breaker !== "GREEN") ? Math.floor(max / 2) : max;
+  }
+
   private async runCourt(): Promise<number> {
     const llm = this.deps.llm;
     const clef = this.deps.clef;
     if (!llm || !clef) return 0;
     const now = this.deps.now();
-    if (this.daily("court", now) >= this.d.funnel.tier3.max_sprints_per_day) return 0;
+    if (this.daily("court", now) >= this.courtCap()) return 0;
     // ADR-051: cases waiting for their research dossier are skipped until it lands or the wait expires.
     const row = one<{ candidate_id: string; payload_json: string; enqueued_at: number }>(
       this.sql,
@@ -4264,7 +4351,7 @@ ${postmortem}`,
       this.d.llm_routing.bull_chain,
       {
         system: BULL_SYSTEM,
-        user: `Evidence JSON (ids for receipts: ${e.receipts.map((r) => r.evidence_id).join(", ")}):\n${evidenceJson}`,
+        user: `Evidence JSON (ids for receipts: ${e.receipts.map((r) => r.evidence_id).join(", ")}):\n${untrusted("evidence", evidenceJson)}`,
         maxOutputTokens: 1500,
         schema: BULL_SCHEMA as unknown as Record<string, unknown>,
       },
@@ -4292,7 +4379,7 @@ ${postmortem}`,
       this.d.llm_routing.bear_chain,
       {
         system: bearSystem(persona),
-        user: `Evidence JSON:\n${evidenceJson}\n\nBull brief JSON:\n${JSON.stringify(checked.bull)}`,
+        user: `Evidence JSON:\n${untrusted("evidence", evidenceJson)}\n\nBull brief JSON:\n${untrusted("bull", JSON.stringify(checked.bull))}`,
         maxOutputTokens: 1500,
         schema: BEAR_SCHEMA as unknown as Record<string, unknown>,
       },
@@ -4319,7 +4406,7 @@ ${postmortem}`,
         [{ provider: bull.provider, model: bull.model }, ...this.d.llm_routing.bull_chain],
         {
           system: REBUTTAL_SYSTEM,
-          user: `Evidence JSON:\n${evidenceJson}\n\nYour brief JSON:\n${JSON.stringify(checked.bull)}\n\nBear attack JSON:\n${JSON.stringify(bear.value)}`,
+          user: `Evidence JSON:\n${untrusted("evidence", evidenceJson)}\n\nYour brief JSON:\n${untrusted("bull", JSON.stringify(checked.bull))}\n\nBear attack JSON:\n${untrusted("bear", JSON.stringify(bear.value))}`,
           maxOutputTokens: 1200,
           schema: REBUTTAL_SCHEMA as unknown as Record<string, unknown>,
         },
@@ -4369,7 +4456,7 @@ ${postmortem}`,
           const chain = [...panelCfg.chain.slice(i), ...panelCfg.chain.slice(0, i)];
           const req = {
             system: panelSystem(seat),
-            user: `Evidence JSON:\n${evidenceJson}\n\nBull brief:\n${JSON.stringify(checked.bull)}\n\nBear attack:\n${JSON.stringify(bear.value)}${rebuttal ? `\n\nBull rebuttal:\n${JSON.stringify(rebuttal)}` : ""}`,
+            user: `Evidence JSON:\n${untrusted("evidence", evidenceJson)}\n\nBull brief:\n${untrusted("bull", JSON.stringify(checked.bull))}\n\nBear attack:\n${untrusted("bear", JSON.stringify(bear.value))}${rebuttal ? `\n\nBull rebuttal:\n${untrusted("rebuttal", JSON.stringify(rebuttal))}` : ""}`,
             maxOutputTokens: 800,
             schema: PANEL_SCHEMA as unknown as Record<string, unknown>,
           };
@@ -4401,11 +4488,12 @@ ${postmortem}`,
     );
     const synthReq = buildSynth(e, checked.bull, bear.value, { rebuttal, panel: shuffled });
     const est = estimateTokens(synthReq.state, synthReq.questions);
-    if (!this.budget.canSpendNeurons("neurons_tier2", neuronsFor("clef", est, this.d), now)) {
+    // audit F-A4-05: the court's Clef judge bills its own allocation (tier3_fallback), not Tier 2's
+    if (!this.budget.canSpendNeurons("neurons_tier3_fallback", neuronsFor("clef", est, this.d), now)) {
       this.rejectCandidate(
         cand,
         "BUDGET",
-        ["tier-2 neurons exhausted for synthesis"],
+        ["court Clef neurons exhausted for synthesis"],
         { ...checked.bull },
         now,
       );
@@ -4426,7 +4514,11 @@ ${postmortem}`,
       await close(`❌ Clef judge unavailable: ${errText(e).slice(0, 120)}`, false);
       return 0;
     }
-    this.budget.add("neurons_tier2", neuronsFor("clef", synthRes.usage.input_tokens ?? est, this.d), now);
+    this.budget.add(
+      "neurons_tier3_fallback",
+      neuronsFor("clef", synthRes.usage.input_tokens ?? est, this.d),
+      now,
+    );
     const synth = interpretSynth(synthRes);
     if (!synth) {
       this.rejectCandidate(cand, "SYNTH", ["incomplete Clef synthesis"], { ...checked.bull }, now);
@@ -5340,6 +5432,12 @@ ${postmortem}`,
       return false;
     }
     const view = { ...baseView, availableCashUsd: Math.min(baseView.availableCashUsd, posture.roomUsd) };
+    // audit F-A2-07: U3 checked on every order, not only by how the universe is built: no leveraged, inverse or
+    // volatility product unless the constitution lists it (its 1x inverse ETFs)
+    if (contract.arena === "EQUITIES" && isLeveragedOrInverse(contract.symbol, meta.name, this.c)) {
+      this.reject(account, contract, "VALIDATOR", ["U3 leveraged, inverse or volatility product"], now);
+      return false;
+    }
     const asset = this.assetView(meta, contract.arena);
     const v = validateEntry(
       {
@@ -5403,7 +5501,8 @@ ${postmortem}`,
       contract.contract_id,
       account,
     );
-    if (ok) this.sql.exec("UPDATE accounts SET orders_today = orders_today + 1 WHERE account = ?", account);
+    // audit F-A2-05: every submit attempt counts against the daily cap, so a refusal loop can't run unbounded
+    this.sql.exec("UPDATE accounts SET orders_today = orders_today + 1 WHERE account = ?", account);
     return ok;
   }
 

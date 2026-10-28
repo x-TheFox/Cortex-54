@@ -1,0 +1,101 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": false,
+  "redirects": [
+    {
+      "source": "/:path(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.getsavant.pro"
+        }
+      ],
+      "destination": "https://getsavant.pro/:path",
+      "permanent": true
+    },
+    {
+      "source": "/download/:path*",
+      "destination": "https://dl.getsavant.pro/download/:path*",
+      "permanent": false
+    },
+    {
+      "source": "/buy",
+      "destination": "https://whop.com/savant-agent/",
+      "permanent": false
+    },
+    {
+      "source": "/account",
+      "destination": "/account/",
+      "permanent": true
+    },
+    {
+      "source": "/activate",
+      "destination": "/activate/",
+      "permanent": true
+    },
+    {
+      "source": "/docs",
+      "destination": "/docs/",
+      "permanent": true
+    },
+    {
+      "source": "/welcome",
+      "destination": "/welcome/",
+      "permanent": true
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains; preload"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "SAMEORIGIN"
+        }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://savant-license.samplayz2ks.workers.dev/:path*"
+    },
+    {
+      "source": "/updates/latest.json",
+      "destination": "https://dl.getsavant.pro/updates/latest.json"
+    },
+    {
+      "source": "/downloads.json",
+      "destination": "https://dl.getsavant.pro/info"
+    }
+  ]
+}

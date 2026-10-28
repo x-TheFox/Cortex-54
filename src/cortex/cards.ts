@@ -109,7 +109,7 @@ export function equityChartUrl(
       labels: pts.map(() => ""),
       datasets: [
         {
-          label: "CORTEX",
+          label: "Savant",
           data: pts.map((p) => p[1]),
           fill: false,
           pointRadius: 0,
@@ -216,7 +216,7 @@ export function hudMessage(s: StatusView): DiscordMessage {
   return {
     components,
     content:
-      `🧠 **CORTEX-54** · pulse ${age} · budget **${s.budget.mode}** (${s.budget.worst.resource} ${(s.budget.worst.fraction * 100).toFixed(0)}%) · journal #${s.journalHead.seq}${s.outboxPending > 0 ? ` (${s.outboxPending} unflushed)` : ""}` +
+      `🧠 **Savant** · pulse ${age} · budget **${s.budget.mode}** (${s.budget.worst.resource} ${(s.budget.worst.fraction * 100).toFixed(0)}%) · journal #${s.journalHead.seq}${s.outboxPending > 0 ? ` (${s.outboxPending} unflushed)` : ""}` +
       (regimeLine ? `\n🌐 ${regimeLine}` : ""),
     embeds,
   };
@@ -346,6 +346,19 @@ export interface CourtSession {
 const bar = (p: number) =>
   `${"█".repeat(Math.round(p * 10))}${"░".repeat(10 - Math.round(p * 10))} ${(p * 100).toFixed(0)}%`;
 const cut = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+/**
+ * Audit F-A4-02: text written by a model or a third party (theses, briefs, headlines, web findings) is shown as
+ * quoted prose, never as the bot's own formatting: masked links lose their target, markdown and mention syntax is
+ * escaped, so an injected "**BUY $XYZ** [now](https://…)" renders as inert text inside the card.
+ */
+export function clean(t: string): string {
+  return t
+    .replace(/\[([^\]]*)\]\((?:[^)]*)\)/g, "$1") // [text](url) → text
+    .replace(/<(@[!&]?|#)\d+>/g, "") // user/role/channel mentions
+    .replace(/@(everyone|here)/gi, "@\u200b$1")
+    .replace(/([\\*_~|`>#])/g, "\\$1");
+}
+const cutp = (t: string, n: number) => cut(clean(t), n);
 const model = (by: string) => `\`${by.split("/").slice(1).join("/") || by}\``;
 const STANCE: Record<string, string> = { support: "🟢 SUPPORT", oppose: "🔴 OPPOSE", abstain: "⚪ ABSTAIN" };
 
@@ -362,12 +375,12 @@ function researchBriefEmbed(d: Dossier) {
     .slice(0, 4)
     .map(
       (f) =>
-        `${mark[f.stance]} ${cut(f.claim, 150)} *(${f.published ?? "undated"}, [${hostOf(f.source_url)}](${f.source_url}))*`,
+        `${mark[f.stance]} ${cutp(f.claim, 150)} *(${f.published ?? "undated"}, [${hostOf(f.source_url)}](${f.source_url}))*`,
     )
     .join("\n");
   const next = d.catalysts
     .slice(0, 3)
-    .map((c) => `**${c.date ?? "date?"}** ${cut(c.event, 90)}`)
+    .map((c) => `**${c.date ?? "date?"}** ${cutp(c.event, 90)}`)
     .join(" · ");
   const fields: { name: string; value: string; inline?: boolean }[] = [];
   if (top) fields.push({ name: "Exhibits from the web", value: cut(top, 900) });
@@ -377,7 +390,7 @@ function researchBriefEmbed(d: Dossier) {
   const a = d.agent;
   return {
     title: `📚 Research desk briefing — ${d.findings.length} findings · 🟢 ${counts.BULL} · 🔴 ${counts.BEAR}`,
-    description: cut(d.summary || "(no summary)", 420),
+    description: cutp(d.summary || "(no summary)", 420),
     color: COLORS.cyan,
     fields,
     footer: {
@@ -404,20 +417,20 @@ export function dossierCard(d: Dossier): DiscordMessage {
     .slice(0, 8)
     .map(
       (f) =>
-        `${mark[f.stance]} ${cut(f.claim, 220)} — *${f.published ?? "undated"}* [${cut(f.source_title || "source", 40)}](${f.source_url})${f.verified ? "" : " ·headline only"}`,
+        `${mark[f.stance]} ${cutp(f.claim, 220)} — *${f.published ?? "undated"}* [${cutp(f.source_title || "source", 40)}](${f.source_url})${f.verified ? "" : " ·headline only"}`,
     )
     .join("\n");
   const cats = d.catalysts
     .slice(0, 5)
-    .map((c) => `• **${c.date ?? "date?"}** ${cut(c.event, 160)}`)
+    .map((c) => `• **${c.date ?? "date?"}** ${cutp(c.event, 160)}`)
     .join("\n");
   const fields: { name: string; value: string; inline?: boolean }[] = [];
   if (d.thesis)
     fields.push({
       name: `${{ INTACT: "✅", WEAKENED: "⚠️", BROKEN: "💥" }[d.thesis.status]} Thesis ${d.thesis.status}`,
-      value: cut(d.thesis.reason || "—", 400),
+      value: cutp(d.thesis.reason || "—", 400),
     });
-  if (d.market_context) fields.push({ name: "🌍 Market today", value: cut(d.market_context, 500) });
+  if (d.market_context) fields.push({ name: "🌍 Market today", value: cutp(d.market_context, 500) });
   if (d.catalyst_trace?.story)
     fields.push({
       name: `🧵 Where the story came from${d.catalyst_trace.first_reported ? ` (first ${d.catalyst_trace.first_reported})` : ""}`,
@@ -429,25 +442,31 @@ export function dossierCard(d: Dossier): DiscordMessage {
   if (d.cruxes.length)
     fields.push({
       name: "🎯 Cruxes",
-      value: cut(d.cruxes.map((c) => `• ${c.question} → ${c.answer ?? "**open**"}`).join("\n"), 700),
+      value: cut(
+        d.cruxes.map((c) => `• ${clean(c.question)} → ${c.answer ? clean(c.answer) : "**open**"}`).join("\n"),
+        700,
+      ),
     });
-  if (d.flags.length) fields.push({ name: "🚩 Filing flags", value: cut(d.flags.join(" · "), 300) });
+  if (d.flags.length) fields.push({ name: "🚩 Filing flags", value: cutp(d.flags.join(" · "), 300) });
   if (cats) fields.push({ name: "📅 What's coming", value: cut(cats, 900) });
-  if (d.bull_case) fields.push({ name: "🐂 Case for", value: cut(d.bull_case, 500), inline: true });
-  if (d.bear_case) fields.push({ name: "🐻 Case against", value: cut(d.bear_case, 500), inline: true });
+  if (d.bull_case) fields.push({ name: "🐂 Case for", value: cutp(d.bull_case, 500), inline: true });
+  if (d.bear_case) fields.push({ name: "🐻 Case against", value: cutp(d.bear_case, 500), inline: true });
   if (d.risks.length)
-    fields.push({ name: "⚠️ Risks", value: cut(d.risks.map((r) => `• ${r}`).join("\n"), 600) });
+    fields.push({ name: "⚠️ Risks", value: cut(d.risks.map((r) => `• ${clean(r)}`).join("\n"), 600) });
   if (d.open_questions.length)
     fields.push({
       name: "❓ Could not verify",
-      value: cut(d.open_questions.map((q) => `• ${q}`).join("\n"), 400),
+      value: cut(d.open_questions.map((q) => `• ${clean(q)}`).join("\n"), 400),
     });
   const a = d.agent;
   return {
     embeds: [
       {
         title: `${{ fast: "⚡", deep: "🔬", watch: "👁" }[d.stage]} Research desk (${d.stage}) — ${d.symbol}`,
-        description: cut(`${d.summary || "(no summary)"}\n\n**Key findings**\n${findings || "none"}`, 3500),
+        description: cut(
+          `${clean(d.summary || "(no summary)")}\n\n**Key findings**\n${findings || "none"}`,
+          3500,
+        ),
         color: COLORS.cyan,
         fields,
         footer: {
@@ -559,7 +578,7 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
       value: `bid **${s.bid}**\nATR14 ${s.atr.toPrecision(4)} (${pct(s.atr / s.bid)})`,
       inline: true,
     },
-    { name: "Source", value: `${s.catalyst.kind} · ${cut(s.catalyst.source, 40)}`, inline: true },
+    { name: "Source", value: `${s.catalyst.kind} · ${cutp(s.catalyst.source, 40)}`, inline: true },
   ];
   const facts = Object.entries(s.facts ?? {});
   if (facts.length > 0)
@@ -567,10 +586,10 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
       name: "🔎 Facts on the record (Clairic)",
       value: facts.map(([k, v]) => `\`${k}\` ${v}`).join(" · "),
     });
-  if (s.kronos) docket.push({ name: "🔮 Kronos (low confidence)", value: cut(s.kronos, 300) });
+  if (s.kronos) docket.push({ name: "🔮 Kronos (low confidence)", value: cutp(s.kronos, 300) });
   embeds.push({
-    title: `⚖️ CORTEX COURT — ${s.symbol} (${s.arena})`,
-    description: `**Matter before the court**\n> ${cut(s.catalyst.headline, 300)}${s.catalyst.url ? `\n[source](${s.catalyst.url})` : ""}`,
+    title: `⚖️ Savant COURT — ${s.symbol} (${s.arena})`,
+    description: `**Matter before the court**\n> ${cutp(s.catalyst.headline, 300)}${s.catalyst.url ? `\n[source](${s.catalyst.url})` : ""}`,
     color: COLORS.cyan,
     fields: docket,
   });
@@ -582,7 +601,7 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
     const risk = b.entry_low - b.stop;
     embeds.push({
       title: `🐂 Opening statement — Bull Advocate`,
-      description: cut(b.thesis, 700),
+      description: `*The Bull Advocate (a model) argues:*\n${cutp(b.thesis, 680)}`,
       color: COLORS.green,
       fields: [
         {
@@ -607,7 +626,7 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
       title: `🐻 Cross-examination — Bear Prosecutor · lethality ${(s.bear.lethality * 100).toFixed(0)}%`,
       description: s.bear.fatal_flaws
         .slice(0, 4)
-        .map((f, i) => `**${i + 1}.** ${cut(f, 260)}`)
+        .map((f, i) => `**${i + 1}.** ${cutp(f, 260)}`)
         .join("\n"),
       color: COLORS.red,
       fields: [
@@ -616,7 +635,7 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
           value: cut(
             s.bear.kill_criteria
               .slice(0, 3)
-              .map((k) => `• ${k}`)
+              .map((k) => `• ${clean(k)}`)
               .join("\n"),
             600,
           ),
@@ -629,7 +648,7 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
     const r = s.rebuttal;
     embeds.push({
       title: `🐂 Rebuttal — ${r.still_long ? "the bull stands firm" : "the bull withdraws"}`,
-      description: cut(r.rebuttal, 900),
+      description: `*The Bull Advocate (a model) answers:*\n${cutp(r.rebuttal, 880)}`,
       color: r.still_long ? COLORS.green : COLORS.orange,
       fields: [
         ...(r.concessions.length
@@ -639,7 +658,7 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
                 value: cut(
                   r.concessions
                     .slice(0, 3)
-                    .map((c) => `• ${c}`)
+                    .map((c) => `• ${clean(c)}`)
                     .join("\n"),
                   500,
                 ),
@@ -662,7 +681,10 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
       color: COLORS.yellow,
       fields: s.panel.map((p) => ({
         name: `${p.emoji} ${p.title} — ${STANCE[p.stance] ?? p.stance} (${(p.confidence * 100).toFixed(0)}%)`,
-        value: cut(`*${p.headline}*\n${p.points.map((x) => `• ${x}`).join("\n")}\n— ${model(p.by)}`, 1000),
+        value: cut(
+          `*${clean(p.headline)}*\n${p.points.map((x) => `• ${clean(x)}`).join("\n")}\n— ${model(p.by)}`,
+          1000,
+        ),
       })),
     });
   }

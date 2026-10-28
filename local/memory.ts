@@ -18,7 +18,7 @@ import { ScarRuleSchema, type ScarTissue, ScarTissueSchema } from "../src/risk/s
  * Memory packs (ADR-068; operator ask "memory uploading", dossier MLP3-010 / MLP4-023). An agent's learned memory —
  * scar rules (vetoes earned from ≥ 3 postmortems) and beliefs — exported as a signed pack, shared on the hub, and
  * imported by another agent. Importing only stages a proposal; nothing changes how the agent trades until the
- * operator runs `cortex memory apply` (constitution U8: self-modification needs the operator). Scar rules can only
+ * operator runs `savant memory apply` (constitution U8: self-modification needs the operator). Scar rules can only
  * remove trades, so an applied pack can make an agent more careful, never more aggressive.
  */
 

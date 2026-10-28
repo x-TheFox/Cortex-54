@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { LocalConfig } from "./config.ts";
 
 /**
- * `cortex deploy` (ADR-065): put the whole CORTEX-54 stack into the user's OWN Cloudflare account with one command:
+ * `savant deploy` (ADR-065): put the whole Savant stack into the user's OWN Cloudflare account with one command:
  * D1 journals, the kill-flag KV, the brain worker (+ LAB brain), the sentinel watchdog, migrations and secrets. Needs
  * CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_TOKEN in the local config (token permissions: Workers Scripts, D1, KV,
  * Workers AI: edit). Idempotent: reruns reuse what exists. Research jobs then run on the user's desktop runner
@@ -149,7 +149,7 @@ export function deploy(o: DeployOptions): DeployResult {
   const k = o.cfg.keys;
   if (!k.CLOUDFLARE_ACCOUNT_ID || !k.CLOUDFLARE_API_TOKEN)
     throw new Error(
-      "cloud deploy needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (cortex setup --set …)",
+      "cloud deploy needs CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN (savant setup --set …)",
     );
   if (!/^[a-z][a-z0-9-]{1,40}$/.test(o.name))
     throw new Error("name must be lowercase letters, digits and dashes");
@@ -312,7 +312,7 @@ export async function verifyDeploy(o: {
       "--name",
       o.name,
       "-m",
-      `cortex deploy: health check failed (${last})`,
+      `savant deploy: health check failed (${last})`,
       "-y",
     ],
     {

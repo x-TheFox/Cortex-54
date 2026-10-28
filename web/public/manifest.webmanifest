@@ -1,0 +1,14 @@
+{
+  "name": "Savant",
+  "short_name": "Savant",
+  "description": "Cockpit for the CORTEX-54 trading agent",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#15191c",
+  "theme_color": "#15191c",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

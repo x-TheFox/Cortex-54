@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type EndpointView,
   type ModelList,
@@ -97,7 +97,7 @@ function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving:
       <b>Live account (real money)</b>
       {!open && !connected ? (
         <p className="cost">
-          Optional. Connect your real Alpaca account when you're ready. It joins switched off: CORTEX trades
+          Optional. Connect your real Alpaca account when you're ready. It joins switched off: Savant trades
           it only after you turn it on yourself.{" "}
           <button type="button" className="chip" onClick={() => setOpen(true)}>
             SET UP LIVE
@@ -120,7 +120,7 @@ function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving:
             <p className="cost">
               In Alpaca, switch to your <b>live</b> account and generate API keys (Home → API keys). They
               start switched off here: nothing is ever bought with real money until you ratify it in the
-              cockpit. Use a cash account: CORTEX never borrows, shorts or uses margin.{" "}
+              cockpit. Use a cash account: Savant never borrows, shorts or uses margin.{" "}
               <Ext href="https://app.alpaca.markets/brokerage/dashboard/overview">Open Alpaca →</Ext>
             </p>
           )}
@@ -173,7 +173,7 @@ function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving:
                 onClick={async () => {
                   if (
                     confirm(
-                      "Disconnect the live account? CORTEX stops managing it; open positions stay at Alpaca.",
+                      "Disconnect the live account? Savant stops managing it; open positions stay at Alpaca.",
                     )
                   )
                     setR(await save({ keys: { ALPACA_LIVE_KEY_ID: null, ALPACA_LIVE_SECRET: null } }));
@@ -185,7 +185,7 @@ function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving:
           </div>
           {margin && (
             <div className="set-actions">
-              <span className="cost">This live account allows margin, so CORTEX holds it.</span>
+              <span className="cost">This live account allows margin, so Savant holds it.</span>
               <button
                 type="button"
                 className="chip go"
@@ -225,7 +225,7 @@ export function TradingSection({ s, save, saving }: { s: SettingsView; save: Sav
         <div className="alert-opt danger-zone">
           <b>This paper account allows borrowing (margin)</b>
           <p className="cost">
-            Alpaca's paper accounts start as margin accounts. CORTEX only trades with its own cash, so it
+            Alpaca's paper accounts start as margin accounts. Savant only trades with its own cash, so it
             holds new trades until borrowing is switched off. This changes one setting at Alpaca (borrowing
             capped at 1x, shorting off); your money and positions stay as they are.
           </p>
@@ -469,7 +469,7 @@ function AddSource({ s, save, done }: { s: SettingsView; save: Save; done: () =>
       )}
       {builtin ? (
         <p className="cost">
-          Recognized: a {preset?.name} key. It uses CORTEX's tested models for this provider:{" "}
+          Recognized: a {preset?.name} key. It uses Savant's tested models for this provider:{" "}
           {(s.freeChains?.[preset?.id ?? ""] ?? []).join(", ") || "its verified models"}.
         </p>
       ) : (
@@ -908,10 +908,10 @@ export function ModelsSection({ s, save, saving }: { s: SettingsView; save: Save
   const single = (s.pool?.models ?? 0) === 1;
   return (
     <section className="set-sec">
-      <h4>AI models</h4>
+      <h4>The court's models</h4>
       <p className="cost">
         The court argues every trade with at least two different models: one makes the case, another attacks
-        it. Add as many as you like, free or paid: CORTEX rotates through all of them (so free limits last
+        it. Add as many as you like, free or paid: Savant rotates through all of them (so free limits last
         longer) and falls back to the next when one fails. <b>Two or more models</b> from different companies
         work best.
       </p>
@@ -1162,7 +1162,7 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
   };
   return (
     <section className="set-sec">
-      <h4>Alerts</h4>
+      <h4>Alerts on your phone or Discord</h4>
       <p className="cost">
         Everything always appears in the FEED. These send it to your phone or Discord too.
       </p>
@@ -1202,7 +1202,7 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
         <b>Discord (optional)</b>
         {s.discord?.connected ? (
           <p className="cost">
-            Connected: {s.discord.channels.length} channels in a private CORTEX-54 category.{" "}
+            Connected: {s.discord.channels.length} channels in a private Savant category.{" "}
             <button
               type="button"
               className="chip"
@@ -1218,7 +1218,7 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
             <p className="cost">
               Create a bot at{" "}
               <Ext href="https://discord.com/developers/applications">discord.com/developers</Ext> (New
-              Application → Bot → Reset Token), paste the token, and press Connect. CORTEX creates its own
+              Application → Bot → Reset Token), paste the token, and press Connect. Savant creates its own
               private channels.
             </p>
             <div className="set-grid">
@@ -1342,8 +1342,9 @@ export function PhoneSection({ s, save, saving }: { s: SettingsView; save: Save;
       <h4>Use it from your phone</h4>
       <p className="cost">
         Turn this on to open the cockpit on a phone connected to the same Wi-Fi. It's plain HTTP inside your
-        own network, so only turn it on at home or on a network you trust. A phone can watch and use the
-        controls (pause, kill switch); settings and keys can only be changed on this computer.
+        own network, so only turn it on at home or on a network you trust. A phone can watch and pause at any
+        time; closing positions, resuming or changing autonomy from a phone needs a fresh scan of the code
+        below. Settings and keys can only be changed on this computer.
       </p>
       <label className="toggle">
         <input
@@ -1385,6 +1386,235 @@ export function PhoneSection({ s, save, saving }: { s: SettingsView; save: Save;
   );
 }
 
+// ------------------------------------------------------------------ licence (ADR-086)
+
+/**
+ * ADR-091: what the weekly Governor would change. Nothing applies until the user approves it here (constitution U8).
+ * Proposals can only make the robot more careful: a calibration map only lowers confidence, a rule only vetoes.
+ */
+export function ProposalsSection({ s, reload }: { s: SettingsView; reload: () => void }) {
+  const [r, setR] = useState<Result | null>(null);
+  const [busy, setBusy] = useState(false);
+  const p = s.proposals;
+  if (!p || (!p.calibration && p.scars.length === 0)) return null;
+  const decide = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    const res = await post<Result>("/api/settings/proposal", body);
+    setBusy(false);
+    setR(res);
+    if (res.ok) {
+      await waitForBrain();
+      reload();
+    }
+  };
+  return (
+    <section className="set-sec">
+      <h4>Waiting for you</h4>
+      <p className="cost">
+        Each week the Governor reviews how the robot's calls turned out and suggests changes. They only ever
+        make it more careful, and nothing changes until you approve it.
+      </p>
+      {p.calibration && (
+        <div className="set-grid">
+          <p className="note-line">
+            Confidence calibration from {p.calibration.n} resolved trades
+            {p.calibration.brierRaw !== null && p.calibration.brierCalibrated !== null
+              ? ` (forecast error ${p.calibration.brierRaw} → ${p.calibration.brierCalibrated}, lower is better)`
+              : ""}
+            . The court's win probabilities are scaled to match how often it was actually right.
+          </p>
+          <div className="set-actions">
+            <button
+              type="button"
+              className="chip go"
+              disabled={busy}
+              onClick={() => void decide({ which: "calibration", approve: true })}
+            >
+              APPROVE
+            </button>
+            <button
+              type="button"
+              className="chip"
+              disabled={busy}
+              onClick={() => void decide({ which: "calibration", approve: false })}
+            >
+              DISMISS
+            </button>
+          </div>
+        </div>
+      )}
+      {p.scars.map((x) => (
+        <div className="set-grid" key={x.id}>
+          <p className="note-line">
+            <b>{x.id}</b> · a new veto rule learned from losing trades: {x.rule}
+          </p>
+          <div className="set-actions">
+            <button
+              type="button"
+              className="chip go"
+              disabled={busy}
+              onClick={() => void decide({ which: "scar", id: x.id, approve: true })}
+            >
+              APPROVE
+            </button>
+            <button
+              type="button"
+              className="chip"
+              disabled={busy}
+              onClick={() => void decide({ which: "scar", id: x.id, approve: false })}
+            >
+              DISMISS
+            </button>
+          </div>
+        </div>
+      ))}
+      <Note r={r} />
+    </section>
+  );
+}
+
+/**
+ * The licence (ADR-086/093). Signing in with the Savant account is the normal path: the browser opens getsavant.pro,
+ * the user approves, and this computer gets its licence. The key and licence-file paths stay for headless installs.
+ */
+export function LicenseSection({ s, reload }: { s: SettingsView; reload: () => void }) {
+  const [key, setKey] = useState("");
+  const [r, setR] = useState<Result | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [waiting, setWaiting] = useState<{ code: string; url: string } | null>(null);
+  const lic = s.license;
+  useEffect(() => {
+    if (!waiting) return;
+    let alive = true;
+    const t = setInterval(async () => {
+      const res = await post<Result & { status?: string }>("/api/settings/license", { poll: true });
+      if (!alive) return;
+      if (res.status === "pending") return;
+      clearInterval(t);
+      setWaiting(null);
+      setR(res);
+      if (res.ok) {
+        await waitForBrain();
+        reload();
+      }
+    }, 4000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [waiting, reload]);
+  if (!lic?.required) return null; // builds without a publisher key (source checkouts) don't sell licences
+  const call = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    const res = await post<Result>("/api/settings/license", body);
+    setBusy(false);
+    setR(res);
+    if (res.ok) {
+      await waitForBrain();
+      reload();
+    }
+  };
+  const signIn = async () => {
+    setBusy(true);
+    const res = await post<Result & { url?: string; code?: string }>("/api/settings/license", {
+      signin: true,
+    });
+    setBusy(false);
+    setR(res);
+    if (res.ok && res.url && res.code) {
+      setWaiting({ code: res.code, url: res.url });
+      window.open(res.url, "_blank", "noopener"); // the desktop shell opens it in the system browser
+    }
+  };
+  return (
+    <section className="set-sec">
+      <h4>This computer</h4>
+      <p className={`note-line ${lic.ok ? "green" : "amber"}`} role="status">
+        {lic.ok
+          ? `Licensed${lic.license.plan === "trial" ? " (free trial)" : ` · ${lic.license.plan}`}${lic.daysLeft === null ? "" : ` · renews automatically (good offline for ${lic.daysLeft} more days)`}. Paper and live trading are on.`
+          : `${lic.reason} Demo mode works without a licence; paper and live trading hold new trades (open positions keep their stops).`}
+      </p>
+      {waiting ? (
+        <div className="alert-opt">
+          <b>Finish in your browser</b>
+          <p className="cost">
+            Sign in on getsavant.pro with the Whop account you bought Savant with, and check the code matches:
+          </p>
+          <p className="big-code">{waiting.code}</p>
+          <p className="cost">
+            Browser didn't open? <Ext href={waiting.url}>Open the sign-in page →</Ext>
+          </p>
+        </div>
+      ) : (
+        <div className="set-actions">
+          <button type="button" className="chip go" disabled={busy} onClick={() => void signIn()}>
+            {busy ? "OPENING…" : lic.ok ? "SIGN IN AGAIN" : "SIGN IN WITH YOUR SAVANT ACCOUNT"}
+          </button>
+          <Ext href="https://getsavant.pro/account/">Your account (plan, computers, billing) →</Ext>
+        </div>
+      )}
+      {!lic.ok && !waiting && (
+        <p className="cost">
+          No plan yet? Every plan starts with a 7-day free trial.{" "}
+          <Ext href="https://getsavant.pro/#pricing">See plans →</Ext>
+        </p>
+      )}
+      <details className="advanced">
+        <summary className="label dim">USE A LICENCE KEY INSTEAD (COMPUTERS WITHOUT A BROWSER)</summary>
+        <p className="cost">Your key is on your account page at getsavant.pro/account.</p>
+        <div className="set-grid">
+          <Secret
+            label="LICENCE KEY"
+            hint={s.licenseKey?.hint}
+            value={key}
+            onChange={setKey}
+            placeholder="paste your key"
+          />
+        </div>
+        <div className="set-actions">
+          <button
+            type="button"
+            className="chip go"
+            disabled={busy || key.length < 8}
+            onClick={() => void call({ key })}
+          >
+            {busy ? "CHECKING…" : "ACTIVATE ON THIS COMPUTER"}
+          </button>
+          {s.licenseKey?.set && (
+            <button
+              type="button"
+              className="chip"
+              disabled={busy}
+              onClick={() => {
+                if (
+                  confirm(
+                    "Release the licence from this computer? Paper and live trading hold until you sign in again.",
+                  )
+                )
+                  void call({ release: true });
+              }}
+            >
+              RELEASE FROM THIS COMPUTER
+            </button>
+          )}
+        </div>
+        <p className="label dim">OR A LICENCE FILE</p>
+        <input
+          className="field plain"
+          type="file"
+          accept=".json,application/json"
+          aria-label="Licence file"
+          onChange={async (e) => {
+            const text = await e.target.files?.[0]?.text();
+            if (text) void call({ file: text });
+          }}
+        />
+      </details>
+      <Note r={r} />
+    </section>
+  );
+}
+
 // ------------------------------------------------------------------ keys, backups, reset (ADR-076)
 
 function download(name: string, text: string, type = "application/octet-stream") {
@@ -1405,30 +1635,9 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
   const [r, setR] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
   const store = s.secretStore;
-  const lic = s.license;
   return (
     <section className="set-sec">
-      <h4>Keys, backups and moving computers</h4>
-      {lic?.required && (
-        <div className="alert-opt">
-          <b>Licence</b>
-          <p className={`note-line ${lic.ok ? "green" : "amber"}`}>
-            {lic.ok
-              ? `Licensed to ${lic.license.licensee} (${lic.license.plan})${lic.daysLeft === null ? "" : ` · ${lic.daysLeft} days left`}.`
-              : `${lic.reason} Demo mode works without one; paper trading holds new entries (open positions keep their stops).`}
-          </p>
-          <input
-            className="field plain"
-            type="file"
-            accept=".json,application/json"
-            aria-label="Licence file"
-            onChange={async (e) => {
-              const text = await e.target.files?.[0]?.text();
-              if (text) setR(await post<Result>("/api/settings/license", { file: text }));
-            }}
-          />
-        </div>
-      )}
+      <h4>Keys, backups and moving</h4>
       <div className="alert-opt">
         <b>Where your keys are kept</b>
         {store?.backend ? (
@@ -1441,10 +1650,10 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
                 setR(await save({ secret_store: e.target.checked ? "keychain" : "file" }))
               }
             />
-            In {store.backend} (recommended) instead of CORTEX's settings file
+            In {store.backend} (recommended) instead of Savant's settings file
           </label>
         ) : (
-          <p className="cost">In CORTEX's settings file, readable only by your user account.</p>
+          <p className="cost">In Savant's settings file, readable only by your user account.</p>
         )}
       </div>
       <div className="alert-opt">
@@ -1483,7 +1692,7 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
       <div className="alert-opt">
         <b>Restore</b>
         <p className="cost">
-          Brings a backup from another computer here. This computer's current journal is replaced. Stop CORTEX
+          Brings a backup from another computer here. This computer's current journal is replaced. Stop Savant
           on the old computer first if it trades the same paper account.
         </p>
         <input
@@ -1501,7 +1710,7 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
             className="chip"
             disabled={busy || !file || rpass.length < 8}
             onClick={async () => {
-              if (!confirm("Replace this computer's CORTEX data with the backup?")) return;
+              if (!confirm("Replace this computer's Savant data with the backup?")) return;
               setBusy(true);
               const res = await post<Result>("/api/settings/restore", { file, passphrase: rpass });
               if (res.ok) await waitForBrain(30_000);
@@ -1516,7 +1725,7 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
       <div className="alert-opt danger-zone">
         <b>Reset this computer</b>
         <p className="cost">
-          Stops CORTEX here and deletes its settings, keys, memory and journal from this computer. Your broker
+          Stops Savant here and deletes its settings, keys, memory and journal from this computer. Your broker
           account and its positions are not touched. Save a backup first if you may want them back.
         </p>
         <label className="set-field">
@@ -1575,8 +1784,8 @@ export function HealthSection() {
   };
   return (
     <section className="set-sec">
-      <h4>Health</h4>
-      <p className="cost">Checks everything the robot needs, in plain words. Same as `cortex doctor`.</p>
+      <h4>Checks</h4>
+      <p className="cost">Checks everything the robot needs, in plain words. Same as `savant doctor`.</p>
       <div className="set-actions">
         <button type="button" className="chip go" disabled={busy} onClick={() => void run()}>
           {busy ? "CHECKING…" : "RUN CHECKS"}
@@ -1605,6 +1814,77 @@ export function HealthSection() {
 
 // ------------------------------------------------------------------ page
 
+type Tone = "green" | "amber" | "red" | "cyan";
+interface Tab {
+  id: string;
+  label: string;
+  blurb: string;
+  /** a dot (and a word) beside the tab, only when something wants a look */
+  status?: { tone: Tone; text: string } | null;
+}
+
+const TAB_KEY = "savant.settings.tab";
+
+function proposalCount(s: SettingsView): number {
+  const p = s.proposals;
+  return p ? (p.calibration ? 1 : 0) + p.scars.length : 0;
+}
+
+function tabsFor(s: SettingsView): Tab[] {
+  const lic = s.license;
+  const models = s.llm?.endpoints.length ?? 0;
+  const n = proposalCount(s);
+  const tabs: (Tab | null)[] = [
+    lic?.required
+      ? {
+          id: "account",
+          label: "Licence",
+          blurb: "Your Savant account on this computer.",
+          status: lic.ok ? null : { tone: "amber", text: "Sign in" },
+        }
+      : null,
+    {
+      id: "trading",
+      label: "Trading",
+      blurb: "Which broker accounts the robot trades.",
+      status: s.mode === "demo" ? { tone: "cyan", text: "Demo" } : null,
+    },
+    {
+      id: "ai",
+      label: "AI models",
+      blurb: "The models that argue each trade, news triage and how many hearings a day.",
+      status:
+        models === 0
+          ? { tone: "red", text: "None" }
+          : models === 1
+            ? { tone: "amber", text: "Add one" }
+            : null,
+    },
+    {
+      id: "governor",
+      label: "Governor",
+      blurb: "Changes the robot proposes to itself. They only ever make it more careful.",
+      status: n ? { tone: "cyan", text: String(n) } : null,
+    },
+    {
+      id: "alerts",
+      label: "Alerts and phone",
+      blurb: "Where the robot reaches you, and opening the cockpit from your phone.",
+    },
+    { id: "data", label: "Keys and backups", blurb: "Where keys live, backups, moving computers, reset." },
+    { id: "health", label: "Health", blurb: "Check everything works, get a support file, run setup again." },
+  ];
+  return tabs.filter((t): t is Tab => t !== null);
+}
+
+function readTab(): string | null {
+  try {
+    return localStorage.getItem(TAB_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export function SettingsPage({
   s,
   reload,
@@ -1615,26 +1895,87 @@ export function SettingsPage({
   restartOnboarding: () => void;
 }) {
   const { save, saving } = useSaver(reload);
+  const [tab, setTab] = useState<string | null>(readTab);
   if (!s) return <p className="empty">Loading settings…</p>;
   if (s.managed === "cloud") return <p className="empty">{s.message}</p>;
+  const tabs = tabsFor(s);
+  const cur = tabs.find((t) => t.id === tab) ?? tabs[0];
+  if (!cur) return null;
+  const pick = (id: string) => {
+    setTab(id);
+    try {
+      localStorage.setItem(TAB_KEY, id);
+    } catch {
+      /* storage unavailable: the tab just isn't remembered */
+    }
+  };
+  const props = { s, save, saving };
   return (
     <div className="settings">
-      {saving && <p className="note-line cyan">Applying…</p>}
-      <TradingSection s={s} save={save} saving={saving} />
-      <ModelsSection s={s} save={save} saving={saving} />
-      <ClefSection s={s} save={save} saving={saving} />
-      <CourtSection s={s} save={save} saving={saving} />
-      <AlertsSection s={s} save={save} saving={saving} />
-      <PhoneSection s={s} save={save} saving={saving} />
-      <DataSection s={s} save={save} saving={saving} />
-      <HealthSection />
-      <section className="set-sec">
-        <h4>Setup</h4>
-        <p className="cost">Run the guided setup again.</p>
-        <button type="button" className="chip" onClick={restartOnboarding}>
-          OPEN SETUP
-        </button>
-      </section>
+      <nav className="set-nav" aria-label="Settings">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className="set-tab"
+            aria-current={t.id === cur.id ? "page" : undefined}
+            onClick={() => pick(t.id)}
+          >
+            <span>{t.label}</span>
+            {t.status && <span className={`set-badge ${t.status.tone}`}>{t.status.text}</span>}
+          </button>
+        ))}
+      </nav>
+      <div className="set-body">
+        <header className="set-head">
+          <h3>{cur.label}</h3>
+          <p>{cur.blurb}</p>
+          {saving && <span className="note-line cyan">Applying…</span>}
+        </header>
+        {cur.id === "account" && <LicenseSection s={s} reload={reload} />}
+        {cur.id === "trading" && <TradingSection {...props} />}
+        {cur.id === "ai" && (
+          <>
+            <ModelsSection {...props} />
+            <ClefSection {...props} />
+            <CourtSection {...props} />
+          </>
+        )}
+        {cur.id === "governor" &&
+          (proposalCount(s) ? (
+            <ProposalsSection s={s} reload={reload} />
+          ) : (
+            <section className="set-sec">
+              <h4>Nothing to review</h4>
+              <p className="cost">
+                Once a week the Governor grades the robot's own record. When it finds its confidence was off,
+                or a pattern that keeps losing, it proposes a fix here for you to approve or dismiss.
+                Proposals can only make the robot more careful; nothing changes until you approve.
+              </p>
+            </section>
+          ))}
+        {cur.id === "alerts" && (
+          <>
+            <AlertsSection {...props} />
+            <PhoneSection {...props} />
+          </>
+        )}
+        {cur.id === "data" && <DataSection {...props} />}
+        {cur.id === "health" && (
+          <>
+            <HealthSection />
+            <section className="set-sec">
+              <h4>Setup</h4>
+              <p className="cost">Walk through the guided setup again. Nothing is lost.</p>
+              <div className="set-actions">
+                <button type="button" className="chip" onClick={restartOnboarding}>
+                  OPEN SETUP
+                </button>
+              </div>
+            </section>
+          </>
+        )}
+      </div>
     </div>
   );
 }

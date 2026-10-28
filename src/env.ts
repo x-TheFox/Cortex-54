@@ -2,6 +2,8 @@ import type { AgentCortexDO, LabCortexDO } from "./cortex/AgentCortexDO.ts";
 
 /** Bindings and secrets for the `cortex` worker. Keep in sync with wrangler.jsonc and .dev.vars.example. */
 export interface Env {
+  /** Audit F-A3-07: per-IP rate limiter (wrangler `ratelimits`); absent in tests and local dev. */
+  RL?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   CORTEX: DurableObjectNamespace<AgentCortexDO>;
   /** ADR-045: the LAB brain (forward-tests strategies on its own paper account) and its journal. */
   CORTEX_LAB?: DurableObjectNamespace<LabCortexDO>;
@@ -33,13 +35,13 @@ export interface Env {
   GROQ_API_KEY?: string;
   NVIDIA_API_KEY?: string;
   OPENROUTER_API_KEY?: string;
-  /** ADR-072 model pool: the user's own endpoints + preferences as JSON (PoolConfigSchema). Set by `cortex deploy`. */
+  /** ADR-072 model pool: the user's own endpoints + preferences as JSON (PoolConfigSchema). Set by `savant deploy`. */
   LLM_POOL?: string;
   /** "owner/name" of this repo; the brain dispatches its batch workflows there (ADR-032). */
   GITHUB_REPO?: string;
   /** Fine-grained token, this repo only, Actions: read and write. Absent → GitHub's own crons only. */
   GH_DISPATCH_TOKEN?: string;
-  /** ADR-065: "queue" = research jobs wait for a linked CORTEX desktop runner instead of GitHub Actions. */
+  /** ADR-065: "queue" = research jobs wait for a linked Savant desktop runner instead of GitHub Actions. */
   RUNNER_MODE?: string;
   /** HMAC key for web-terminal login links and session cookies (ADR-034). */
   WEB_SESSION_SECRET?: string;

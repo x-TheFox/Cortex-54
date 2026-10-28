@@ -1,6 +1,6 @@
 /**
  * Compose the Tauri updater manifest (latest.json) from each platform's `updater-<platform>.json` (ADR-077). The app
- * reads it from the latest GitHub release and installs only bundles whose signature matches the key built into it.
+ * reads it from getsavant.pro/updates/latest.json (the latest release) and installs only bundles whose signature matches the key built into it.
  *
  *   node scripts/updater-manifest.ts <dir> <version> <notes.md> > latest.json
  */
@@ -9,7 +9,9 @@ import { join } from "node:path";
 
 const [dir, version, notesFile] = process.argv.slice(2);
 if (!dir || !version) throw new Error("usage: <dir> <version> [notes.md]");
-const repo = process.env.GITHUB_REPOSITORY ?? "x-TheFox/Cortex-54";
+// Bundles are linked through the product domain (vercel.json sends /download/* to the savant-downloads Worker, ADR-094), so moving
+// where releases are hosted only changes the redirect, never an installed app.
+const base = (process.env.SAVANT_DOWNLOAD_BASE ?? "https://getsavant.pro").replace(/\/$/, "");
 const platforms: Record<string, { signature: string; url: string }> = {};
 for (const f of readdirSync(dir).filter((x) => /^updater-.+\.json$/.test(x))) {
   const u = JSON.parse(readFileSync(join(dir, f), "utf8")) as {
@@ -19,7 +21,7 @@ for (const f of readdirSync(dir).filter((x) => /^updater-.+\.json$/.test(x))) {
   };
   platforms[u.platform] = {
     signature: u.signature,
-    url: `https://github.com/${repo}/releases/download/v${version}/${u.name}`,
+    url: `${base}/download/v${version}/${u.name}`,
   };
 }
 if (!Object.keys(platforms).length)

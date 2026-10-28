@@ -58,7 +58,7 @@ ${argv.map((a) => `    <string>${xml(a)}</string>`).join("\n")}
     const file = join(home, ".config", "systemd", "user", "cortex54.service");
     const q = (a: string) => (/[\s"']/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
     const content = `[Unit]
-Description=CORTEX-54 trading agent (local mode)
+Description=Savant trading agent (local mode)
 After=network-online.target
 
 [Service]
@@ -99,7 +99,8 @@ WantedBy=default.target
           "/TN",
           "CORTEX54",
           "/TR",
-          `cmd /c set CORTEX_HOME=${env.CORTEX_HOME}&& ${cmd}`,
+          // audit F-A6-05: `set "VAR=value"` keeps a home path with spaces (C:\Users\Jane Doe\…) whole
+          `cmd /c set "CORTEX_HOME=${env.CORTEX_HOME}" && ${cmd}`,
         ],
       ],
       disable: [["schtasks", "/Delete", "/F", "/TN", "CORTEX54"]],

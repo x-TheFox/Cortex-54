@@ -2,7 +2,7 @@ import type { ChannelKey } from "./notifier.ts";
 
 /**
  * Discord auto-setup (ADR-071). Discord is an optional add-on to the app: the user pastes a bot token, and this
- * creates (or reuses) a private CORTEX-54 category with one channel per feed, plus an alarm webhook. Idempotent: safe
+ * creates (or reuses) a private Savant category with one channel per feed, plus an alarm webhook. Idempotent: safe
  * to re-run. When the bot is not in any server yet, it returns the invite link instead. Slash commands are registered
  * only when asked (they need a public interactions URL, which only the cloud worker has).
  */
@@ -156,14 +156,14 @@ export async function discordSetup(o: {
   type Channel = { id: string; name: string; type: number; parent_id?: string | null };
   const existing = await api<Channel[]>("GET", `/guilds/${guild.id}/channels`);
   const created: string[] = [];
-  let category = existing.find((c) => c.type === 4 && c.name.toLowerCase() === "cortex-54");
+  let category = existing.find((c) => c.type === 4 && ["savant", "cortex-54"].includes(c.name.toLowerCase())); // pre-rebrand servers keep their category
   if (!category) {
     category = await api<Channel>("POST", `/guilds/${guild.id}/channels`, {
-      name: "CORTEX-54",
+      name: "Savant",
       type: 4,
       permission_overwrites: overwrites,
     });
-    created.push("CORTEX-54");
+    created.push("Savant");
   }
   const channels: Partial<Record<ChannelKey, string>> = {};
   for (const ch of CHANNELS) {
@@ -186,8 +186,8 @@ export async function discordSetup(o: {
       "GET",
       `/channels/${channels.alarms}/webhooks`,
     );
-    let hook = hooks.find((h) => h.name === "CORTEX Sentinel" && h.token);
-    if (!hook) hook = await api("POST", `/channels/${channels.alarms}/webhooks`, { name: "CORTEX Sentinel" });
+    let hook = hooks.find((h) => (h.name === "Savant Sentinel" || h.name === "CORTEX Sentinel") && h.token);
+    if (!hook) hook = await api("POST", `/channels/${channels.alarms}/webhooks`, { name: "Savant Sentinel" });
     if (hook?.token) webhookUrl = `https://discord.com/api/webhooks/${hook.id}/${hook.token}`;
   }
   let commands: number | null = null;

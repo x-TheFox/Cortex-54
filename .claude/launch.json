@@ -6,6 +6,21 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["web:dev", "--port", "5174", "--strictPort"],
       "port": 5174
+    },
+    {
+      "name": "web-local",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["web:dev", "--port", "5175", "--strictPort"],
+      "env": {
+        "CORTEX_API": "http://127.0.0.1:8755"
+      },
+      "port": 5175
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["landing:preview"],
+      "port": 5176
     }
   ]
 }

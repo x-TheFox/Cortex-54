@@ -1,0 +1,9 @@
+Savant (including the Cortex agent)
+Copyright (c) 2026 the Savant publisher. All rights reserved.
+
+This software is proprietary. It is licensed, not sold, under the Savant End-User Licence Agreement
+(docs/legal/eula.md, shipped with the app as EULA) and the Terms of Service (docs/legal/terms.md). No licence or
+other right is granted by publishing this source, except where a file states otherwise.
+
+Third-party components keep their own licences; see NOTICE.md and THIRD_PARTY_NOTICES.md (generated at build time
+and shipped inside every installer).

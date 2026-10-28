@@ -1044,7 +1044,7 @@ describe("court end-to-end (Phase 3)", () => {
       n: 6,
     });
     const card = t.notifier.sent.find(
-      (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ CORTEX COURT"),
+      (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ Savant COURT"),
     );
     const embeds = card?.msg.embeds ?? [];
     const titles = embeds.map((e) => e.title ?? "");
@@ -1230,7 +1230,7 @@ describe("court end-to-end (Phase 3)", () => {
     expect(r3.courtContracts).toBe(1);
     expect(users[0]).toContain("res_1");
     expect(users[0]).toContain("Spot bitcoin ETFs took in $1.1B");
-    const card = t.notifier.sent.find((m) => m.msg.embeds?.[0]?.title?.startsWith("⚖️ CORTEX COURT"));
+    const card = t.notifier.sent.find((m) => m.msg.embeds?.[0]?.title?.startsWith("⚖️ Savant COURT"));
     const brief = card?.msg.embeds?.[1];
     expect(brief?.title).toBe("📚 Research desk briefing — 1 findings · 🟢 1 · 🔴 0");
     expect(JSON.stringify(brief)).toContain("[example.com](https://example.com/etf)");
@@ -2390,6 +2390,28 @@ describe("Audit fixes (2026-10-24)", () => {
     expect(j.quarantined()).toBe(1); // nothing new: an outage is not a poison pill
   });
 
+  it("outbox: quarantined rows are requeued for another try (audit F-A3-02); a replayed journal row is ignored", async () => {
+    const sql = memorySql();
+    for (const s of HOT_SCHEMA) sql.exec(s);
+    const j = new Journal(sql);
+    sql.exec("INSERT INTO d1_outbox (tbl, row_json, created_at) VALUES ('nope', '{}', ?)", T0);
+    const sqls: string[] = [];
+    const ok = {
+      prepare: (q: string) => {
+        sqls.push(q);
+        return { bind: () => ({}) };
+      },
+      batch: async (s: unknown[]) => s,
+    };
+    await j.flush(ok);
+    expect(j.quarantined()).toBe(1);
+    expect(j.requeueQuarantined(T0 + 1)).toBe(1);
+    expect(j.quarantined()).toBe(0);
+    expect(j.pending()).toBeGreaterThanOrEqual(2); // the row is back, plus the OUTBOX_REQUEUE journal row
+    await j.flush(ok);
+    expect(sqls.some((q) => q.startsWith("INSERT OR IGNORE INTO journal"))).toBe(true);
+  });
+
   it("compacts per-day keys and old contracts but keeps live state", async () => {
     const t = setup();
     const old = T0 - 30 * 86_400_000;
@@ -2477,5 +2499,108 @@ describe("any account size, account changes, margin, local metering (ADR-081)", 
     expect(s1.fractions).toEqual({}); // no Worker / DO / D1 quotas on the user's computer
     expect(s1.neurons.neurons_tier1).toBeCloseTo(0.5, 5);
     expect(ai.brain.budget.canSpendNeurons("neurons_tier1", 2000, T0)).toBe(false);
+  });
+});
+
+describe("exit-path liveness (audit BL-4, F-A1-01…04)", () => {
+  const pos = (t: ReturnType<typeof setup>, symbol: string, arena: string, qty: string, stop: string) =>
+    t.sql.exec(
+      `INSERT INTO positions (account, symbol, arena, contract_id, qty, avg_entry, stop_price, target_price, fee_rt,
+         opened_at, max_hold_until) VALUES ('PAPER', ?, ?, 'c-live1', ?, '100', ?, '130', 0.004, ?, ?)`,
+      symbol,
+      arena,
+      qty,
+      stop,
+      T0,
+      T0 + 72 * HOUR,
+    );
+
+  it("a failed broker sync still runs the synthetic stop from the last known position", async () => {
+    const t = setup();
+    t.paper.positionsBySymbol.set("SOL/USD", { qty: 0.1, avg: 100 });
+    pos(t, "SOL/USD", "CRYPTO", "0.1", "95");
+    await t.brain.pulse(); // a normal sync first
+    t.paper.account = async () => {
+      throw new Error("503 from the broker");
+    };
+    t.advance(60_000);
+    t.market.set("SOL/USD", 94, 94.02); // below the stop
+    const r = await t.brain.pulse();
+    expect(r.accounts.PAPER?.ok).toBe(false);
+    expect(t.paper.calls.some((c) => c === "submit:sell:limit:SOL/USD")).toBe(true);
+    expect(r.entries).toBe(0);
+  });
+
+  it("a whole-share equity stop rests GTC even while the market is closed; fractional waits for the session", async () => {
+    const t = setup();
+    t.paper.isOpen = false;
+    t.market.set("NVDA", 100, 100.05);
+    t.paper.positionsBySymbol.set("NVDA", { qty: 3, avg: 100 });
+    pos(t, "NVDA", "EQUITIES", "3", "92");
+    await t.brain.pulse();
+    const stop = [...t.paper.orders.values()].find((o) => o.symbol === "NVDA" && o.type === "stop");
+    expect(stop?.time_in_force).toBe("gtc");
+    const u = setup();
+    u.paper.isOpen = false;
+    u.market.set("NVDA", 100, 100.05);
+    u.paper.positionsBySymbol.set("NVDA", { qty: 0.25, avg: 100 });
+    pos(u, "NVDA", "EQUITIES", "0.25", "92");
+    await u.brain.pulse();
+    expect([...u.paper.orders.values()].some((o) => o.symbol === "NVDA" && o.type === "stop")).toBe(false);
+  });
+
+  it("a stop left over from a position closed outside the robot is cancelled", async () => {
+    const t = setup();
+    t.paper.positionsBySymbol.set("SOL/USD", { qty: 0.1, avg: 100 });
+    const o = await t.paper.submitOrder({
+      symbol: "SOL/USD",
+      side: "sell",
+      type: "stop_limit",
+      time_in_force: "gtc",
+      qty: "0.1",
+      stop_price: "90",
+      limit_price: "89",
+      client_order_id: "c54-P-orphan01-S-1",
+    });
+    t.sql.exec(
+      `INSERT INTO orders (client_order_id, account, contract_id, role, attempt, broker_order_id, state, side, symbol,
+         arena, order_type, tif, qty, created_at, updated_at) VALUES ('c54-P-orphan01-S-1','PAPER','orphan01','STOP',1,
+         ?, 'new','sell','SOL/USD','CRYPTO','stop_limit','gtc','0.1',?,?)`,
+      o.id,
+      T0,
+      T0,
+    );
+    t.paper.positionsBySymbol.delete("SOL/USD"); // sold by hand in the broker's app; no local position either
+    await t.brain.pulse();
+    expect(t.paper.calls).toContain(`cancel:${o.id}`);
+  });
+
+  it("an equity exit that rests unfilled is cancelled after N pulses so it can be re-priced", async () => {
+    const t = setup();
+    t.market.set("NVDA", 100, 100.05);
+    t.paper.positionsBySymbol.set("NVDA", { qty: 3, avg: 100 });
+    pos(t, "NVDA", "EQUITIES", "3", "92");
+    t.sql.exec("UPDATE positions SET state = 'EXITING', exit_reason = 'TARGET' WHERE symbol = 'NVDA'");
+    const o = await t.paper.submitOrder({
+      symbol: "NVDA",
+      side: "sell",
+      type: "limit",
+      time_in_force: "day",
+      qty: "3",
+      limit_price: "120",
+      client_order_id: "c54-P-clive001-X-1",
+    });
+    t.sql.exec(
+      `INSERT INTO orders (client_order_id, account, contract_id, role, attempt, broker_order_id, state, side, symbol,
+         arena, order_type, tif, qty, limit_price, pulses_unfilled, created_at, updated_at)
+         VALUES ('c54-P-clive001-X-1','PAPER','c-live1','EXIT',1,?,'new','sell','NVDA','EQUITIES','limit','day','3',
+         '120', ?, ?, ?)`,
+      o.id,
+      doctrine.execution.max_unfilled_pulses,
+      T0,
+      T0,
+    );
+    await t.brain.pulse();
+    expect(t.paper.calls).toContain(`cancel:${o.id}`);
   });
 });

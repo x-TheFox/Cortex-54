@@ -29,27 +29,29 @@ import {
   SCAR_TISSUE,
 } from "../src/generated/config.ts";
 import { hubFromEnv } from "../src/hub/client.ts";
-import { verifySignedBody } from "../src/lib/hmac.ts";
+import { TERMS_VERSION } from "../src/legal/version.ts";
+import { verifyRoute } from "../src/lib/hmac.ts";
 import type { AccountId } from "../src/lib/ids.ts";
 import { InboxNotifier, readFeed } from "../src/notify/inbox.ts";
 import { ntfyUrl, PushNotifier } from "../src/notify/push.ts";
 import { handleWeb, loginLink, type WebBrain, type WebSettings } from "../src/web/api.ts";
 import { pill, pillAuthorized, swiftbar } from "../src/web/pill.ts";
 import { snapshotDb } from "./backup.ts";
-import type { LocalConfig } from "./config.ts";
+import { type LocalConfig, loadConfig } from "./config.ts";
 import { runtimeChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
 import { entriesBlocked, readLicense } from "./license.ts";
 import { loadLocalScar, mergeScar } from "./memory.ts";
+import { loadLocalCalibration } from "./proposals.ts";
 import { SimBroker } from "./simbroker.ts";
 import { fileD1, fileSql, type LocalD1 } from "./store.ts";
 
 /**
- * cortexd: the whole CORTEX-54 brain on one machine (ADR-064). Same Brain, same doctrine and constitution, same
+ * cortexd: the whole Savant brain on one machine (ADR-064). Same Brain, same doctrine and constitution, same
  * journal schema; the Durable Object's alarm becomes a timer, D1 becomes a SQLite file, GitHub Actions become local
  * subprocesses, and the router becomes a small HTTP server bound to localhost. Two modes:
  *   demo  – a keyless simulated broker on live public crypto prices (nothing to sign up for);
- *   paper – the user's own Alpaca paper account (CORTEX needs it exclusively: don't share it with a cloud brain).
+ *   paper – the user's own Alpaca paper account (Savant needs it exclusively: don't share it with a cloud brain).
  * A live account can be connected too (ADR-083); it stays at Stop 0 until the user ratifies LIVE autonomy (U8).
  */
 
@@ -257,14 +259,16 @@ export class LocalCortex {
       d1: this.d1,
       // the local kill switch; on a licensed build, paper mode without a valid licence holds entries the same way
       // (exits and stops keep working: ADR-077)
+      // ADR-087: and until the current terms are accepted, no new entries on a real broker account either
       readKillFlag: async () =>
         existsSync(join(home, "KILLED")) ||
-        ((cfg.mode === "paper" || Boolean(liveKey)) && entriesBlocked(readLicense(home))),
+        ((cfg.mode === "paper" || Boolean(liveKey)) &&
+          (entriesBlocked(readLicense(home)) || loadConfig(home)?.terms?.version !== TERMS_VERSION)),
       now,
       clef: o.overrides?.clef !== undefined ? o.overrides.clef : clef,
       clairic,
       llm: this.router,
-      calibration: CALIBRATION,
+      calibration: loadLocalCalibration(home) ?? CALIBRATION, // ADR-091: a map the user approved in the app
       scar: mergeScar(SCAR_TISSUE, loadLocalScar(home)), // + memory packs the operator applied (ADR-068)
       dispatcher: cfg.research.enabled ? this.jobs : null,
       http: o.overrides?.http ?? (o.overrides?.market ? null : (u, i) => fetch(u, i)),
@@ -366,6 +370,8 @@ export class LocalCortex {
     const lic = readLicense(this.o.home);
     if (this.o.cfg.mode === "paper" && entriesBlocked(lic) && lic.required && !lic.ok)
       return `Licence: ${lic.reason} No new trades until it's fixed; open positions keep their stops.`;
+    if (this.o.cfg.mode === "paper" && loadConfig(this.o.home)?.terms?.version !== TERMS_VERSION)
+      return "Accept the terms (Settings) before Savant trades your account";
     if (this.pool?.notes.some((n) => n.level === "block")) return "The court needs AI models (Settings)";
     const bad = runtimeChecks(this.health() as Parameters<typeof runtimeChecks>[0]).find((c) => !c.ok);
     return bad ? `${bad.name}: ${bad.detail}` : null;
@@ -454,7 +460,7 @@ export class LocalCortex {
   health(): Record<string, unknown> {
     const last = getKV(this.sql, "last_pulse_at");
     return {
-      name: "CORTEX-54 local",
+      name: "Savant local",
       mode: this.o.cfg.mode,
       now: Date.now(),
       last_pulse_at: last === null ? null : Number(last),
@@ -534,10 +540,26 @@ export class LocalCortex {
     const local = isLoopback(remote);
     if (cfg.lan.enabled && !local && request.method === "POST" && url.pathname.startsWith("/api/settings/"))
       return Response.json(
-        { ok: false, message: "Settings can only be changed on the computer CORTEX runs on." },
+        { ok: false, message: "Settings can only be changed on the computer Savant runs on." },
         { status: 403 },
       );
-    if (request.method === "GET" && url.pathname === "/health") return Response.json(this.health());
+    // audit F-A6-03: key hints, the licensee and licence details stay on this computer
+    if (
+      cfg.lan.enabled &&
+      !local &&
+      request.method === "GET" &&
+      (url.pathname === "/api/settings" || url.pathname.startsWith("/api/settings/"))
+    )
+      return Response.json(
+        { ok: false, message: "Settings are only shown on the computer Savant runs on." },
+        { status: 403 },
+      );
+    if (request.method === "GET" && url.pathname === "/health") {
+      const h = this.health();
+      if (local) return Response.json(h);
+      const { license: _license, ...rest } = h as typeof h & { license?: unknown };
+      return Response.json(rest);
+    }
     if (request.method === "GET" && url.pathname === "/pill") {
       if (!pillAuthorized(request.headers.get("authorization"), cfg.secrets.pill_token))
         return new Response("unauthorized", { status: 401 });
@@ -551,19 +573,27 @@ export class LocalCortex {
       (url.pathname === "/ingest/batch" || url.pathname === "/governor/export")
     ) {
       const body = await request.text();
-      const ok = await verifySignedBody(
-        cfg.secrets.ingest_hmac,
-        request.headers.get("x-cortex-signature"),
-        request.headers.get("x-cortex-timestamp"),
-        body,
-      );
+      const ok = await verifyRoute(cfg.secrets.ingest_hmac, request.headers, url.pathname, body, {
+        legacyOk: url.pathname === "/ingest/batch",
+      });
       if (!ok) return new Response("bad signature", { status: 401 });
       if (url.pathname === "/ingest/batch") {
-        const r = await this.brain.ingestBatch(JSON.parse(body));
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          return new Response("bad json", { status: 400 });
+        }
+        const r = await this.brain.ingestBatch(parsed);
         await this.brain.flushJournal();
         return Response.json(r, { status: r.ok ? 200 : 422 });
       }
-      const q = JSON.parse(body) as { table?: string; after?: number; limit?: number };
+      let q: { table?: string; after?: number; limit?: number };
+      try {
+        q = JSON.parse(body) as typeof q;
+      } catch {
+        return new Response("bad json", { status: 400 });
+      }
       if (!EXPORT_TABLES.has(String(q.table))) return new Response("table not allowed", { status: 400 });
       await this.brain.flushJournal();
       const limit = Math.min(200, Math.max(1, Number(q.limit) || 100));
@@ -584,6 +614,7 @@ export class LocalCortex {
           DB: this.d1,
           SESSION_TTL_MS: 30 * 86_400_000, // your own computer: stay signed in (local mode is paper-only)
           COOKIE_INSECURE: cfg.lan.enabled, // plain HTTP on the user's Wi-Fi (ADR-076)
+          REMOTE_DEVICE: !local,
         },
         this.webBrain(),
       );

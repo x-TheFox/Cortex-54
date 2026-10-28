@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { WorkflowDispatcher } from "../src/cortex/dispatch.ts";
 import type { LocalConfig } from "./config.ts";
@@ -8,7 +8,7 @@ import type { LocalConfig } from "./config.ts";
  * Local job runner (ADR-064). The brain "dispatches" its batch workflows exactly as in the cloud (research, Kronos,
  * dossiers, Governor), but here each one is a local Python subprocess (`uv run …`) that posts its signed batch back
  * to this machine's /ingest/batch. No GitHub account, no Actions minutes, no cloud. Jobs that need a pinned upstream
- * checkout get it cloned once into the CORTEX home.
+ * checkout get it cloned once into the Savant home.
  */
 
 const UPSTREAM = {
@@ -56,7 +56,7 @@ export function jobFor(
     // ADR-072: the research desk uses the user's model pool too (not only the built-in free keys)
     ...(ctx.cfg.llm.endpoints.length ? { LLM_POOL: JSON.stringify(ctx.cfg.llm) } : {}),
     RUN_URL: "",
-    // the Python env lives in the CORTEX home, never inside the (read-only, signed) app bundle
+    // the Python env lives in the Savant home, never inside the (read-only, signed) app bundle
     UV_PROJECT_ENVIRONMENT: join(ctx.home, "venv"),
   };
   const uv = (extra: string[], groups: string[] = []) => [
@@ -72,7 +72,8 @@ export function jobFor(
     return {
       cmd: "uv",
       args: uv(["cortex_research.governor.run", ...(inputs.weekly === "true" ? ["--weekly"] : [])]),
-      env,
+      // ADR-091: proposals land in the Savant home for approval in the app (there is no repository to open a PR on)
+      env: { ...env, GOVERNOR_STATE_DIR: ctx.home },
       key: `governor${inputs.weekly === "true" ? "-weekly" : ""}`,
     };
   if (workflow !== "research.yml") return null;
@@ -166,15 +167,27 @@ export class LocalJobs implements WorkflowDispatcher {
     if (this.log.length > 200) this.log.shift();
   }
 
+  /**
+   * The two open-source packages the research desk runs, pinned by commit. Fetched as a plain archive from the public
+   * code host with the curl and tar that ship with macOS, Windows 10+ and Linux: no git, no account (audit F-A6-13).
+   */
   private ensureVendor(which: "upstream" | "kronos"): void {
     const v = which === "upstream" ? UPSTREAM : KRONOS;
-    const dir = join(this.ctx.home, "vendor", which);
-    if (existsSync(join(dir, ".git"))) return;
-    mkdirSync(join(this.ctx.home, "vendor"), { recursive: true });
-    const clone = spawnSync("git", ["clone", "--filter=blob:none", `https://github.com/${v.repo}`, dir], {
-      stdio: "ignore",
-    });
-    if (clone.status !== 0) throw new Error(`could not clone ${v.repo} (is git installed?)`);
-    spawnSync("git", ["-C", dir, "checkout", "--quiet", v.sha], { stdio: "ignore" });
+    const root = join(this.ctx.home, "vendor");
+    const dir = join(root, which);
+    const stamp = join(dir, ".savant-sha");
+    if (existsSync(stamp) && readFileSync(stamp, "utf8").trim() === v.sha) return;
+    mkdirSync(dir, { recursive: true });
+    const archive = join(root, `${which}.tar.gz`);
+    const get = spawnSync(
+      "curl",
+      ["-fsSL", "--retry", "2", "-o", archive, `https://codeload.github.com/${v.repo}/tar.gz/${v.sha}`],
+      { stdio: "ignore" },
+    );
+    if (get.status !== 0) throw new Error(`could not download ${v.repo} (check the internet connection)`);
+    const untar = spawnSync("tar", ["-xzf", archive, "-C", dir, "--strip-components=1"], { stdio: "ignore" });
+    rmSync(archive, { force: true });
+    if (untar.status !== 0) throw new Error(`could not unpack ${v.repo}`);
+    writeFileSync(stamp, `${v.sha}\n`);
   }
 }

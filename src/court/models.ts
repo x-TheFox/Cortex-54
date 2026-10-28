@@ -1,5 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { lineage } from "./lineage.ts";
 import type { Fetcher } from "./llm.ts";
+
+export { lineage };
 
 /** Endpoint helpers shared by the pool, the settings page and the CLI (ADR-072). */
 export type ApiFormat = "openai" | "anthropic";
@@ -13,27 +16,6 @@ export const DEFAULT_URL: Record<ApiFormat, string> = {
 export function normalizeUrl(format: ByokFormat, url: string | undefined): string {
   const u = (url ?? "").trim().replace(/\/+$/, "") || DEFAULT_URL[format];
   return format === "anthropic" ? u.replace(/\/v1$/, "") : u;
-}
-
-/** Rough model lineage from its id (for the "same family" warning; never used to block). */
-export function lineage(model: string): string {
-  const m = model.toLowerCase().split("/").pop() ?? "";
-  const table: [RegExp, string][] = [
-    [/claude|opus|sonnet|haiku|fable/, "anthropic"],
-    [/^gpt-oss/, "openai-oss"],
-    [/^(gpt|o\d|chatgpt)/, "openai"],
-    [/gemini|gemma/, "google"],
-    [/llama/, "meta"],
-    [/qwen|qwq/, "qwen"],
-    [/deepseek/, "deepseek"],
-    [/mistral|mixtral|codestral|magistral/, "mistral"],
-    [/nemotron/, "nvidia"],
-    [/grok/, "xai"],
-    [/kimi|moonshot/, "moonshot"],
-    [/glm|chatglm/, "zhipu"],
-    [/phi-?\d/, "microsoft"],
-  ];
-  return table.find(([re]) => re.test(m))?.[1] ?? m;
 }
 
 /**

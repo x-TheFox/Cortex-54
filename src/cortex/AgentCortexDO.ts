@@ -185,7 +185,11 @@ export class AgentCortexDO extends DurableObject<Env> {
   private begin(): void {
     if (!this.pulsing)
       this.meter.current = new InvocationMeter(DOCTRINE.budgets.per_invocation.subrequests - 5);
-    this.brain.budget.add("do_requests", 1, Date.now());
+    const now = Date.now();
+    this.brain.budget.add("do_requests", 1, now);
+    // audit F-A3-05: every RPC here started as a Worker request, so this is a floor on worker_requests (404s and
+    // refused signatures never reach the brain), so real exhaustion now trips THRIFT/REDUCE_ONLY
+    this.brain.budget.add("worker_requests", 1, now);
   }
 
   async ensureAlarm(): Promise<number> {

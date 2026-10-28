@@ -41,6 +41,9 @@
   // Workers AI: 10,000 neurons/day free, hard fail beyond. Every call goes through FreeTierBudget.
   "ai": { "binding": "AI" },
 
+  // Audit F-A3-07: per-IP rate limit on the public routes (Workers rate limiting binding, free; counted per colo).
+  "ratelimits": [{ "name": "RL", "namespace_id": "5402", "simple": { "limit": 120, "period": 60 } }],
+
   // Workflows (Phase 3): ResearchSprintWorkflow binding is added when the class exists.
 
   // Belt-and-braces self-heal (ADR-021, revised): the DO also arms its own alarm on start and on every /health.

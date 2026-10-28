@@ -17,8 +17,11 @@ export function rowHash(prev: string, seq: number, ts: number, kind: string, pay
 }
 
 /** D1 tables the outbox may write to (whitelist; table names are interpolated into SQL). */
+// audit F-A3-01: a batch that lands in D1 but whose DELETE never runs (crash, eviction) is sent again. Tables with a
+// natural key (journal seq + row hash, contract ids, fill ids) ignore the replay; the AUTOINCREMENT logs below have no
+// natural key, so a replay there can add a duplicate log line (noise, never a broken chain or a double trade).
 const TABLES = {
-  journal: { ignoreDupes: false },
+  journal: { ignoreDupes: true },
   decision_contracts: { ignoreDupes: true },
   orders_log: { ignoreDupes: false },
   fills: { ignoreDupes: true },
@@ -233,6 +236,29 @@ export class Journal {
     if (written === 0 && failed.length > 0)
       throw lastError instanceof Error ? lastError : new Error(String(lastError));
     return written;
+  }
+
+  /**
+   * Audit F-A3-02: the repair path. Quarantined rows go back into the outbox (a new id, so they flush after the
+   * backlog); a row that is still bad earns its three strikes again and returns to quarantine. Run daily, so a
+   * row that failed on a transient D1 schema/quota problem heals by itself.
+   */
+  requeueQuarantined(now: number, max = 200): number {
+    const rows = this.sql.exec<{ id: number; tbl: string; row_json: string; created_at: number }>(
+      "SELECT id, tbl, row_json, created_at FROM d1_outbox_dead ORDER BY id LIMIT ?",
+      max,
+    );
+    for (const r of rows) {
+      this.sql.exec(
+        "INSERT INTO d1_outbox (tbl, row_json, created_at) VALUES (?, ?, ?)",
+        r.tbl,
+        r.row_json,
+        r.created_at,
+      );
+      this.sql.exec("DELETE FROM d1_outbox_dead WHERE id = ?", r.id);
+    }
+    if (rows.length) this.append("SYSTEM", "OUTBOX_REQUEUE", null, { rows: rows.length }, now);
+    return rows.length;
   }
 
   /** Rows moved aside by the poison-pill guard (for the status view and replay). */

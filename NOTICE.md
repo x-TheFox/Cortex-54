@@ -10,6 +10,15 @@ their original copyright header; each port is listed here when it lands.
 | [shiyu-coder/Kronos](https://github.com/shiyu-coder/Kronos) | MIT | candlestick foundation model, run from a pinned checkout (`67b630e`) in `research.yml` job=kronos; weights `NeoQuasar/Kronos-base` + `Kronos-Tokenizer-base` from Hugging Face. No code copied (ADR-041) |
 | [kazuhikoarase/qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | MIT | QR codes in the app (phone alerts, phone pairing; npm `qrcode-generator`, bundled unmodified, ADR-076) |
 
+Landing page (`landing/`, ADR-084) — bundled from npm, unmodified:
+
+| Project | License | Used for |
+|---|---|---|
+| [GSAP](https://gsap.com) 3.15 (`gsap`, incl. ScrollTrigger) | GSAP Standard "no charge" license (https://gsap.com/standard-license) — commercial sites allowed; notices kept | scroll-driven motion |
+| [Lenis](https://github.com/darkroomengineering/lenis) 1.3 | MIT | smooth scrolling |
+| Newsreader (`@fontsource-variable/newsreader`) | SIL Open Font License 1.1 | display type |
+| IBM Plex Sans / Mono (`@fontsource/ibm-plex-*`) | SIL Open Font License 1.1 | text and figures |
+
 Ideas only (no code copied):
 - HKUDS/AI-Trader and HKUDS/Vibe-Trading — no license file at time of review (2026-10-22).
 - TauricResearch/TradingAgents, FinMem, FinRobot, freqtrade, hummingbot, jesse, OpenBB, qlib —

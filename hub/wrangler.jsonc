@@ -6,6 +6,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "observability": { "enabled": true },
+  // audit BL-3: per-IP limit on POSTs (feed and packs)
+  "ratelimits": [{ "name": "RL", "namespace_id": "5403", "simple": { "limit": 30, "period": 60 } }],
   "d1_databases": [
     {
       "binding": "DB",

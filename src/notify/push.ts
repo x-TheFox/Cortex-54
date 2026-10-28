@@ -17,7 +17,7 @@ const PUSHED: Partial<Record<ChannelKey, { priority: number; tags: string; filte
 
 export function pushText(msg: DiscordMessage): { title: string; body: string } {
   const e = msg.embeds?.at(-1) ?? msg.embeds?.[0];
-  const title = (e?.title ?? msg.content ?? "CORTEX-54").replace(/[*_`]/g, "").slice(0, 120);
+  const title = (e?.title ?? msg.content ?? "Savant").replace(/[*_`]/g, "").slice(0, 120);
   const body = [
     e?.description,
     ...(e?.fields ?? []).slice(-2).map((f) => `${f.name}: ${f.value}`),
@@ -53,7 +53,7 @@ export class PushNotifier implements Notifier {
             method: "POST",
             headers: {
               // ntfy reads these; non-ASCII titles must be RFC 2047-free, so emoji go in the body/tags instead
-              title: title.replace(/[^\x20-\x7e]/g, "").trim() || "CORTEX-54",
+              title: title.replace(/[^\x20-\x7e]/g, "").trim() || "Savant",
               priority: String(rule.priority),
               tags: rule.tags,
             },

@@ -1,13 +1,20 @@
 import { useState } from "react";
 import type { SettingsView } from "./api.ts";
-import { AlertsSection, ClefSection, ModelsSection, TradingSection, useSaver } from "./settings.tsx";
+import {
+  AlertsSection,
+  ClefSection,
+  LicenseSection,
+  ModelsSection,
+  TradingSection,
+  useSaver,
+} from "./settings.tsx";
 
 /**
  * First-launch onboarding (ADR-073): a guided wizard, the same sections as SETTINGS one at a time, in plain words. It
  * can be left and resumed. (The paste-into-an-agent path was removed from the app by the operator, ADR-083; the
  * `cortex` CLI and docs/SETUP_WITH_AN_AGENT.md still work for people who want it.)
  */
-const STEPS = ["Account", "AI models", "Cloudflare AI", "Alerts", "Done"] as const;
+const STEPS = ["Account", "Licence", "AI models", "Cloudflare AI", "Alerts", "Done"] as const;
 
 export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () => void; close: () => void }) {
   const [path, setPath] = useState<"choose" | "wizard">("choose");
@@ -20,16 +27,16 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
   };
 
   return (
-    <div className="onb" role="dialog" aria-modal="true" aria-label="Set up CORTEX-54">
+    <div className="onb" role="dialog" aria-modal="true" aria-label="Set up Savant">
       <div className="onb-card">
         {path === "choose" && (
           <>
             <p className="label dim">WELCOME</p>
             <h2 className="onb-title">Let's get your robot ready.</h2>
             <p className="onb-lead">
-              CORTEX-54 trades on its own: it reads the news, argues every trade with two AI models, and a
-              risk engine decides the size. Right now it is running in <b>demo mode</b> with no keys. Five
-              short steps, with links to every free key, finish the setup. You can change anything later in
+              Savant trades on its own: it reads the news, argues every trade with two AI models, and a risk
+              engine decides the size. Right now it is running in <b>demo mode</b> with no keys. Five short
+              steps, with links to every free key, finish the setup. You can change anything later in
               SETTINGS.
             </p>
             <div className="onb-nav">
@@ -67,14 +74,26 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
             {step === 1 && (
               <>
                 <p className="onb-lead">
+                  Demo mode is free, forever. To trade your paper or live account, activate a licence: every
+                  plan starts with a <b>7-day free trial</b>, and the key is in your Whop order.
+                </p>
+                <LicenseSection s={s} reload={reload} />
+                {!s.license?.required && (
+                  <p className="cost">This build doesn't need a licence. Skip ahead.</p>
+                )}
+              </>
+            )}
+            {step === 2 && (
+              <>
+                <p className="onb-lead">
                   The fastest free start: a <b>Google Gemini</b> key and a <b>Groq</b> key (two minutes each,
-                  no card). Paste a key below and CORTEX recognizes it. Add paid models or a model on your own
+                  no card). Paste a key below and Savant recognizes it. Add paid models or a model on your own
                   computer any time.
                 </p>
                 <ModelsSection s={s} save={save} saving={saving} />
               </>
             )}
-            {step === 2 && (
+            {step === 3 && (
               <>
                 <p className="onb-lead">
                   Recommended, free: Cloudflare's AI sorts the news and reads the facts out of announcements.
@@ -83,13 +102,13 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
                 <ClefSection s={s} save={save} saving={saving} />
               </>
             )}
-            {step === 3 && (
+            {step === 4 && (
               <>
                 <p className="onb-lead">Optional. Everything always shows up in the app's FEED.</p>
                 <AlertsSection s={s} save={save} saving={saving} />
               </>
             )}
-            {step === 4 && (
+            {step === 5 && (
               <>
                 <p className="onb-lead">Here's where things stand.</p>
                 <Progress s={s} />
@@ -109,14 +128,14 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
               >
                 Back
               </button>
-              {step < 4 ? (
+              {step < 5 ? (
                 <button
                   type="button"
                   className="onb-btn primary"
                   disabled={saving}
                   onClick={() => setStep(step + 1)}
                 >
-                  {step === 2 || step === 3 ? "Next (or skip)" : "Next"}
+                  {step >= 1 && step <= 4 && step !== 2 ? "Next (or skip)" : "Next"}
                 </button>
               ) : (
                 <button

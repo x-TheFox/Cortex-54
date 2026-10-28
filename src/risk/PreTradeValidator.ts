@@ -77,6 +77,9 @@ export function validateEntry(i: ValidateInput, d: Doctrine, c: Constitution): V
   r.push(...contractViolations(k));
   const arenas = a.account === "LIVE" ? c.allowed.live_arenas : c.allowed.paper_arenas;
   if (!arenas.includes(k.arena)) r.push(`${k.arena} not allowed on ${a.account}`);
+  // audit F-A2-08: options are a virtual shadow lab only (ADR-031) — nothing generates option entries today, but the
+  // gate refuses them explicitly instead of relying on that
+  if (k.arena === "OPTIONS") r.push("OPTIONS are shadow-only: no real option orders");
   const strategy = d.strategies.find((s) => s.id === k.strategy_id);
   if (!strategy) r.push(`unknown strategy ${k.strategy_id}`);
   else {
@@ -150,6 +153,23 @@ export function validateEntry(i: ValidateInput, d: Doctrine, c: Constitution): V
     d,
   );
   if (!sizing.ok) return { ok: false, reasons: sizing.reasons };
+
+  // audit F-A2-04: fees were estimated at the largest allowed notional; a smaller real order (or a min-ticket lift)
+  // pays a higher rate (the equity regulatory fee is a $0.01 minimum). Re-check the hurdle and the risk at the real size.
+  const realFeeRt = roundTripFeeRate(k.arena, sizing.notionalUsd, d);
+  if (realFeeRt > feeRt + 1e-12) {
+    const again = clearsFeeHurdle((target - entryPrice) / entryPrice, realFeeRt, costSpread, d);
+    if (!again.ok)
+      return {
+        ok: false,
+        reasons: [
+          `expected move below fee hurdle at the real order size (${(again.required * 100).toFixed(2)}%)`,
+        ],
+      };
+    const riskWithFees = sizing.notionalUsd * (Math.abs(entryPrice - stop) / entryPrice + realFeeRt);
+    if (riskWithFees > a.equityUsd * c.hard_limits.max_per_trade_risk_pct + 1e-9)
+      return { ok: false, reasons: ["U3 per-trade risk (real fees)"] };
+  }
 
   // Belt and braces: constitution caps re-checked on the final numbers.
   const h = c.hard_limits;

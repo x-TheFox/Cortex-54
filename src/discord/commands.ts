@@ -1,4 +1,4 @@
-/** Slash commands for the CORTEX Discord app. Registered by scripts/register-commands.ts. */
+/** Slash commands for the Savant Discord app. Registered by scripts/register-commands.ts. */
 const account = {
   type: 3,
   name: "account",

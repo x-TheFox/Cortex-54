@@ -19,13 +19,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 
 import requests
 
 BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 # identifies the agent to the sites it reads; installs can add a contact via CORTEX_USER_AGENT (never a repo URL)
-BOT_UA = os.environ.get("CORTEX_USER_AGENT") or "CORTEX-54 research agent"
+BOT_UA = os.environ.get("CORTEX_USER_AGENT") or "Savant research agent"
 TIMEOUT = 20
 MAX_PAGE_CHARS = 7000
 ALPACA_DATA = "https://data.alpaca.markets"
@@ -58,6 +58,30 @@ def html_to_text(raw: str) -> tuple[str, str]:
     # keep lines that look like prose or data, drop menu crumbs
     keep = [ln for ln in lines if len(ln) >= 40 or re.search(r"\d", ln) and len(ln) >= 12]
     return title, "\n".join(keep)
+
+
+
+def public_host(host: str, resolve=None) -> bool:
+    """Audit F-B1-07: a host is readable only if every address it resolves to is public (no loopback, private,
+    link-local, cloud metadata, multicast or reserved ranges). Name-shaped checks alone miss 10.x, [::1], 0x7f.1, etc."""
+    import ipaddress
+    import socket
+
+    h = host.strip("[]").lower()
+    if not h or h in ("localhost",) or h.endswith((".internal", ".local", ".localhost")):
+        return False
+    try:
+        infos = (resolve or socket.getaddrinfo)(h, None)
+    except OSError:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved
+                or ip.is_unspecified):
+            return False
+    return True
 
 
 @dataclass
@@ -206,12 +230,24 @@ class Toolbox:
         p = urlparse(url)
         if p.scheme not in ("http", "https") or not p.netloc:
             return {"error": "not an http(s) URL"}
-        if p.hostname in ("localhost", "127.0.0.1", "0.0.0.0") or (p.hostname or "").endswith((".internal", ".local")):
+        if not public_host(p.hostname or ""):
             return {"error": "refused: local address"}
         title, text = "", ""
         try:
+            # audit F-B1-07: redirects are followed by hand so every hop is checked against private addresses
             r = self.http(url, headers={"user-agent": BROWSER_UA, "accept": "text/html,*/*"}, timeout=TIMEOUT,
-                          allow_redirects=True)
+                          allow_redirects=False)
+            for _ in range(4):
+                loc = r.headers.get("location") if 300 <= r.status_code < 400 else None
+                if not loc:
+                    break
+                nxt = urljoin(url, loc)
+                np_ = urlparse(nxt)
+                if np_.scheme not in ("http", "https") or not public_host(np_.hostname or ""):
+                    return {"error": "refused: redirect to a local address"}
+                url = nxt
+                r = self.http(url, headers={"user-agent": BROWSER_UA, "accept": "text/html,*/*"}, timeout=TIMEOUT,
+                              allow_redirects=False)
             ctype = r.headers.get("content-type", "")
             if r.ok and "html" in ctype:
                 title, text = html_to_text(r.text)

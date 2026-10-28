@@ -131,8 +131,12 @@ describe("OS keychain (ADR-076)", () => {
     const file = readFileSync(join(h, "config.json"), "utf8");
     expect(file).not.toContain("gsk_topsecret_1111");
     expect(file).not.toContain("sk-endpoint-2222");
-    expect(file).toContain("web_session"); // generated local secrets stay (the tray reads its pill token there)
+    // audit F-A6-07: the session-signing secrets move to the keychain too; the read-only tray token stays
+    expect(file).not.toContain(cfg.secrets.web_session);
+    expect(file).not.toContain(cfg.secrets.ingest_hmac);
+    expect(file).toContain(cfg.secrets.pill_token);
     const back = loadConfig(h);
+    expect(back?.secrets.web_session).toBe(cfg.secrets.web_session);
     expect(back?.keys.GROQ_API_KEY).toBe("gsk_topsecret_1111");
     expect(back?.llm.endpoints[0]?.key).toBe("sk-endpoint-2222");
     // and back to the file: the keychain item is removed
@@ -374,10 +378,10 @@ describe("MSIX package (ADR-079)", async () => {
   it("uses a four-part version and Microsoft's unsigned-publisher OID unless a Store identity is given", () => {
     expect(msixVersion("0.1.12")).toBe("0.1.12.0");
     expect(() => msixVersion("x")).toThrow();
-    const m = manifest({ version: "1.2.3", exe: "CORTEX-54.exe" });
+    const m = manifest({ version: "1.2.3", exe: "Savant.exe" });
     expect(m).toContain('Version="1.2.3.0"');
     expect(m).toContain("OID.2.25.311729368913984317654407730594956997722=1");
-    expect(m).toContain('Executable="CORTEX-54.exe"');
+    expect(m).toContain('Executable="Savant.exe"');
     expect(m).toContain('rescap:Capability Name="runFullTrust"');
     const store = manifest({ version: "1.2.3", exe: "a&b.exe", publisher: "CN=ABC-123", name: "Pub.App" });
     expect(store).toContain('Publisher="CN=ABC-123"');
@@ -424,5 +428,73 @@ describe("live account in local mode (ADR-083)", () => {
       clef: () => ({ ok: false, level: "off", text: "off" }),
     });
     expect((await s.save({ keys: { ALPACA_LIVE_KEY_ID: "AKxxxx" } })).ok).toBe(false);
+  });
+});
+
+describe("shipped-build protection (ADR-089)", () => {
+  it("obfuscates the bundle without changing what it does", async () => {
+    const { obfuscateBundle } = await import("../scripts/protect.ts");
+    const { execFileSync } = await import("node:child_process");
+    const { writeFileSync: w, readFileSync: r } = await import("node:fs");
+    const f = join(tmp(), "b.mjs");
+    w(
+      f,
+      "import{createRequire}from'node:module';const secretName='licence-check';console.log(secretName.length*6);",
+    );
+    obfuscateBundle(f);
+    expect(r(f, "utf8")).not.toContain("licence-check");
+    expect(execFileSync(process.execPath, [f], { encoding: "utf8" }).trim()).toBe("78");
+  });
+});
+
+describe("Governor proposals on a customer's install (ADR-091)", () => {
+  it("nothing applies until approved; approved maps must be shrink-only; rules merge into the local scar tissue", async () => {
+    const { readProposals, decideProposal, loadLocalCalibration } = await import("../local/proposals.ts");
+    const { loadLocalScar } = await import("../local/memory.ts");
+    const { writeFileSync: w, mkdirSync: md } = await import("node:fs");
+    const h = tmp();
+    md(join(h, "proposals"));
+    const cal = (pts: number[][]) => ({
+      version: 1,
+      generated_at: 1,
+      maps: { "court.win_prob": { n: 60, points: pts, brier_raw: 0.24, brier_calibrated: 0.22 } },
+    });
+    w(
+      join(h, "proposals", "calibration.json"),
+      JSON.stringify(
+        cal([
+          [0.2, 0.2],
+          [0.9, 0.6],
+        ]),
+      ),
+    );
+    const rule = {
+      id: "SCAR-101",
+      kind: "context",
+      rule: "Thin weekend books punished breakouts three times.",
+      evidence: ["a", "b", "c"],
+      added: "2026-10-27",
+    };
+    w(join(h, "proposals", "scar-tissue.json"), JSON.stringify({ version: 1, rules: [rule] }));
+    expect(readProposals(h).calibration?.n).toBe(60);
+    expect(readProposals(h).scars.map((s) => s.id)).toEqual(["SCAR-101"]);
+    expect(loadLocalCalibration(h)).toBeNull(); // not applied yet
+    expect(decideProposal(h, { which: "calibration", approve: true }).ok).toBe(true);
+    expect(loadLocalCalibration(h)?.maps["court.win_prob"]?.n).toBe(60);
+    expect(decideProposal(h, { which: "scar", id: "SCAR-101", approve: true }).ok).toBe(true);
+    expect(loadLocalScar(h).rules.map((r) => r.id)).toEqual(["SCAR-101"]);
+    expect(readProposals(h)).toEqual({ calibration: null, scars: [] });
+    // a map that would raise confidence is never offered (and never loads)
+    w(
+      join(h, "proposals", "calibration.json"),
+      JSON.stringify(
+        cal([
+          [0.2, 0.2],
+          [0.6, 0.9],
+        ]),
+      ),
+    );
+    expect(readProposals(h).calibration).toBeNull();
+    expect(decideProposal(h, { which: "calibration", approve: true }).ok).toBe(false);
   });
 });

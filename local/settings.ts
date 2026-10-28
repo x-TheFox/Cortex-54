@@ -10,6 +10,7 @@ import {
 } from "../src/court/pool.ts";
 import { discordSetup } from "../src/discord/setup.ts";
 import { DOCTRINE } from "../src/generated/config.ts";
+import { TERMS_VERSION } from "../src/legal/version.ts";
 import { ntfyUrl } from "../src/notify/push.ts";
 import type { WebSettings } from "../src/web/api.ts";
 import { AGENT_PROMPT } from "./agent-prompt.ts";
@@ -24,11 +25,20 @@ import {
 import { KEY_NAMES, type KeyName, type LocalConfig, LocalConfigSchema, saveConfig } from "./config.ts";
 import { configChecks, runtimeChecks } from "./health.ts";
 import { secretBackend } from "./keychain.ts";
-import { installLicense, readLicense } from "./license.ts";
+import {
+  activateKey,
+  installLicense,
+  pollDeviceSignIn,
+  readLicense,
+  releaseKey,
+  STORE_URL,
+  startDeviceSignIn,
+} from "./license.ts";
+import { decideProposal, readProposals } from "./proposals.ts";
 
 /**
  * Settings for local mode (ADR-071/072/073): the web app's Settings page and first-run onboarding, and the CLI's
- * `cortex llm` commands, all go through here. Secrets are never sent back to the browser: the view shows whether a
+ * `savant llm` commands, all go through here. Secrets are never sent back to the browser: the view shows whether a
  * key is set and its last four characters. Saving writes config.json (mode 600) and reloads the brain in-process.
  */
 
@@ -123,7 +133,7 @@ export interface SettingsDeps {
   swap?: (write: () => void) => Promise<void>;
   /** ADR-076: a one-time login link on this computer's Wi-Fi address (null when LAN access is off) */
   pairLink?: () => Promise<string | null>;
-  /** ADR-076: stop the service and wipe the CORTEX home */
+  /** ADR-076: stop the service and wipe the Savant home */
   wipe?: () => Promise<void>;
   /** ADR-081: cap the paper account's borrowing at 1x at the broker */
   cashOnly?: (account: "PAPER" | "LIVE") => Promise<{ ok: boolean; message: string }>;
@@ -182,7 +192,15 @@ export class LocalSettings implements WebSettings {
       },
       lan: { enabled: c.lan.enabled, port: c.port },
       secretStore: { mode: c.secret_store, backend: keychainName(this.d.home) },
+      proposals: readProposals(this.d.home),
+      terms: {
+        current: TERMS_VERSION,
+        accepted: c.terms?.version === TERMS_VERSION,
+        acceptedAt: c.terms?.accepted_at ?? null,
+      },
       license: readLicense(this.d.home),
+      licenseKey: { set: Boolean(c.keys.SAVANT_LICENSE_KEY), hint: hint(c.keys.SAVANT_LICENSE_KEY) },
+      storeUrl: STORE_URL,
       account: this.d.account?.() ?? null,
       live: this.d.liveAccount?.() ?? null,
       discord: {
@@ -212,7 +230,7 @@ export class LocalSettings implements WebSettings {
     };
   }
 
-  /** HEALTH (ADR-073): the same checks as `cortex doctor`, plus what only a running brain knows. */
+  /** HEALTH (ADR-073): the same checks as `savant doctor`, plus what only a running brain knows. */
   async checks(): Promise<unknown> {
     const c = this.d.cfg();
     const h = this.d.health?.();
@@ -297,7 +315,7 @@ export class LocalSettings implements WebSettings {
         const margin = Number(a.multiplier ?? 1) > 1;
         return {
           ok: true,
-          message: `Connected to your ${live ? "live (real-money)" : "paper"} account: equity $${Number(a.equity).toFixed(2)}.${margin ? " It allows margin: CORTEX holds new trades until you make it cash-only (button below, after saving)." : ""}`,
+          message: `Connected to your ${live ? "live (real-money)" : "paper"} account: equity $${Number(a.equity).toFixed(2)}.${margin ? " It allows margin: Savant holds new trades until you make it cash-only (button below, after saving)." : ""}`,
         };
       }
       if (q.kind === "cloudflare") {
@@ -362,6 +380,11 @@ export class LocalSettings implements WebSettings {
       )
         c = { ...c, clef: patch.clef };
       if (typeof patch.onboarded === "boolean") c = { ...c, onboarded: patch.onboarded };
+      if (patch.terms && typeof patch.terms === "object") {
+        const t = patch.terms as { version?: unknown; accepted_at?: unknown };
+        if (t.version === TERMS_VERSION && typeof t.accepted_at === "number")
+          c = { ...c, terms: { version: TERMS_VERSION, accepted_at: Math.floor(t.accepted_at) } };
+      }
       if (patch.court && typeof patch.court === "object") {
         const v = (patch.court as { max_per_day?: unknown }).max_per_day;
         c = {
@@ -454,7 +477,7 @@ export class LocalSettings implements WebSettings {
       return { ok: false, message: plain(e) };
     }
     if (!this.d.swap)
-      return { ok: false, message: "Restore isn't available here; use `cortex restore` instead." };
+      return { ok: false, message: "Restore isn't available here; use `savant restore` instead." };
     const home = this.d.home;
     const current = this.d.cfg();
     const swap = this.d.swap;
@@ -469,7 +492,7 @@ export class LocalSettings implements WebSettings {
     );
     return {
       ok: true,
-      message: `Restoring the backup from ${b.madeAt.slice(0, 10)} (${mode} mode): CORTEX restarts on it in a few seconds.${b.withKeys ? "" : " It had no keys: add them in SETTINGS."} If the old computer still runs CORTEX on the same paper account, stop it there.`,
+      message: `Restoring the backup from ${b.madeAt.slice(0, 10)} (${mode} mode): Savant restarts on it in a few seconds.${b.withKeys ? "" : " It had no keys: add them in SETTINGS."} If the old computer still runs Savant on the same paper account, stop it there.`,
     };
   }
 
@@ -483,10 +506,85 @@ export class LocalSettings implements WebSettings {
     }
   }
 
+  /** ADR-091: approve or dismiss a Governor proposal (the customer's version of merging its pull request). */
+  async proposal(q: { which: "calibration" | "scar"; approve: boolean; id?: string }) {
+    const r = decideProposal(this.d.home, q);
+    if (r.ok && q.approve) setTimeout(() => this.d.reload(), 250);
+    return r;
+  }
+
+  /** ADR-087: record that the user accepted the current legal set. */
+  async terms(q: { accept: boolean }) {
+    if (!q.accept) return { ok: false, message: "Tick the box to accept the terms first." };
+    await this.save({ terms: { version: TERMS_VERSION, accepted_at: Date.now() } });
+    return { ok: true, message: "Thanks. Savant can trade now." };
+  }
+
+  /** ADR-093: the device sign-in in progress (one at a time) */
+  private signin: { secret: string; code: string; url: string; until: number } | null = null;
+
   /** ADR-077: install a licence file (checked against this build's publisher key before it is saved). */
-  async license(q: { file: string }) {
+  async license(q: { file?: string; key?: string; release?: boolean; signin?: boolean; poll?: boolean }) {
+    const c = this.d.cfg();
+    const net = this.d.fetcher ? { fetcher: this.d.fetcher } : {};
+    // ADR-093: sign in with the Savant account instead of pasting a key
+    if (q.signin) {
+      const r = await startDeviceSignIn(this.d.home, net);
+      if (!r.ok) return r;
+      this.signin = { secret: r.secret, code: r.code, url: r.url, until: Date.now() + r.expiresIn * 1000 };
+      return {
+        ok: true,
+        message: `Your browser opens getsavant.pro. Check the code there matches ${r.code}, then sign in.`,
+        url: r.url,
+        code: r.code,
+      };
+    }
+    if (q.poll) {
+      const s = this.signin;
+      if (!s || Date.now() > s.until) {
+        this.signin = null;
+        return { ok: false, message: "Sign-in timed out. Click Sign in again.", status: "expired" };
+      }
+      const p = await pollDeviceSignIn(s.secret, net);
+      if (p.status === "pending" || p.status === "error")
+        return {
+          ok: false,
+          message: "Waiting for you to approve in the browser…",
+          status: "pending",
+          code: s.code,
+          url: s.url,
+        };
+      this.signin = null;
+      if (p.status === "expired" || !p.key)
+        return { ok: false, message: "Sign-in timed out. Click Sign in again.", status: "expired" };
+      const r = await activateKey(this.d.home, p.key, { app: "desktop", ...net });
+      if (!r.ok) return { ...r, status: "error" };
+      await this.save({ keys: { SAVANT_LICENSE_KEY: p.key } });
+      return {
+        ok: true,
+        message: `Signed in. ${r.message} Paper and live trading are unlocked.`,
+        status: "done",
+      };
+    }
+    // ADR-086: a Whop licence key → the licence server → a token bound to this computer
+    if (q.release) {
+      const key = c.keys.SAVANT_LICENSE_KEY;
+      if (!key) return { ok: false, message: "No licence key is saved on this computer." };
+      const r = await releaseKey(this.d.home, key, this.d.fetcher ? { fetcher: this.d.fetcher } : {});
+      if (r.ok) await this.save({ keys: { SAVANT_LICENSE_KEY: null } });
+      return r;
+    }
+    if (q.key) {
+      const r = await activateKey(this.d.home, q.key, {
+        app: "desktop",
+        ...(this.d.fetcher ? { fetcher: this.d.fetcher } : {}),
+      });
+      if (!r.ok) return r;
+      await this.save({ keys: { SAVANT_LICENSE_KEY: q.key.trim() } });
+      return { ok: true, message: `${r.message} Paper and live trading are unlocked.` };
+    }
     try {
-      const st = installLicense(this.d.home, q.file);
+      const st = installLicense(this.d.home, q.file ?? "");
       setTimeout(() => this.d.reload(), 250);
       return {
         ok: true,
@@ -517,11 +615,11 @@ export class LocalSettings implements WebSettings {
   async reset(q: { confirm: string }) {
     if (q.confirm !== "RESET") return { ok: false, message: "Type RESET to confirm." };
     if (!this.d.wipe)
-      return { ok: false, message: "Reset isn't available here; delete the CORTEX folder by hand." };
+      return { ok: false, message: "Reset isn't available here; delete the Savant folder by hand." };
     setTimeout(() => void this.d.wipe?.(), 300);
     return {
       ok: true,
-      message: "Resetting: CORTEX stops and deletes its settings, keys and history on this computer.",
+      message: "Resetting: Savant stops and deletes its settings, keys and history on this computer.",
     };
   }
 

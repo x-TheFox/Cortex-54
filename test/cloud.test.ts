@@ -7,7 +7,7 @@ import { brainConfig, brainSecrets, deploy, type Runner, stripJsonc } from "../l
 import { claimOnce } from "../local/runner.ts";
 import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
 import { QueueDispatcher } from "../src/cortex/queue.ts";
-import { verifySignedBody } from "../src/lib/hmac.ts";
+import { verifyRoute } from "../src/lib/hmac.ts";
 import { memorySql } from "./sim/sqlite.ts";
 
 describe("job queue for desktop runners (ADR-065)", () => {
@@ -39,11 +39,10 @@ describe("job queue for desktop runners (ADR-065)", () => {
     const secret = "s".repeat(40);
     const dispatched: string[] = [];
     const fetcher = (async (url: string, init?: RequestInit) => {
-      const ok = await verifySignedBody(
-        secret,
-        new Headers(init?.headers).get("x-cortex-signature"),
-        new Headers(init?.headers).get("x-cortex-timestamp"),
-        String(init?.body),
+      const ok = await verifyRoute(secret, new Headers(init?.headers), "/runner/claim", String(init?.body));
+      // audit F-A3-03: the same signature is worthless on any other route
+      expect(await verifyRoute(secret, new Headers(init?.headers), "/ingest/batch", String(init?.body))).toBe(
+        false,
       );
       expect(url).toBe("https://cortex.example.workers.dev/runner/claim");
       return ok
@@ -70,7 +69,7 @@ describe("job queue for desktop runners (ADR-065)", () => {
   });
 });
 
-describe("cortex deploy (ADR-065)", () => {
+describe("savant deploy (ADR-065)", () => {
   const root = process.cwd();
   it("parses the repo's JSONC (URLs inside strings survive) and writes a customer config with no operator ids", () => {
     const tpl = readFileSync("wrangler.jsonc", "utf8");
@@ -101,6 +100,8 @@ describe("cortex deploy (ADR-065)", () => {
       "GROQ_API_KEY=g",
       "ALPACA_PAPER_KEY_ID=k",
       "ALPACA_PAPER_SECRET=s",
+      "ALPACA_LIVE_KEY_ID=LIVEKEY",
+      "ALPACA_LIVE_SECRET=LIVESECRET",
     ]);
     const calls: string[] = [];
     let d1: { name: string; uuid: string }[] = [];
@@ -147,6 +148,11 @@ describe("cortex deploy (ADR-065)", () => {
     });
     expect(secretsSeen[0]).not.toHaveProperty("CLOUDFLARE_API_TOKEN"); // the deploy token never goes into the worker
     expect(secretsSeen[1]).toHaveProperty("SENTINEL_TICK_SECRET");
+    // audit F-A6-13: a cloud deploy carries PAPER keys only, even when the app holds live keys
+    for (const s of secretsSeen) {
+      expect(Object.keys(s).filter((k) => k.includes("LIVE"))).toEqual([]);
+      expect(Object.values(s)).not.toContain("LIVESECRET");
+    }
     // second run: nothing new is created
     calls.length = 0;
     deploy({ root, home, cfg: { ...cfg, cloud: r.cloud }, name: "acme", run });

@@ -29,6 +29,28 @@ const json = (b: unknown, status = 200) =>
   Response.json(b, { status, headers: { "access-control-allow-origin": "*", "cache-control": "no-store" } });
 
 const MAX_BODY = 1_000_000;
+
+/**
+ * Audit F-A5-01 / BL-3: the write surface is open by design (any agent key may publish), so it is bounded instead.
+ * Agents publish every 30 min (a few dozen rows a day), so these limits never touch a real agent.
+ */
+export const LIMITS = {
+  rowsPerAgentPerDay: 2_000,
+  packsPerAgentPerDay: 5,
+  newAgentsPerDay: 100,
+  maxAgents: 5_000,
+};
+const DAY = 86_400_000;
+
+/** Display names are free text chosen by the agent: plain characters only, and never mistaken for a verified identity. */
+export function cleanName(n: string | undefined): string | null {
+  const t = (n ?? "")
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{N} ._-]/gu, "")
+    .trim()
+    .slice(0, 32);
+  return t.length >= 2 ? t : null;
+}
 /** A row must reach the hub within this long of its own timestamp to count (agents publish every 30 min). */
 export const LATE_MS = 6 * 3_600_000;
 
@@ -97,7 +119,7 @@ export async function handleHub(req: Request, db: HubDb, now: number): Promise<R
       ? json({ agent: a, record: (await records(db, m[1]))[0] ?? null })
       : json({ error: "no such agent" }, 404);
   }
-  if (p === "" || p === "/v1") return json({ name: "CORTEX hub", version: 1 });
+  if (p === "" || p === "/v1") return json({ name: "Savant hub", version: 1 });
   return json({ error: "not found" }, 404);
 }
 
@@ -113,6 +135,24 @@ async function feed(body: unknown, db: HubDb, now: number): Promise<Response> {
   const prev = await db.first<{ head_seq: number }>("SELECT head_seq FROM agents WHERE agent_id = ?", id);
   if (prev && b.head.seq < prev.head_seq)
     return json({ error: "head went backwards (journal rewritten?)" }, 409);
+  if (!prev) {
+    const agents = await db.first<{ total: number; today: number }>(
+      "SELECT COUNT(*) AS total, SUM(CASE WHEN first_seen > ? THEN 1 ELSE 0 END) AS today FROM agents",
+      now - DAY,
+    );
+    if ((agents?.total ?? 0) >= LIMITS.maxAgents)
+      return json({ error: "the hub is full; try again later" }, 503);
+    if ((agents?.today ?? 0) >= LIMITS.newAgentsPerDay)
+      return json({ error: "too many new agents today; try again tomorrow" }, 429);
+  } else {
+    const today = await db.first<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM rows WHERE agent_id = ? AND received_at > ?",
+      id,
+      now - DAY,
+    );
+    if ((today?.n ?? 0) + b.rows.length > LIMITS.rowsPerAgentPerDay)
+      return json({ error: "daily row quota reached for this agent" }, 429);
+  }
   // a row already published must not change (its hash is the record)
   for (const r of b.rows) {
     const old = await db.first<{ row_sha256: string }>(
@@ -128,7 +168,7 @@ async function feed(body: unknown, db: HubDb, now: number): Promise<Response> {
       "INSERT INTO agents (agent_id, public_key, name, first_seen) VALUES (?, ?, ?, ?)",
       id,
       b.public_key,
-      b.name ?? null,
+      cleanName(b.name),
       now,
     );
   for (const r of b.rows)
@@ -152,7 +192,7 @@ async function feed(body: unknown, db: HubDb, now: number): Promise<Response> {
     b.head.seq,
     b.head.sha,
     now,
-    b.name ?? null,
+    cleanName(b.name),
     id,
   );
   return json({ ok: true, agent_id: id, stored: b.rows.length });
@@ -165,10 +205,17 @@ async function publishPack(body: unknown, db: HubDb, now: number): Promise<Respo
   if (!(await verifyPayload(pk.public_key, unsigned(pk), pk.sig)))
     return json({ error: "bad signature" }, 401);
   const packId = sha256Hex(JSON.stringify(pk)).slice(0, 16);
+  const agent = agentIdOf(pk.public_key);
+  const today = await db.first<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM packs WHERE agent_id = ? AND created_at > ?",
+    agent,
+    now - DAY,
+  );
+  if ((today?.n ?? 0) >= LIMITS.packsPerAgentPerDay) return json({ error: "daily pack quota reached" }, 429);
   await db.run(
     "INSERT OR IGNORE INTO packs (pack_id, agent_id, kind, title, json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     packId,
-    agentIdOf(pk.public_key),
+    agent,
     pk.kind,
     pk.title,
     JSON.stringify(pk),
@@ -189,7 +236,8 @@ interface Record_ {
 async function records(db: HubDb, agent?: string): Promise<Record_[]> {
   const rows = await db.all<{ agent_id: string; name: string | null; kind: string; payload_json: string }>(
     `SELECT r.agent_id, a.name, r.kind, r.payload_json FROM rows r JOIN agents a ON a.agent_id = r.agent_id
-     WHERE r.kind IN ('EXIT', 'EXCURSIONS') AND r.late = 0 ${agent ? "AND r.agent_id = ?" : ""}`,
+     WHERE r.kind IN ('EXIT', 'EXCURSIONS') AND r.late = 0 ${agent ? "AND r.agent_id = ?" : ""}
+     LIMIT 200000`,
     ...(agent ? [agent] : []),
   );
   const by = new Map<string, Record_ & { caps: number[] }>();
@@ -222,7 +270,7 @@ async function leaderboard(db: HubDb): Promise<Response> {
     note:
       "Counts only rows published within 6 h of when they happened, signed by the agent and hash-linked to the row " +
       "before; published rows can't be edited. This proves a record wasn't rewritten or backfilled — not that the " +
-      "agent's broker fills were real.",
+      "agent's broker fills were real. Names are chosen by each agent and are not verified: the agent_id is the identity.",
     agents: all.slice(0, 100).map((r) => ({ ...r, win_rate: Math.round((r.wins / r.trades) * 100) / 100 })),
   });
 }

@@ -109,7 +109,7 @@ export function openBackup(text: string, passphrase: string): OpenedBackup {
   try {
     env = EnvelopeSchema.parse(JSON.parse(text));
   } catch {
-    throw new Error("This isn't a CORTEX-54 backup file.");
+    throw new Error("This isn't a Savant backup file.");
   }
   if (env.kdf.n > 2 ** 20 || env.kdf.r > 32 || env.kdf.p > 16)
     throw new Error("Backup settings out of range.");
@@ -133,18 +133,35 @@ export function openBackup(text: string, passphrase: string): OpenedBackup {
 }
 
 /**
- * Write a backup into a CORTEX home (the brain must be stopped). This computer keeps its own generated secrets, port
+ * Write a backup into a Savant home (the brain must be stopped). This computer keeps its own generated secrets, port
  * and network setting; keys come from the backup when it has them, else the ones already here stay.
  */
 export function restoreInto(home: string, b: OpenedBackup, current: LocalConfig | null): LocalConfig {
   mkdirSync(home, { recursive: true, mode: 0o700 });
-  for (const [n, buf] of Object.entries(b.files)) {
-    const dest = join(home, n);
-    const tmp = `${dest}.restore`;
-    writeFileSync(tmp, buf as Buffer, { mode: 0o600 });
-    for (const side of ["-wal", "-shm"]) rmSync(`${dest}${side}`, { force: true });
-    renameSync(tmp, dest);
+  // audit F-A6-06: stage every file first, then swap; if any swap fails, put the previous files back, so a failed
+  // restore never leaves a mix of old and new databases
+  const names = Object.keys(b.files);
+  for (const n of names)
+    writeFileSync(join(home, `${n}.restore`), b.files[n as FileName] as Buffer, { mode: 0o600 });
+  const swapped: string[] = [];
+  try {
+    for (const n of names) {
+      const dest = join(home, n);
+      if (existsSync(dest)) renameSync(dest, `${dest}.prev`);
+      for (const side of ["-wal", "-shm"]) rmSync(`${dest}${side}`, { force: true });
+      renameSync(`${dest}.restore`, dest);
+      swapped.push(dest);
+    }
+  } catch (e) {
+    for (const dest of swapped) rmSync(dest, { force: true });
+    for (const n of names) {
+      const dest = join(home, n);
+      if (existsSync(`${dest}.prev`)) renameSync(`${dest}.prev`, dest);
+      rmSync(`${dest}.restore`, { force: true });
+    }
+    throw e;
   }
+  for (const n of names) rmSync(join(home, `${n}.prev`), { force: true });
   return restoredConfig(b, current);
 }
 
@@ -162,10 +179,12 @@ export function restoredConfig(b: OpenedBackup, current: LocalConfig | null): Lo
       ? b.config.llm
       : {
           ...b.config.llm,
-          endpoints: b.config.llm.endpoints.map((e) => ({
-            ...e,
-            key: current?.llm.endpoints.find((x) => x.id === e.id)?.key ?? "",
-          })),
+          // audit F-A6-06: a key stays with the address it was given to; a backup that repoints an endpoint id at
+          // another URL gets no key
+          endpoints: b.config.llm.endpoints.map((e) => {
+            const mine = current?.llm.endpoints.find((x) => x.id === e.id);
+            return { ...e, key: mine && mine.url === e.url ? mine.key : "" };
+          }),
         },
     onboarded: true,
   };

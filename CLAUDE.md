@@ -50,10 +50,12 @@ No model, no Governor, no Discord button can change them at runtime.
    ≥90% puts the system in `REDUCE_ONLY`. We never fail open. We never trade on a guess.
 7. **The journal is append-only and hash-chained.** No UPDATE or DELETE on journal tables (SQL triggers block
    them). The daily chain head is posted to Discord as an external anchor.
-8. **Self-modification is a pull request; real money needs ratification.** The Governor can only *propose*
-   doctrine/scar-tissue/calibration changes as a GitHub PR; the operator merges. There is **no approve-each-trade
-   mode**. LIVE stays dormant (Stop 0) until every roadmap phase is built and the fully autonomous PAPER account
-   passes the graduation gate; then the operator ratifies once (`RATIFY`) and LIVE trades autonomously.
+8. **Self-modification needs approval; real money needs ratification.** The Governor can only *propose*
+   calibration/scar-tissue changes, and proposals can only tighten. On the publisher's own deployment a proposal is a
+   GitHub PR the operator merges; on a customer's install it is a proposal in the app (Settings → Governor proposals)
+   the user approves or dismisses (ADR-091). There is **no approve-each-trade mode**. LIVE joins at Stop 0 and trades
+   only after the operator ratifies it (`RATIFY` on a fresh sign-in); the paper graduation gate is shown as advice
+   before ratifying (ADR-083).
 
 If you are about to write code that weakens any of these, stop and ask the operator.
 
@@ -210,7 +212,7 @@ neurons/M, no output billing (ADR-043). **Jev** (TypeSafe AI) is not in our Work
 | Options live at $75–$125 | The sizer forbids it until ~$1,000+. Options are paper shadow lab only. |
 | Containers for Monte Carlo/backtests | Paid only. GitHub Actions (Python) does batch compute. |
 | satori + resvg PNG HUD in the Worker | 10 ms CPU and 3 MB bundle on Free. Discord embeds + QuickChart image URLs instead. |
-| Cloudflare Access for the web terminal | Avoided (card risk). Discord OAuth restricted to the operator's user ID. |
+| Cloudflare Access for the web terminal | Avoided (card risk). Single-use sign-in links from `/terminal` or the app (ADR-034), no OAuth. |
 | R2 archives, Vectorize semantic memory | R2 avoided. Beliefs live in D1 with tags; Vectorize only if D1 search proves insufficient. |
 | Cron `0 13 * * 1-5` = 8:30 ET | UTC crons drift with DST. Session logic uses Alpaca `/v2/clock` + `/v2/calendar`. |
 | Copy HKUDS/AI-Trader skills | No license. Ideas only. |
@@ -290,6 +292,10 @@ research/                 Python (uv): cortex_research.run crypto|equity|world �
 local/                    cortexd local mode + `cortex` CLI (ADR-064/065): runtime, sandbox broker, jobs, service,
                           deploy, runner, memory packs, settings backend + live reload (settings.ts), agent-prompt.ts,
                           keychain, encrypted backups, licences (keychain.ts, backup.ts, license.ts — ADR-076/077)
+landing/                  the product's landing page (ADR-084/090): static vanilla TS + GSAP/Lenis, numbers printed from config/
+                          at build time, demo cockpit at /demo/; getsavant.pro on Vercel (`pnpm deploy:landing`). Notes: landing/CLAUDE.md
+workers/license/          Whop licence-key server (ADR-086): machine-bound Ed25519 tokens (`pnpm deploy:license`)
+workers/downloads/        permanent download links to the newest installers (ADR-094, `pnpm deploy:downloads`)
 desktop/                  Tauri v2 app (ADR-066): src-tauri/ shell; bundles dist/cortexd + an official Node runtime
 hub/                      community hub Worker + D1 migrations (ADR-068), hosted by the publisher
 src/universe/ src/portfolio/ src/hub/   dynamic universe + scout (058), exits/lateness/book (059–061), hub protocol (068)
@@ -327,6 +333,7 @@ pnpm cortex llm add <key-or-url> [--models a,b]   # model pool (ADR-072): list |
 pnpm cortex support       # redacted support file (no secrets) for asking for help (ADR-074)
 pnpm cortex backup [--keys] | restore FILE | keychain on|off | license install FILE | reset --yes   # ADR-076/077
 pnpm web:demo             # static demo cockpit on synthetic data → demo-dist/ (ADR-077)
+pnpm landing:build        # landing page + demo cockpit → landing-dist/ (ADR-084); landing:dev / landing:preview to view
 gh workflow run release -f bump=minor   # desktop release for every platform (auto on merges to main; ADR-077)
 pnpm demo                 # keyless local demo on live crypto prices (simulated broker)
 pnpm cortexd:build        # dist/cortexd bundle (no TS source); pnpm desktop:runtime && pnpm desktop:build → the app
@@ -496,5 +503,15 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   "Make it cash-only" for margin paper accounts, no Cloudflare free-tier meter in local mode. ADR-082: outside links
   in the desktop app open in the system browser. ADR-083: the app can connect a live account (joins at Stop 0; the
   user may ratify whenever they choose, with the paper gate shown as a warning); setup no longer offers the agent path.
+- 2026-10-27: ADR-084: the landing page (`landing/`): its own paper-and-ink identity, the real sizer and journal hash
+  running on the page, constitution and limits printed from config/ at build time, the demo cockpit one click from
+  the hero. GitHub Pages now serves the page at the root and the demo cockpit at `/demo/`.
+- 2026-10-27: launch round (operator). ADR-085 rebrand: **Savant** (the app) with **Cortex** (the agent), "54" retired.
+  ADR-086 Whop checkout/licences ($35/mo, $299/yr, 7-day trial, free demo) + the `savant-license` Worker. ADR-087 legal
+  set + first-launch terms. ADR-088 pre-launch audit response (`docs/AUDIT_2026-10-27.md`). ADR-089 shipped-build
+  protection (obfuscation, bytecode, tamper check). ADR-090 getsavant.pro on Vercel, downloads/updates via the domain.
+  ADR-091 Governor proposals approved in the app on customer installs (U8 reworded). ADR-092 private source repo,
+  public binary releases, no git for customers. ADR-093 accounts on getsavant.pro (Sign in with Whop), app device
+  sign-in, docs. ADR-094 downloads at getsavant.pro/download/<target> (savant-downloads Worker), SETTINGS in groups. Licence server live at savant-license.samplayz2ks.workers.dev (also getsavant.pro/api).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

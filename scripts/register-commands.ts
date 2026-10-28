@@ -24,5 +24,5 @@ async function register(
   console.log(`${label}: registered ${(JSON.parse(text) as unknown[]).length} commands`);
 }
 
-await register("CORTEX", process.env.DISCORD_APP_ID, process.env.DISCORD_BOT_TOKEN, CORTEX_COMMANDS);
+await register("Savant", process.env.DISCORD_APP_ID, process.env.DISCORD_BOT_TOKEN, CORTEX_COMMANDS);
 await register("SENTINEL", process.env.SENTINEL_APP_ID, process.env.SENTINEL_BOT_TOKEN, SENTINEL_COMMANDS);

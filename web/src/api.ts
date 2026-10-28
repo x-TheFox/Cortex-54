@@ -377,6 +377,21 @@ export interface SettingsView {
   live?: { mode: string; reason: string | null; equityUsd: number | null; autonomyStop: number } | null;
   /** ADR-081: the paper account's mode and why */
   account?: { mode: string; reason: string | null; startUsd: number; equityUsd: number | null } | null;
+  /** ADR-091: what the weekly Governor would change, waiting for approval */
+  proposals?: {
+    calibration: {
+      n: number;
+      brierRaw: number | null;
+      brierCalibrated: number | null;
+      proposedAt: number | null;
+    } | null;
+    scars: { id: string; kind: string; rule: string }[];
+  };
+  /** ADR-087: the legal set the user accepted */
+  terms?: { current: string; accepted: boolean; acceptedAt: number | null };
+  /** ADR-086 */
+  licenseKey?: { set: boolean; hint: string };
+  storeUrl?: string;
   /** ADR-077 */
   license?:
     | { required: false }

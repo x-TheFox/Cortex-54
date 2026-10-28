@@ -14,11 +14,31 @@ import { lineage, normalizeUrl } from "./models.ts";
  * the user accepts the same model on both sides; the app warns that the bear then catches fewer bad trades.
  */
 
+/** Hosts a model endpoint may never point at: cloud metadata services and link-local addresses. */
+export function endpointHostAllowed(u: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(u);
+  } catch {
+    return false;
+  }
+  if (url.username || url.password) return false;
+  const h = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (/^169\.254\./.test(h) || /^fe80:/i.test(h) || h === "fd00:ec2::254") return false;
+  if (h === "metadata.google.internal" || h === "metadata" || h.endsWith(".internal")) return false;
+  return true;
+}
+
 export const EndpointSchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]{0,23}$/),
   name: z.string().min(1).max(60),
   format: z.enum(["openai", "anthropic"]),
-  url: z.string().regex(/^https?:\/\//),
+  // audit F-A4-04: https/http only, no credentials in the URL, never a cloud metadata or link-local address (a local
+  // model on localhost or the LAN is fine: that is the user's own machine)
+  url: z
+    .string()
+    .regex(/^https?:\/\//)
+    .refine((u) => endpointHostAllowed(u), { message: "this address is not allowed for a model endpoint" }),
   key: z.string().max(2000).default(""),
   /** enabled models (the user picks from discovery, or types names when the endpoint can't list them) */
   models: z.array(z.string().min(1).max(200)).max(50).default([]),

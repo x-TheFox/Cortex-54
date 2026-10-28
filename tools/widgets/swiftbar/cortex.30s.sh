@@ -1,6 +1,6 @@
 #!/bin/bash
-# <xbar.title>CORTEX-54 pulse pill</xbar.title>
-# <xbar.desc>Equity, positions, breakers and regime of the CORTEX-54 trading agent (read-only).</xbar.desc>
+# <xbar.title>Savant pulse pill</xbar.title>
+# <xbar.desc>Equity, positions, breakers and regime of the Savant trading agent (read-only).</xbar.desc>
 # <xbar.dependencies>curl</xbar.dependencies>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 #

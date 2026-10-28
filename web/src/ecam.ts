@@ -105,7 +105,11 @@ export function ecam(s: StatusView, now: number): Ecam {
       title: "BRAIN PULSE LOST",
       detail:
         s.lastPulseAt === null ? "No pulse recorded." : `Last pulse ${Math.round(age / 60_000)} min ago.`,
-      actions: ["SENTINEL WATCHES INDEPENDENTLY", "KILL SWITCH: gh workflow run kill-switch"],
+      // audit F-A6-11: the right advice depends on where the brain runs
+      actions:
+        (s.budget.scope ?? "cloudflare") === "cloudflare"
+          ? ["SENTINEL WATCHES INDEPENDENTLY", "KILL SWITCH: SENTINEL /kill IN DISCORD"]
+          : ["RESTART SAVANT (TRAY › QUIT, THEN OPEN IT)", "CLOSE POSITIONS ON ALPACA.MARKETS IF NEEDED"],
     });
   } else if (age > PULSE_LATE_MS) {
     cautions.push({

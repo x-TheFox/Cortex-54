@@ -7,7 +7,7 @@ import { PoolConfigSchema } from "../src/court/pool.ts";
 import { accountFor, secretBackend } from "./keychain.ts";
 
 /**
- * Local-mode configuration (ADR-064): one JSON file in the CORTEX home (default ~/.cortex54, override with
+ * Local-mode configuration (ADR-064): one JSON file in the Savant home (default ~/.cortex54, override with
  * CORTEX_HOME), readable only by the user. Holds the user's own keys; nothing in it ever leaves the machine except to
  * the provider each key belongs to.
  */
@@ -18,6 +18,8 @@ export const KEY_NAMES = [
   /** ADR-083: the user's live (real-money) Alpaca account; LIVE stays at Stop 0 until they ratify */
   "ALPACA_LIVE_KEY_ID",
   "ALPACA_LIVE_SECRET",
+  /** ADR-086: the licence key from the customer's Whop order (refreshes the machine-bound licence token daily) */
+  "SAVANT_LICENSE_KEY",
   "GEMINI_API_KEY",
   "GROQ_API_KEY",
   "NVIDIA_API_KEY",
@@ -56,10 +58,11 @@ export const LocalConfigSchema = z.object({
     .object({ enabled: z.boolean().default(true), max_parallel: z.number().int().min(1).max(4).default(2) })
     .default({ enabled: true, max_parallel: 2 }),
   starting_cash: z.number().positive().default(54),
+  // in keychain mode these live in the keychain and the file holds "" (audit F-A6-07); loadConfig merges them back
   secrets: z.object({
-    web_session: z.string().min(32),
-    ingest_hmac: z.string().min(32),
-    pill_token: z.string().min(32),
+    web_session: z.string().min(32).or(z.literal("")),
+    ingest_hmac: z.string().min(32).or(z.literal("")),
+    pill_token: z.string().min(32).or(z.literal("")),
   }),
   keys: z.partialRecord(z.enum(KEY_NAMES), z.string()).default({}),
   /** ADR-072: the user's own model endpoints (any number) and how the court uses the pool */
@@ -69,6 +72,8 @@ export const LocalConfigSchema = z.object({
   }),
   /** ADR-073: first-run onboarding finished (the app shows the welcome screen until then) */
   onboarded: z.boolean().default(false),
+  /** ADR-087: which legal set the user accepted, and when (null = not yet; entries stay held until they do) */
+  terms: z.object({ version: z.string(), accepted_at: z.number().int() }).nullable().default(null),
   /**
    * ADR-075: court hearings per UTC day. Unset = the doctrine's 12 (protects free-tier quotas). A pool with paid
    * models can run more; each hearing is ~9 model calls.
@@ -82,13 +87,21 @@ export const LocalConfigSchema = z.object({
   lan: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   /** ADR-076: where keys are kept: this file (mode 600) or the system keychain (macOS Keychain, libsecret, DPAPI) */
   secret_store: z.enum(["file", "keychain"]).default("file"),
-  /** ADR-065: the user's own cloud brain (cortex deploy), which this machine serves as a research runner */
+  /** ADR-065: the user's own cloud brain (savant deploy), which this machine serves as a research runner */
   cloud: z.object({ url: z.string(), worker: z.string(), ingest_hmac: z.string().min(32) }).optional(),
 });
 export type LocalConfig = z.infer<typeof LocalConfigSchema>;
 
+/**
+ * The Savant home (ADR-085): SAVANT_HOME (or the older CORTEX_HOME), else ~/.savant. A computer that already has the
+ * pre-rebrand ~/.cortex54 keeps using it, so nobody's settings, keys or journal move.
+ */
 export function cortexHome(): string {
-  return process.env.CORTEX_HOME || join(homedir(), ".cortex54");
+  const env = process.env.SAVANT_HOME || process.env.CORTEX_HOME;
+  if (env) return env;
+  const legacy = join(homedir(), ".cortex54");
+  const home = join(homedir(), ".savant");
+  return !existsSync(home) && existsSync(legacy) ? legacy : home;
 }
 
 export const configPath = (home = cortexHome()) => join(home, "config.json");
@@ -108,17 +121,30 @@ export function newConfig(mode: LocalConfig["mode"] = "demo"): LocalConfig {
 const VaultSchema = z.object({
   keys: z.partialRecord(z.enum(KEY_NAMES), z.string()).default({}),
   endpoint_keys: z.record(z.string(), z.string()).default({}),
+  /** audit F-A6-07: the app's own session/signing secrets, so config.json holds no secret at all in keychain mode */
+  secrets: z.record(z.string(), z.string()).default({}),
 });
+
+/** Fill any secret that is missing (an older vault, or a file from before keychain mode kept them). */
+function withSecrets(s: LocalConfig["secrets"], vault: Record<string, string>): LocalConfig["secrets"] {
+  const pick = (k: keyof LocalConfig["secrets"]) => (vault[k] || s[k] || secret()) as string;
+  return {
+    web_session: pick("web_session"),
+    ingest_hmac: pick("ingest_hmac"),
+    pill_token: pick("pill_token"),
+  };
+}
 
 export function loadConfig(home = cortexHome()): LocalConfig | null {
   const p = configPath(home);
   if (!existsSync(p)) return null;
   const cfg = LocalConfigSchema.parse(JSON.parse(readFileSync(p, "utf8")));
-  if (cfg.secret_store !== "keychain") return cfg;
+  if (cfg.secret_store !== "keychain") return { ...cfg, secrets: withSecrets(cfg.secrets, {}) };
   const raw = secretBackend(home).get(accountFor(home));
   const v = VaultSchema.parse(raw ? JSON.parse(raw) : {});
   return {
     ...cfg,
+    secrets: withSecrets(cfg.secrets, v.secrets),
     keys: { ...cfg.keys, ...v.keys },
     llm: {
       ...cfg.llm,
@@ -141,10 +167,13 @@ export function saveConfig(cfg: LocalConfig, home = cortexHome()): string {
         endpoint_keys: Object.fromEntries(
           onDisk.llm.endpoints.filter((e) => e.key).map((e) => [e.id, e.key]),
         ),
+        secrets: onDisk.secrets,
       }),
     );
     onDisk = {
       ...onDisk,
+      // the tray reads the read-only status token from this file, so it stays; the signing secrets don't
+      secrets: { web_session: "", ingest_hmac: "", pill_token: onDisk.secrets.pill_token },
       keys: {},
       llm: { ...onDisk.llm, endpoints: onDisk.llm.endpoints.map((e) => ({ ...e, key: "" })) },
     };

@@ -18,6 +18,7 @@ import { Onboarding } from "./onboarding.tsx";
 import { AccountPanel, CourtPanel } from "./overhead.tsx";
 import { AcctPage, FunnelPage, GovPage, MemPage, OptPage, StsPage } from "./pages.tsx";
 import { SettingsPage } from "./settings.tsx";
+import { TermsGate } from "./terms.tsx";
 import { Today } from "./today.tsx";
 
 // ADR-071: the app is the main dashboard; FEED and ASK carry everything Discord used to, SET configures it all.
@@ -60,7 +61,7 @@ function AccountColumn({ a, s, local = false }: { a: AccountView; s: StatusView;
         </div>
         <div className="dormant">
           {a.account === "LIVE"
-            ? "Real money starts after all phases are built, PAPER passes the 30-day gate, a live kill drill, and your RATIFY."
+            ? "Real money starts only when you RATIFY it. The paper record and the graduation gate are shown first."
             : "Waiting for the first reconciliation."}
         </div>
       </div>
@@ -242,14 +243,14 @@ export function App() {
         <div className="signin">
           <div className="display">
             <div className="glass">
-              <span className="label dim">CORTEX-54 · TERMINAL</span>
+              <span className="label dim">SAVANT · CORTEX</span>
               <p className="alert caution">
                 <span className="alert-title">
                   {boot === "expired" ? "LOGIN LINK EXPIRED" : "NO SESSION"}
                 </span>
               </p>
-              <p className="alert-action">OPEN THE DASHBOARD FROM THE CORTEX APP (TRAY → OPEN)</p>
-              <p className="alert-action">OR RUN `cortex link` · OR /terminal IN DISCORD</p>
+              <p className="alert-action">OPEN THE DASHBOARD FROM THE SAVANT APP (TRAY → OPEN)</p>
+              <p className="alert-action">OR RUN `savant link` · OR /terminal IN DISCORD</p>
               <p className="alert-action">EACH LINK WORKS ONCE, FOR 10 MINUTES</p>
             </div>
           </div>
@@ -280,7 +281,7 @@ export function App() {
         </button>
         <div className="strip-title" data-guide="strip">
           <span className="brand">
-            CORTEX-54<small>OPERATOR TERMINAL</small>
+            SAVANT<small>CORTEX AGENT</small>
           </span>
           <span className="readouts" aria-live="off">
             <span>
@@ -447,7 +448,11 @@ export function App() {
         </section>
       )}
 
-      {onb && settings.data && (
+      {settings.data?.managed === "local" && settings.data.terms && !settings.data.terms.accepted && (
+        <TermsGate s={settings.data} reload={settings.reload} />
+      )}
+
+      {onb && settings.data && (settings.data.terms?.accepted ?? true) && (
         <Onboarding
           s={settings.data}
           reload={settings.reload}

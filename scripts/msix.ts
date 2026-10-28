@@ -26,16 +26,16 @@ const xml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function manifest(o: { version: string; exe: string; publisher?: string; name?: string }): string {
-  const publisher = o.publisher ?? `CN=CORTEX-54, ${UNSIGNED_OID}`;
+  const publisher = o.publisher ?? `CN=Savant, ${UNSIGNED_OID}`;
   return `<?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   IgnorableNamespaces="uap rescap">
-  <Identity Name="${xml(o.name ?? "CORTEX54.Desktop")}" Publisher="${xml(publisher)}" Version="${msixVersion(o.version)}" ProcessorArchitecture="x64" />
+  <Identity Name="${xml(o.name ?? "Savant.Desktop")}" Publisher="${xml(publisher)}" Version="${msixVersion(o.version)}" ProcessorArchitecture="x64" />
   <Properties>
-    <DisplayName>CORTEX-54</DisplayName>
-    <PublisherDisplayName>CORTEX-54</PublisherDisplayName>
+    <DisplayName>Savant</DisplayName>
+    <PublisherDisplayName>Savant</PublisherDisplayName>
     <Logo>Assets\\StoreLogo.png</Logo>
   </Properties>
   <Dependencies>
@@ -46,7 +46,7 @@ export function manifest(o: { version: string; exe: string; publisher?: string; 
   </Resources>
   <Applications>
     <Application Id="CORTEX54" Executable="${xml(o.exe)}" EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements DisplayName="CORTEX-54" Description="Autonomous trading agent with a constitutional risk engine"
+      <uap:VisualElements DisplayName="Savant" Description="Autonomous trading agent with a constitutional risk engine"
         BackgroundColor="transparent" Square150x150Logo="Assets\\Square150x150Logo.png" Square44x44Logo="Assets\\Square44x44Logo.png" />
     </Application>
   </Applications>

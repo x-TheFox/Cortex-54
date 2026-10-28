@@ -259,6 +259,12 @@ def pmcc(sid: str, und: str, spot: float, calls: list[Quote], leaps: list[Quote]
     debit = lq.ask - sq.bid
     if debit <= 0:
         return "non-positive debit"
+    # audit F-B1-06: with the short assigned on a rally the position is worth at least the strike width, so a debit
+    # at or above the width locks in a loss on the very move the trade wants; max loss = the debit only holds when
+    # debit < width (the classic PMCC rule), which is now required
+    width = sq.strike - lq.strike
+    if debit >= width:
+        return f"debit {debit:.2f} ≥ strike width {width:.2f}: a rally would lock in a loss"
     fee = fees_cents(2)
     return Plan(
         sid, "diagonal", und,

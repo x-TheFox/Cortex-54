@@ -1,0 +1,10 @@
+# Audit BL-5 / F-A5-02: every third-party action is pinned to a commit SHA; Dependabot proposes updates as PRs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

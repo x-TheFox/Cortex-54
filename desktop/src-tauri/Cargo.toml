@@ -1,7 +1,7 @@
 [package]
 name = "cortex54-desktop"
 version = "0.1.0"
-description = "CORTEX-54 desktop app: the local brain, the cockpit and a tray pill"
+description = "Savant desktop app: the local Cortex agent, the cockpit and a tray pill"
 edition = "2021"
 
 [lib]
@@ -10,6 +10,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+sha2 = "0.10"
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
@@ -17,6 +18,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 
 [profile.release]
 codegen-units = 1
