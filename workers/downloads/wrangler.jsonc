@@ -7,6 +7,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
+  // dl.getsavant.pro (the getsavant.pro zone is on Cloudflare; Cloudflare creates the DNS record for it)
+  "routes": [{ "pattern": "dl.getsavant.pro", "custom_domain": true }],
   "observability": { "enabled": true },
   "vars": {
     // the repository whose releases hold the installers; switch to the public binary repo when the source goes private
