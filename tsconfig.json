@@ -17,5 +17,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src", "workers/sentinel/src", "hub/src"]
+  "include": ["src", "workers/sentinel/src", "workers/downloads/src", "hub/src"]
 }

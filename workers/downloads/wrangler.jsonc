@@ -1,0 +1,16 @@
+{
+  // Savant downloads (ADR-094): permanent links to the newest installers, streamed from the release storage under the
+  // product's own name. Optional secret: GITHUB_TOKEN (read-only; lifts the anonymous API rate limit).
+  // Deploy: pnpm deploy:downloads
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "savant-downloads",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "vars": {
+    // the repository whose releases hold the installers; switch to the public binary repo when the source goes private
+    "RELEASES_REPO": "x-TheFox/Cortex-54",
+    "SITE_ORIGIN": "https://getsavant.pro"
+  }
+}

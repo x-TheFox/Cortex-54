@@ -1260,3 +1260,22 @@ the site's CSP stays `'self'`. getsavant.pro/docs carries the install guide (inc
 Gatekeeper and Windows SmartScreen prompts), getting started, account, live trading, troubleshooting and uninstall.
 Checkout returns to /welcome/ with a payment confirmation. Also fixed on the way: the licence server read the plan
 from `plan_id`, but Whop sends `variant_id`, so every paid key would have been refused as the free plan.
+
+## ADR-094 — Downloads served under the product's name; SETTINGS in groups (2026-10-28)
+**Context:** operator: downloads should not come from GitHub, and the printed links were wrong: they asked for
+`Savant_darwin-aarch64.dmg` while releases hold `Savant_<version>_darwin-aarch64.dmg` (v0.1.5 even `CORTEX-54_…`), so every
+download link returned 404. Vercel Blob was ruled out by its egress limits; R2 needs a card on file (§1); other free
+file hosts cap bandwidth or storage.
+**Decision:** a small Worker, `savant-downloads` (`workers/downloads`), answers `/download/<target>` (mac, mac-intel,
+windows, windows-msi, windows-msix, linux, linux-deb, linux-rpm, linux-arm, linux-arm-deb, linux-arm-rpm) by finding that
+file in the latest release, whatever its version, and streaming it as `Savant-<version>-<target>.<ext>` with Range
+support. `/download/v<version>/<file>` serves exact files for the updater, `/updates/latest.json` the manifest, `/info`
+the version and sizes the site shows. Storage stays the release assets of the public binary repository (free, no
+bandwidth cap), which people never see; switching storage changes only `assetUrl`. getsavant.pro redirects
+`/download/*` to the Worker (bytes never pass through Vercel, so its bandwidth allowance is untouched) and rewrites the
+two small JSON files. The release workflow no longer uploads a second, version-less copy of every installer. Old
+`/download/Savant_<platform>.<ext>` links still resolve. Until getsavant.pro's DNS moves to Cloudflare the Worker answers
+on its workers.dev address; afterwards it gets `dl.getsavant.pro` and only the redirect changes.
+The app's SETTINGS page had grown into one 2,700 px column; it is now a list of groups (Licence, Trading, AI models,
+Governor, Alerts and phone, Keys and backups, Health) with one group open at a time, each part a card, and a badge
+on any group that wants a look (no models, unsigned licence, proposals waiting).

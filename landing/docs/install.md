@@ -8,11 +8,11 @@ after this; you only install once.
 
 | Computer | Download |
 |---|---|
-| Mac with Apple silicon (M1 or later) | [Savant for Apple silicon (.dmg)](/download/Savant_darwin-aarch64.dmg) |
-| Mac with Intel | [Savant for Intel Macs (.dmg)](/download/Savant_darwin-x86_64.dmg) |
-| Windows 10 or 11 (64-bit) | [Savant installer (.exe)](/download/Savant_windows-x86_64-setup.exe) · [.msi](/download/Savant_windows-x86_64.msi) · [.msix](/download/Savant_windows-x86_64.msix) |
-| Linux x64 | [AppImage](/download/Savant_linux-x86_64.AppImage) · [.deb](/download/Savant_linux-x86_64.deb) · [.rpm](/download/Savant_linux-x86_64.rpm) |
-| Linux arm64 | [AppImage](/download/Savant_linux-aarch64.AppImage) · [.deb](/download/Savant_linux-aarch64.deb) |
+| Mac with Apple silicon (M1 or later) | [Savant for Apple silicon (.dmg)](/download/mac) |
+| Mac with Intel | [Savant for Intel Macs (.dmg)](/download/mac-intel) |
+| Windows 10 or 11 (64-bit) | [Savant installer (.exe)](/download/windows) · [.msi](/download/windows-msi) · [.msix](/download/windows-msix) |
+| Linux x64 | [AppImage](/download/linux) · [.deb](/download/linux-deb) · [.rpm](/download/linux-rpm) |
+| Linux arm64 | [AppImage](/download/linux-arm) · [.deb](/download/linux-arm-deb) |
 
 Not sure which Mac you have? Apple menu → **About This Mac**: "Chip: Apple M…" means Apple silicon.
 
@@ -38,7 +38,7 @@ If macOS says the app **is damaged**, the download was interrupted: delete it, d
 
 ## Windows
 
-1. Run `Savant_windows-x86_64-setup.exe`.
+1. Run the installer you downloaded (`Savant-<version>-windows-setup.exe`).
 2. Windows SmartScreen may show **"Windows protected your PC"** because the installer isn't signed with a paid
    code-signing certificate. Click **More info**, then **Run anyway**. It asks once per download.
 3. Follow the installer. Savant starts in the tray (bottom-right, near the clock).
@@ -46,7 +46,7 @@ If macOS says the app **is damaged**, the download was interrupted: delete it, d
 Prefer an MSIX package (Windows 11)? Open PowerShell **as administrator** in your Downloads folder and run:
 
 ```
-Add-AppxPackage -AllowUnsigned .\Savant_windows-x86_64.msix
+Add-AppxPackage -AllowUnsigned .\Savant-*-windows.msix
 ```
 
 MSIX installs update through the next MSIX, not inside the app.
@@ -56,11 +56,11 @@ MSIX installs update through the next MSIX, not inside the app.
 - **AppImage** (any distribution): make it executable and run it.
 
   ```
-  chmod +x Savant_linux-x86_64.AppImage && ./Savant_linux-x86_64.AppImage
+  chmod +x Savant-*-linux-x64.AppImage && ./Savant-*-linux-x64.AppImage
   ```
 
-- **Debian/Ubuntu**: `sudo apt install ./Savant_linux-x86_64.deb`
-- **Fedora/RHEL**: `sudo dnf install ./Savant_linux-x86_64.rpm`
+- **Debian/Ubuntu**: `sudo apt install ./Savant-*-linux-x64.deb`
+- **Fedora/RHEL**: `sudo dnf install ./Savant-*-linux-x64.rpm`
 
 The tray icon needs a desktop with a system tray (GNOME needs the AppIndicator extension).
 

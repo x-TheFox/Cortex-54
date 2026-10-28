@@ -58,8 +58,9 @@ runs it.** We host exactly one service, the community hub, and it never touches 
   lasts 14 days and renews daily. Only the paid plans unlock trading.
 - **Landing page (ADR-090):** https://getsavant.pro on Vercel (`pnpm deploy:landing`), with pricing, the demo cockpit at
   `/demo/`, the post-purchase page at `/welcome/`, the legal set at `/legal/`, and stable redirects:
-  `/download/<file>` → the latest release asset, `/updates/latest.json` → the updater manifest. Installed apps and the
-  site only ever name getsavant.pro, so moving where releases are hosted is a one-line change in `landing/vercel.json`.
+  `/download/<target>` (mac, mac-intel, windows, linux, …) → the newest installer, `/updates/latest.json` → the updater
+  manifest, both served by the `savant-downloads` Worker (ADR-094, `pnpm deploy:downloads`). Installed apps and the site
+  only ever name getsavant.pro, so moving where releases are stored changes only that Worker.
   The old GitHub Pages copy is no longer deployed.
 - **The repo going private:** when it does, GitHub Actions minutes stop being free; the operator's own deployment
   should switch to `RUNNER_MODE=queue` with a desktop runner (ADR-065), which needs no Actions at all.

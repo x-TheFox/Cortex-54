@@ -1,3 +1,4 @@
+import { labelDownloads } from "./downloads.ts";
 import "./plain.ts";
 
 // Whop's checkout returns here with ?status=success (ADR-093): say so, then tidy the address bar.
@@ -7,3 +8,5 @@ if (q.get("status") === "success" || q.get("checkout_status") === "success") {
   if (n) n.hidden = false;
   history.replaceState(null, "", location.pathname);
 }
+
+void labelDownloads();

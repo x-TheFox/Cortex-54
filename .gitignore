@@ -35,3 +35,4 @@ demo-dist/
 desktop/src-tauri/tauri.release.conf.json
 # landing page build output (pnpm landing:build, ADR-084)
 landing-dist/
+.vercel/

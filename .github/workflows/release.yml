@@ -176,7 +176,6 @@ jobs:
         run: |
           v=${{ needs.plan.outputs.version }}
           node scripts/msix.ts "out/Savant_${v}_${{ matrix.platform }}.msi" "$v" "out/Savant_${v}_${{ matrix.platform }}.msix"
-          cp "out/Savant_${v}_${{ matrix.platform }}.msix" "out/Savant_${{ matrix.platform }}.msix"
       - name: Upload to the draft release
         shell: bash
         env:

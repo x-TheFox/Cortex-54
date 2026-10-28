@@ -42,9 +42,8 @@ for (const f of files) {
   const base = f.split(/[\\/]/).pop() ?? "";
   if (/\.(dmg|msi|deb|rpm|AppImage)$/.test(base) || /-setup\.exe$/.test(base)) {
     const ext = base.match(/(-setup\.exe|\.[A-Za-z]+)$/)?.[1] ?? "";
+    // getsavant.pro/download/<target> finds the newest of these whatever its version (ADR-094)
     put(f, `Savant_${version}_${platform}${ext}`);
-    // a version-less copy, so getsavant.pro/download/<name> (→ the latest release) is a link that never goes stale
-    put(f, `Savant_${platform}${ext}`);
   }
 }
 

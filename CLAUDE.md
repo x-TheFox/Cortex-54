@@ -295,6 +295,7 @@ local/                    cortexd local mode + `cortex` CLI (ADR-064/065): runti
 landing/                  the product's landing page (ADR-084/090): static vanilla TS + GSAP/Lenis, numbers printed from config/
                           at build time, demo cockpit at /demo/; getsavant.pro on Vercel (`pnpm deploy:landing`). Notes: landing/CLAUDE.md
 workers/license/          Whop licence-key server (ADR-086): machine-bound Ed25519 tokens (`pnpm deploy:license`)
+workers/downloads/        permanent download links to the newest installers (ADR-094, `pnpm deploy:downloads`)
 desktop/                  Tauri v2 app (ADR-066): src-tauri/ shell; bundles dist/cortexd + an official Node runtime
 hub/                      community hub Worker + D1 migrations (ADR-068), hosted by the publisher
 src/universe/ src/portfolio/ src/hub/   dynamic universe + scout (058), exits/lateness/book (059–061), hub protocol (068)
@@ -511,6 +512,6 @@ Never commit secrets. Never log API keys, account numbers or Discord tokens.
   protection (obfuscation, bytecode, tamper check). ADR-090 getsavant.pro on Vercel, downloads/updates via the domain.
   ADR-091 Governor proposals approved in the app on customer installs (U8 reworded). ADR-092 private source repo,
   public binary releases, no git for customers. ADR-093 accounts on getsavant.pro (Sign in with Whop), app device
-  sign-in, docs. Licence server live at savant-license.samplayz2ks.workers.dev (also getsavant.pro/api).
+  sign-in, docs. ADR-094 downloads at getsavant.pro/download/<target> (savant-downloads Worker), SETTINGS in groups. Licence server live at savant-license.samplayz2ks.workers.dev (also getsavant.pro/api).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
 - Local secrets: `.dev.vars` and `workers/sentinel/.dev.vars` (gitignored). Never print or commit them.

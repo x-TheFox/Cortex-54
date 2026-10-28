@@ -1435,26 +1435,142 @@ a {
   overflow-wrap: anywhere;
 }
 
-/* ---------------------------------------------------------------- SETTINGS */
+/* ---------------------------------------------------------------- SETTINGS
+   A list of groups on the left, one group open on the right; each part of a group is its own card. */
 .settings {
   display: grid;
-  gap: 26px;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
 }
-.set-sec {
-  border-top: 1px solid var(--rule);
-  padding-top: 14px;
+.set-nav {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 2px;
+}
+.set-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0 4px 4px 0;
+  color: var(--engrave);
+  font: 400 13.5px var(--ui);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color 120ms var(--ease),
+    background-color 120ms var(--ease);
+}
+.set-tab:hover {
+  color: var(--white);
+  background: var(--glass-2);
+}
+.set-tab[aria-current="page"] {
+  color: var(--cyan);
+  border-left-color: var(--cyan);
+  background: var(--glass-2);
+}
+.set-badge {
+  flex: none;
+  font: 700 10px var(--num);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+}
+.set-badge.green {
+  color: var(--green);
+}
+.set-badge.amber {
+  color: var(--amber);
+}
+.set-badge.red {
+  color: var(--red);
+}
+.set-badge.cyan {
+  color: var(--cyan);
+}
+.set-body {
+  display: grid;
+  gap: 14px;
+  max-width: 880px;
   min-width: 0;
 }
-.set-sec:first-child {
-  border-top: 0;
-  padding-top: 0;
+.set-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin-bottom: 2px;
+}
+.set-head h3 {
+  margin: 0;
+  font: 700 18px var(--ui);
+  color: var(--white);
+}
+.set-head p {
+  flex-basis: 100%;
+  margin: 0;
+  font: 400 13px / 1.5 var(--ui);
+  color: var(--engrave);
+}
+.set-sec {
+  background: var(--glass-2);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 16px 18px 18px;
+  min-width: 0;
 }
 .set-sec h4 {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   font: 700 12px var(--ui);
   letter-spacing: 0.14em;
   color: var(--white);
   text-transform: uppercase;
+}
+.set-sec .cost {
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: 72ch;
+}
+.set-sec .alert-opt + .alert-opt {
+  border-top: 1px solid var(--rule);
+  padding-top: 14px;
+  margin-top: 16px;
+}
+@media (max-width: 760px) {
+  .settings {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .set-nav {
+    position: static;
+    display: flex;
+    overflow-x: auto;
+    gap: 4px;
+    padding-bottom: 4px;
+  }
+  .set-tab {
+    width: auto;
+    flex: none;
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 4px 4px 0 0;
+  }
+  .set-tab[aria-current="page"] {
+    border-bottom-color: var(--cyan);
+  }
+  .set-sec {
+    padding: 14px;
+  }
 }
 .set-grid {
   display: grid;
@@ -1791,8 +1907,10 @@ a {
   font: 400 14px / 1.5 var(--ui);
 }
 .onb .set-sec {
-  border-top: 0;
-  padding-top: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
 }
 @media (prefers-reduced-motion: reduce) {
   .onb-card,

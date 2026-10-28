@@ -1,3 +1,4 @@
+import { labelDownloads } from "./downloads.ts";
 import "./plain.ts";
 import { api, finishSignIn, h, signedIn, signIn, signOut } from "./auth.ts";
 
@@ -198,14 +199,14 @@ async function show(): Promise<void> {
         ]
       : []),
     h("div", { class: "acct-grid" }, ...plans.map((p) => planCard(p, note, () => void show()))),
-    h("h2", {}, "Download"),
+    h("h2", {}, "Download ", h("span", { class: "fine", "data-dl-version": "" })),
     h(
       "p",
       { class: "dl" },
-      h("a", { class: "btn btn-line", href: "/download/Savant_darwin-aarch64.dmg" }, "macOS · Apple silicon"),
-      h("a", { class: "btn btn-line", href: "/download/Savant_darwin-x86_64.dmg" }, "macOS · Intel"),
-      h("a", { class: "btn btn-line", href: "/download/Savant_windows-x86_64-setup.exe" }, "Windows"),
-      h("a", { class: "btn btn-line", href: "/download/Savant_linux-x86_64.AppImage" }, "Linux"),
+      h("a", { class: "btn btn-line", href: "/download/mac" }, "macOS · Apple silicon"),
+      h("a", { class: "btn btn-line", href: "/download/mac-intel" }, "macOS · Intel"),
+      h("a", { class: "btn btn-line", href: "/download/windows" }, "Windows"),
+      h("a", { class: "btn btn-line", href: "/download/linux" }, "Linux"),
     ),
     h(
       "p",
@@ -223,6 +224,7 @@ async function show(): Promise<void> {
       }),
     ),
   );
+  void labelDownloads(root);
 }
 
 (async () => {

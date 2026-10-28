@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 const [dir, version, notesFile] = process.argv.slice(2);
 if (!dir || !version) throw new Error("usage: <dir> <version> [notes.md]");
-// Bundles are linked through the product domain (vercel.json redirects /download/* to the release files), so moving
+// Bundles are linked through the product domain (vercel.json sends /download/* to the savant-downloads Worker, ADR-094), so moving
 // where releases are hosted only changes the redirect, never an installed app.
 const base = (process.env.SAVANT_DOWNLOAD_BASE ?? "https://getsavant.pro").replace(/\/$/, "");
 const platforms: Record<string, { signature: string; url: string }> = {};

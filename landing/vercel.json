@@ -14,18 +14,8 @@
       "permanent": true
     },
     {
-      "source": "/download/v:version/:file",
-      "destination": "https://github.com/x-TheFox/Cortex-54/releases/download/v:version/:file",
-      "permanent": false
-    },
-    {
-      "source": "/download/:file",
-      "destination": "https://github.com/x-TheFox/Cortex-54/releases/latest/download/:file",
-      "permanent": false
-    },
-    {
-      "source": "/updates/latest.json",
-      "destination": "https://github.com/x-TheFox/Cortex-54/releases/latest/download/latest.json",
+      "source": "/download/:path*",
+      "destination": "https://savant-downloads.samplayz2ks.workers.dev/download/:path*",
       "permanent": false
     },
     {
@@ -35,8 +25,23 @@
     },
     {
       "source": "/account",
-      "destination": "https://whop.com/@me/settings/orders",
-      "permanent": false
+      "destination": "/account/",
+      "permanent": true
+    },
+    {
+      "source": "/activate",
+      "destination": "/activate/",
+      "permanent": true
+    },
+    {
+      "source": "/docs",
+      "destination": "/docs/",
+      "permanent": true
+    },
+    {
+      "source": "/welcome",
+      "destination": "/welcome/",
+      "permanent": true
     }
   ],
   "headers": [
@@ -83,6 +88,14 @@
     {
       "source": "/api/:path*",
       "destination": "https://savant-license.samplayz2ks.workers.dev/:path*"
+    },
+    {
+      "source": "/updates/latest.json",
+      "destination": "https://savant-downloads.samplayz2ks.workers.dev/updates/latest.json"
+    },
+    {
+      "source": "/downloads.json",
+      "destination": "https://savant-downloads.samplayz2ks.workers.dev/info"
     }
   ]
 }

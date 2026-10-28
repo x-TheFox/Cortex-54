@@ -908,7 +908,7 @@ export function ModelsSection({ s, save, saving }: { s: SettingsView; save: Save
   const single = (s.pool?.models ?? 0) === 1;
   return (
     <section className="set-sec">
-      <h4>AI models</h4>
+      <h4>The court's models</h4>
       <p className="cost">
         The court argues every trade with at least two different models: one makes the case, another attacks
         it. Add as many as you like, free or paid: Savant rotates through all of them (so free limits last
@@ -1162,7 +1162,7 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
   };
   return (
     <section className="set-sec">
-      <h4>Alerts</h4>
+      <h4>Alerts on your phone or Discord</h4>
       <p className="cost">
         Everything always appears in the FEED. These send it to your phone or Discord too.
       </p>
@@ -1409,7 +1409,7 @@ export function ProposalsSection({ s, reload }: { s: SettingsView; reload: () =>
   };
   return (
     <section className="set-sec">
-      <h4>Governor proposals</h4>
+      <h4>Waiting for you</h4>
       <p className="cost">
         Each week the Governor reviews how the robot's calls turned out and suggests changes. They only ever
         make it more careful, and nothing changes until you approve it.
@@ -1528,7 +1528,7 @@ export function LicenseSection({ s, reload }: { s: SettingsView; reload: () => v
   };
   return (
     <section className="set-sec">
-      <h4>Licence</h4>
+      <h4>This computer</h4>
       <p className={`note-line ${lic.ok ? "green" : "amber"}`} role="status">
         {lic.ok
           ? `Licensed${lic.license.plan === "trial" ? " (free trial)" : ` · ${lic.license.plan}`}${lic.daysLeft === null ? "" : ` · renews automatically (good offline for ${lic.daysLeft} more days)`}. Paper and live trading are on.`
@@ -1637,7 +1637,7 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
   const store = s.secretStore;
   return (
     <section className="set-sec">
-      <h4>Keys, backups and moving computers</h4>
+      <h4>Keys, backups and moving</h4>
       <div className="alert-opt">
         <b>Where your keys are kept</b>
         {store?.backend ? (
@@ -1784,7 +1784,7 @@ export function HealthSection() {
   };
   return (
     <section className="set-sec">
-      <h4>Health</h4>
+      <h4>Checks</h4>
       <p className="cost">Checks everything the robot needs, in plain words. Same as `savant doctor`.</p>
       <div className="set-actions">
         <button type="button" className="chip go" disabled={busy} onClick={() => void run()}>
@@ -1814,6 +1814,77 @@ export function HealthSection() {
 
 // ------------------------------------------------------------------ page
 
+type Tone = "green" | "amber" | "red" | "cyan";
+interface Tab {
+  id: string;
+  label: string;
+  blurb: string;
+  /** a dot (and a word) beside the tab, only when something wants a look */
+  status?: { tone: Tone; text: string } | null;
+}
+
+const TAB_KEY = "savant.settings.tab";
+
+function proposalCount(s: SettingsView): number {
+  const p = s.proposals;
+  return p ? (p.calibration ? 1 : 0) + p.scars.length : 0;
+}
+
+function tabsFor(s: SettingsView): Tab[] {
+  const lic = s.license;
+  const models = s.llm?.endpoints.length ?? 0;
+  const n = proposalCount(s);
+  const tabs: (Tab | null)[] = [
+    lic?.required
+      ? {
+          id: "account",
+          label: "Licence",
+          blurb: "Your Savant account on this computer.",
+          status: lic.ok ? null : { tone: "amber", text: "Sign in" },
+        }
+      : null,
+    {
+      id: "trading",
+      label: "Trading",
+      blurb: "Which broker accounts the robot trades.",
+      status: s.mode === "demo" ? { tone: "cyan", text: "Demo" } : null,
+    },
+    {
+      id: "ai",
+      label: "AI models",
+      blurb: "The models that argue each trade, news triage and how many hearings a day.",
+      status:
+        models === 0
+          ? { tone: "red", text: "None" }
+          : models === 1
+            ? { tone: "amber", text: "Add one" }
+            : null,
+    },
+    {
+      id: "governor",
+      label: "Governor",
+      blurb: "Changes the robot proposes to itself. They only ever make it more careful.",
+      status: n ? { tone: "cyan", text: String(n) } : null,
+    },
+    {
+      id: "alerts",
+      label: "Alerts and phone",
+      blurb: "Where the robot reaches you, and opening the cockpit from your phone.",
+    },
+    { id: "data", label: "Keys and backups", blurb: "Where keys live, backups, moving computers, reset." },
+    { id: "health", label: "Health", blurb: "Check everything works, get a support file, run setup again." },
+  ];
+  return tabs.filter((t): t is Tab => t !== null);
+}
+
+function readTab(): string | null {
+  try {
+    return localStorage.getItem(TAB_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export function SettingsPage({
   s,
   reload,
@@ -1824,28 +1895,87 @@ export function SettingsPage({
   restartOnboarding: () => void;
 }) {
   const { save, saving } = useSaver(reload);
+  const [tab, setTab] = useState<string | null>(readTab);
   if (!s) return <p className="empty">Loading settings…</p>;
   if (s.managed === "cloud") return <p className="empty">{s.message}</p>;
+  const tabs = tabsFor(s);
+  const cur = tabs.find((t) => t.id === tab) ?? tabs[0];
+  if (!cur) return null;
+  const pick = (id: string) => {
+    setTab(id);
+    try {
+      localStorage.setItem(TAB_KEY, id);
+    } catch {
+      /* storage unavailable: the tab just isn't remembered */
+    }
+  };
+  const props = { s, save, saving };
   return (
     <div className="settings">
-      {saving && <p className="note-line cyan">Applying…</p>}
-      <LicenseSection s={s} reload={reload} />
-      <ProposalsSection s={s} reload={reload} />
-      <TradingSection s={s} save={save} saving={saving} />
-      <ModelsSection s={s} save={save} saving={saving} />
-      <ClefSection s={s} save={save} saving={saving} />
-      <CourtSection s={s} save={save} saving={saving} />
-      <AlertsSection s={s} save={save} saving={saving} />
-      <PhoneSection s={s} save={save} saving={saving} />
-      <DataSection s={s} save={save} saving={saving} />
-      <HealthSection />
-      <section className="set-sec">
-        <h4>Setup</h4>
-        <p className="cost">Run the guided setup again.</p>
-        <button type="button" className="chip" onClick={restartOnboarding}>
-          OPEN SETUP
-        </button>
-      </section>
+      <nav className="set-nav" aria-label="Settings">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className="set-tab"
+            aria-current={t.id === cur.id ? "page" : undefined}
+            onClick={() => pick(t.id)}
+          >
+            <span>{t.label}</span>
+            {t.status && <span className={`set-badge ${t.status.tone}`}>{t.status.text}</span>}
+          </button>
+        ))}
+      </nav>
+      <div className="set-body">
+        <header className="set-head">
+          <h3>{cur.label}</h3>
+          <p>{cur.blurb}</p>
+          {saving && <span className="note-line cyan">Applying…</span>}
+        </header>
+        {cur.id === "account" && <LicenseSection s={s} reload={reload} />}
+        {cur.id === "trading" && <TradingSection {...props} />}
+        {cur.id === "ai" && (
+          <>
+            <ModelsSection {...props} />
+            <ClefSection {...props} />
+            <CourtSection {...props} />
+          </>
+        )}
+        {cur.id === "governor" &&
+          (proposalCount(s) ? (
+            <ProposalsSection s={s} reload={reload} />
+          ) : (
+            <section className="set-sec">
+              <h4>Nothing to review</h4>
+              <p className="cost">
+                Once a week the Governor grades the robot's own record. When it finds its confidence was off,
+                or a pattern that keeps losing, it proposes a fix here for you to approve or dismiss.
+                Proposals can only make the robot more careful; nothing changes until you approve.
+              </p>
+            </section>
+          ))}
+        {cur.id === "alerts" && (
+          <>
+            <AlertsSection {...props} />
+            <PhoneSection {...props} />
+          </>
+        )}
+        {cur.id === "data" && <DataSection {...props} />}
+        {cur.id === "health" && (
+          <>
+            <HealthSection />
+            <section className="set-sec">
+              <h4>Setup</h4>
+              <p className="cost">Walk through the guided setup again. Nothing is lost.</p>
+              <div className="set-actions">
+                <button type="button" className="chip" onClick={restartOnboarding}>
+                  OPEN SETUP
+                </button>
+              </div>
+            </section>
+          </>
+        )}
+      </div>
     </div>
   );
 }

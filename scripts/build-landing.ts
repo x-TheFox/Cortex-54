@@ -4,7 +4,7 @@
  * (_headers, the service worker) are dropped, as the Pages deploy always did.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildDocs } from "./build-docs.ts";
@@ -21,14 +21,9 @@ buildDocs("landing/docs", "landing-dist/docs"); // ADR-093: install guide and he
 const tp = join(mkdtempSync(join(tmpdir(), "savant-tp-")), "THIRD_PARTY_NOTICES.md");
 execFileSync("pnpm", ["exec", "tsx", "scripts/third-party.ts", tp], { stdio: "inherit" });
 writeFileSync("landing-dist/legal/third-party.html", page(readFileSync(tp, "utf8")).html);
-// ADR-090: Vercel serves landing-dist as a static site; its headers and redirects (downloads, updates) travel with it
-// ADR-092: the redirects name the public repository that holds the installers (the source repository is private)
-const releases = process.env.SAVANT_RELEASES_REPO ?? "x-TheFox/Cortex-54";
-if (!/^[\w.-]+\/[\w.-]+$/.test(releases)) throw new Error("SAVANT_RELEASES_REPO must look like owner/repo");
-writeFileSync(
-  "landing-dist/vercel.json",
-  readFileSync("landing/vercel.json", "utf8").replaceAll("x-TheFox/Cortex-54", releases),
-);
+// ADR-090: Vercel serves landing-dist as a static site; its headers, redirects and rewrites travel with it. Downloads
+// and updates go to the savant-downloads Worker (ADR-094), which knows where the release files are stored.
+copyFileSync("landing/vercel.json", "landing-dist/vercel.json");
 if (!existsSync("landing-dist/index.html") || !existsSync("landing-dist/demo/index.html")) {
   throw new Error("landing build incomplete");
 }
