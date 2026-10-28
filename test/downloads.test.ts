@@ -98,6 +98,26 @@ describe("Savant downloads (ADR-094)", () => {
     expect(r.headers.get("content-range")).toBe("bytes 0-6/1000");
   });
 
+  it("reads exact (pre-rebrand) names from the release page when the API is rate-limited", async () => {
+    const f = async (url: string): Promise<Response> => {
+      if (url.includes("api.github.com")) return new Response("limited", { status: 403 });
+      if (url.endsWith("/releases/latest"))
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://github.com/o/bins/releases/tag/v0.1.5" },
+        });
+      if (url.includes("/expanded_assets/"))
+        return new Response(
+          '<a href="/o/bins/releases/download/v0.1.5/CORTEX-54_0.1.5_darwin-aarch64.dmg" rel="nofollow">',
+        );
+      if (url.endsWith("/v0.1.5/CORTEX-54_0.1.5_darwin-aarch64.dmg")) return new Response("dmg");
+      return new Response("nf", { status: 404 });
+    };
+    const r = await get("/download/mac", f);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-disposition")).toContain("Savant-0.1.5-mac-apple-silicon.dmg");
+  });
+
   it("keeps working when the API is rate-limited (tag from the redirect, predictable names)", async () => {
     const { f } = fakeGitHub({ apiDown: true });
     const r = await get("/download/mac-intel", f);
