@@ -85,6 +85,15 @@ export const resetCache = () => {
 /** The latest published release: the API when it answers, otherwise the tag from the /releases/latest redirect. */
 export async function latest(env: Env, f: Fetch, now = Date.now()): Promise<Release | null> {
   if (memo && memo.repo === env.RELEASES_REPO && now - memo.at < TTL) return memo.release;
+  // one lookup per Cloudflare location every 5 minutes (keeps far under GitHub's anonymous API limit)
+  const cache = typeof caches === "undefined" ? null : (caches as unknown as { default: Cache }).default;
+  const key = `https://savant-downloads.cache/latest/${env.RELEASES_REPO}`;
+  const hit = await cache?.match(key).catch(() => undefined);
+  if (hit) {
+    const release = (await hit.json()) as Release;
+    memo = { at: now, repo: env.RELEASES_REPO, release };
+    return release;
+  }
   let release: Release | null = null;
   const r = await f(`https://api.github.com/repos/${env.RELEASES_REPO}/releases/latest`, {
     headers: {
@@ -112,19 +121,37 @@ export async function latest(env: Env, f: Fetch, now = Date.now()): Promise<Rele
     }).catch(() => null);
     const tag = /\/releases\/tag\/([^/?#]+)/.exec(w?.headers.get("location") ?? "")?.[1];
     if (tag) {
-      const version = decodeURIComponent(tag).replace(/^v/, "");
+      const t = decodeURIComponent(tag);
+      const version = t.replace(/^v/, "");
+      // the release page lists the exact file names (no API quota); guess the workflow's names only if it doesn't answer
+      const page = await f(
+        `https://github.com/${env.RELEASES_REPO}/releases/expanded_assets/${encodeURIComponent(t)}`,
+        {
+          headers: { "user-agent": "savant-downloads" },
+        },
+      ).catch(() => null);
+      const html = page?.ok ? await page.text() : "";
+      const names = [
+        ...new Set(
+          [...html.matchAll(/\/releases\/download\/[^/"]+\/([A-Za-z0-9._-]+)"/g)].map((m) => m[1] as string),
+        ),
+      ];
       release = {
-        tag: decodeURIComponent(tag),
+        tag: t,
         version,
         published_at: null,
-        assets: Object.values(TARGETS).map((t) => ({
-          name: `Savant_${version}_${t.platform}${t.ext}`,
-          size: 0,
-        })),
+        assets: names.length
+          ? names.map((name) => ({ name, size: 0 }))
+          : Object.values(TARGETS).map((x) => ({ name: `Savant_${version}_${x.platform}${x.ext}`, size: 0 })),
       };
     }
   }
-  if (release) memo = { at: now, repo: env.RELEASES_REPO, release };
+  if (release) {
+    memo = { at: now, repo: env.RELEASES_REPO, release };
+    await cache
+      ?.put(key, Response.json(release, { headers: { "cache-control": "public, max-age=300" } }))
+      .catch(() => undefined);
+  }
   return release;
 }
 
