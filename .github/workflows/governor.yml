@@ -39,9 +39,9 @@ jobs:
           since=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ)
           n=$(gh run list -R "$GITHUB_REPOSITORY" --workflow governor.yml --event workflow_dispatch --created ">=$since" --json databaseId --jq length)
           if [ "${n:-0}" -gt 0 ]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "already dispatched"; fi
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.dedupe.outputs.skip != 'true'
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         if: steps.dedupe.outputs.skip != 'true'
       - name: Mode
         id: mode
@@ -65,9 +65,9 @@ jobs:
         if: steps.dedupe.outputs.skip != 'true'
         run: |
           if git diff --quiet -- config/calibration.json config/scar-tissue.yaml; then echo "any=false" >> "$GITHUB_OUTPUT"; else echo "any=true" >> "$GITHUB_OUTPUT"; fi
-      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         if: steps.changed.outputs.any == 'true'
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.changed.outputs.any == 'true'
         with:
           node-version: 24
