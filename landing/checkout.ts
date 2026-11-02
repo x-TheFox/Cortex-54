@@ -13,5 +13,8 @@ export const PLANS = {
 
 export const TRIAL_DAYS = 7;
 
+/** The launch pricing's name (operator, 2026-11-02): early customers buy the Founder edition while launch settles. */
+export const EDITION = "Founder edition";
+
 /** Where customers find their licence key, downloads and billing (Whop's own account page). */
 export const ORDERS_URL = "https://whop.com/@me/settings/orders";

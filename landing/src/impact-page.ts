@@ -89,8 +89,10 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; message
 function tracker(v: View): HTMLElement {
   const c = v.current;
   const pool = c.pool_cents;
-  const next = Math.min(v.max_slots, Math.max(1, c.slots + (pool > 0 ? 1 : 0)));
-  const target = next * v.slot_target_cents;
+  // each foundation gets up to slot_target; one more joins as soon as the pool passes slots × slot_target
+  const next = Math.min(v.max_slots, c.slots + 1);
+  const target = Math.max(1, c.slots) * v.slot_target_cents;
+  const each = c.slots > 0 ? Math.floor(pool / c.slots) : 0;
   const pct = Math.max(2, Math.min(100, Math.round((pool / Math.max(1, target)) * 100)));
   // CSP allows styles set through the CSSOM, not style attributes
   const fill = h("span", {});
@@ -109,7 +111,12 @@ function tracker(v: View): HTMLElement {
         h("dt", {}, `${Math.round(v.share * 100)}% pledged`),
         h("dd", { class: "imp-pool" }, usd(pool)),
       ),
-      h("div", {}, h("dt", {}, "Foundations funded"), h("dd", {}, String(c.slots))),
+      h(
+        "div",
+        {},
+        h("dt", {}, "Foundations funded"),
+        h("dd", {}, c.slots > 0 ? `${c.slots} · ${usd(each)} each` : "0"),
+      ),
       h(
         "div",
         {},
@@ -122,7 +129,7 @@ function tracker(v: View): HTMLElement {
       {
         class: "imp-bar",
         role: "img",
-        "aria-label": `${usd(pool)} of ${usd(target)} toward ${next} foundation${next === 1 ? "" : "s"}`,
+        "aria-label": `${usd(pool)} in the pool; foundation ${next} joins above ${usd(target)}`,
       },
       fill,
     ),
@@ -130,8 +137,8 @@ function tracker(v: View): HTMLElement {
       "p",
       { class: "fine" },
       c.slots >= v.max_slots
-        ? `The pool funds the maximum of ${v.max_slots} foundations this month.`
-        : `Every ${usd(v.slot_target_cents)} in the pool funds one more foundation (up to ${v.max_slots}). ${usd(Math.max(0, target - pool))} to go for foundation ${next}.`,
+        ? `${v.max_slots} foundations, the most a month funds: they share the whole pool, however large.`
+        : `No cap: all of it is given, however small or large. Every ${usd(v.slot_target_cents)} of pool adds a foundation, so past ${usd(target)} foundation ${next} joins and the pool is split again (up to ${v.max_slots}; then the ${v.max_slots} share everything).`,
       c.computed_at
         ? ` Updated ${new Date(c.computed_at).toLocaleString()}.`
         : " First update after the next daily refresh.",
@@ -345,7 +352,7 @@ async function render(flash?: { m: string; ok: boolean }): Promise<void> {
         "li",
         {},
         h("b", {}, "Count. "),
-        `On the 1st, the month's revenue is final: ${Math.round(v.share * 100)}% of it is the pool, and every ${usd(v.slot_target_cents)} funds one foundation (up to ${v.max_slots}).`,
+        `On the 1st, the month's revenue is final: ${Math.round(v.share * 100)}% of it is the pool, all of it given, with no cap. The pool sets how many foundations share it: one per ${usd(v.slot_target_cents)} started (so even a few dollars funds one), up to ${v.max_slots}; above that the ${v.max_slots} split the whole pool equally, however large.`,
       ),
       h(
         "li",

@@ -2137,6 +2137,25 @@ html.has-dialog {
   letter-spacing: -0.02em;
   margin: 0 0 24px;
 }
+.plans-edition {
+  font: 500 0.75rem / 1.4 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--caution);
+  margin: 0 0 10px;
+}
+.plans-lede {
+  max-width: 62ch;
+  margin: -8px 0 24px;
+  color: var(--ink-2);
+}
+.plans-lock {
+  max-width: 62ch;
+  margin: -8px 0 24px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--caution);
+  color: var(--ink);
+}
 .plans-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

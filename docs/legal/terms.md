@@ -60,6 +60,9 @@ plan is active. Demo mode can be used free of charge.
   the period you paid for.
 - Refunds are described in the [Refund Policy](refunds.html).
 - We may change prices for future periods with at least 14 days' notice; you can cancel before the change applies.
+- **Founder edition.** A subscription started at Founder edition (launch) pricing keeps that price for as long as it
+  stays active without a break, including after prices rise for new customers. If it is cancelled or lapses, a new
+  subscription is at the prices of that time.
 - When a licence ends, demo mode keeps working. Paper and live trading **stop opening new positions** but keep
   managing the open ones (their stops and exits stay active) so a lapsed licence never leaves a position without
   protection. Close or manage those positions yourself if you stop using Savant.

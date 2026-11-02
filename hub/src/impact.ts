@@ -11,9 +11,10 @@ import type { HubDb } from "./handler.ts";
  * Every month, automatically:
  *   1. gross revenue = every charge Savant collected in the calendar month (UTC), before payment-processor fees, less
  *      refunds issued in that month; read from the payment processor, refreshed daily for the live tracker
- *   2. pool = 20% of gross
- *   3. slots = how many foundations the pool funds: one per $SLOT_TARGET of pool, at least 1 (when the pool is above
- *      zero) and at most MAX_SLOTS; the pool is split equally across them
+ *   2. pool = 20% of gross, all of it, whatever the amount (no floor, no cap on money)
+ *   3. slots = how many foundations share it: as many as it takes to keep each share at or under $SLOT_TARGET (so any
+ *      pool above zero funds at least 1), at most MAX_SLOTS; past MAX_SLOTS × $SLOT_TARGET the MAX_SLOTS foundations
+ *      share the whole pool equally (operator, 2026-11-02)
  *   4. winners = the most-supported eligible suggestions (deduplicated), ties to the earliest suggestion
  *   5. the month's report is published; when each gift is made, its receipt is attached (operator: `pnpm impact`)
  *
@@ -23,7 +24,7 @@ import type { HubDb } from "./handler.ts";
  */
 
 export const PLEDGE_SHARE = 0.2;
-export const SLOT_TARGET_CENTS = 25_000; // one foundation per $250 of pool
+export const SLOT_TARGET_CENTS = 25_000; // the most one foundation gets before the pool funds another (until MAX_SLOTS)
 export const MAX_SLOTS = 10;
 export const COOLDOWN_MONTHS = 3;
 const DAY = 86_400_000;
@@ -40,7 +41,7 @@ export const prevMonth = (m: string) => monthOf(monthRange(m).from - 1);
 /** How many foundations a pool funds. Pure. */
 export function slotsFor(poolCents: number): number {
   if (poolCents <= 0) return 0;
-  return Math.max(1, Math.min(MAX_SLOTS, Math.floor(poolCents / SLOT_TARGET_CENTS)));
+  return Math.max(1, Math.min(MAX_SLOTS, Math.ceil(poolCents / SLOT_TARGET_CENTS)));
 }
 
 /** Split a pool into `n` equal shares in cents; the remainder cents go to the first shares. Pure. */
