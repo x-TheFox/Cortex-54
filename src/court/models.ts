@@ -43,7 +43,7 @@ export const PRESETS: Preset[] = [
     url: "https://generativelanguage.googleapis.com/v1beta/openai",
     tier: "free",
     keyUrl: "https://aistudio.google.com/apikey",
-    keyPattern: "^AIza[0-9A-Za-z_-]{30,}$",
+    keyPattern: "^(AIza[0-9A-Za-z_-]{30,}|AQ\\.[0-9A-Za-z._-]{20,})$", // audit UX-04: newer AI Studio keys start AQ.
     note: "Free daily quota. Sign in with a Google account, press Create API key.",
     builtinKey: "GEMINI_API_KEY",
   },

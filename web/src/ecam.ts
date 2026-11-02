@@ -76,7 +76,7 @@ function accountAlerts(a: AccountView): Alert[] {
       level: "caution",
       page: "ACCT",
       title: `${A} ENTRIES PAUSED`,
-      detail: a.modeReason ?? "Paused by the operator.",
+      detail: a.modeReason ?? "Paused by you.",
       actions: ["RESUME ON THE OVERHEAD PANEL"],
     });
   }

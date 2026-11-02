@@ -38,6 +38,20 @@ export const TARGETS: Record<string, { platform: string; ext: string; label: str
   "linux-arm-rpm": { platform: "linux-aarch64", ext: ".rpm", label: "linux-arm64" },
 };
 
+/** Audit WEB-01: names people guess, mapped to the real targets. */
+export const ALIASES: Record<string, string> = {
+  macos: "mac",
+  osx: "mac",
+  "mac-arm": "mac",
+  "mac-apple-silicon": "mac",
+  "macos-intel": "mac-intel",
+  win: "windows",
+  "windows-x64": "windows",
+  "linux-x64": "linux",
+  "linux-arm64": "linux-arm",
+  "linux-aarch64": "linux-arm",
+};
+
 /** Links printed before ADR-094 (`/download/Savant_darwin-aarch64.dmg`) keep working. */
 export function legacyTarget(file: string): string | null {
   const m = /^Savant_([a-z]+-[a-z0-9_]+?)(-setup\.exe|\.[A-Za-z]+)$/.exec(file);
@@ -233,8 +247,15 @@ export async function handle(req: Request, env: Env, f: Fetch = (u, i) => fetch(
 
   m = /^\/download\/([A-Za-z0-9._-]+)$/.exec(p);
   if (m) {
-    const target = TARGETS[m[1] as string] ? (m[1] as string) : legacyTarget(m[1] as string);
-    if (!target) return text("There's no download by that name.", 404);
+    const name = (m[1] as string).toLowerCase();
+    const target = TARGETS[name] ? name : (ALIASES[name] ?? legacyTarget(m[1] as string));
+    if (!target)
+      return text(
+        `There's no download by that name. Try one of: ${Object.keys(TARGETS)
+          .map((t) => `/download/${t}`)
+          .join(", ")}`,
+        404,
+      );
     const release = await latest(env, f);
     if (!release) return text("Downloads are unavailable right now.", 502);
     const asset = pick(release, target);

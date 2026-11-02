@@ -324,6 +324,12 @@ export function App() {
         </button>
       </header>
 
+      {s?.readiness && !s.readiness.ready && (
+        <div className={`ready-banner ${s.readiness.level}`} role="status">
+          <b>{s.readiness.headline}.</b> {s.readiness.detail}
+        </div>
+      )}
+
       <section className="display" aria-label="Engine and warning display">
         <div className="glass ewd">
           <div className="ewd-acct">
@@ -469,7 +475,12 @@ export function App() {
         />
       )}
 
-      <Guide open={guide} onClose={() => setGuide(false)} setPage={setPage} />
+      <Guide
+        open={guide}
+        onClose={() => setGuide(false)}
+        setPage={setPage}
+        equityUsd={s?.accounts.find((a) => a.account === "PAPER")?.equityUsd ?? null}
+      />
 
       {toast && (
         <div className={`toast ${toast.err ? "err" : ""}`} role="status">

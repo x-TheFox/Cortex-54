@@ -8,6 +8,7 @@ import {
   presetFor,
   type Result,
   type SettingsView,
+  type StatusView,
   type Tier,
   useResource,
   waitForBrain,
@@ -108,13 +109,9 @@ function LiveAccount({ s, save, saving }: { s: SettingsView; save: Save; saving:
           {connected && live ? (
             <p className="cost">
               Connected: ${live.equityUsd?.toFixed(2) ?? "—"} ·{" "}
-              {live.autonomyStop === 0 ? (
-                <b>switched off (Stop 0)</b>
-              ) : (
-                <b className="red">TRADING REAL MONEY (Stop {live.autonomyStop})</b>
-              )}
-              . To turn it on, use the LIVE autonomy dial at the bottom of the cockpit and type RATIFY (twice,
-              10 minutes apart, on a fresh sign-in).
+              {live.autonomyStop === 0 ? <b>switched off</b> : <b className="red">TRADING REAL MONEY</b>}. To
+              turn it on, use the LIVE autonomy dial at the bottom of the cockpit and type RATIFY (twice, 10
+              minutes apart, on a fresh sign-in).
             </p>
           ) : (
             <p className="cost">
@@ -209,7 +206,18 @@ export function TradingSection({ s, save, saving }: { s: SettingsView; save: Sav
   const [r, setR] = useState<Result | null>(null);
   const k = s.keys ?? {};
   const test = async () => setR(await post<Result>("/api/settings/test", { kind: "alpaca", keyId, secret }));
-  const acct = s.account;
+  // audit UX-02: the live account line follows the brain (polled), not the settings snapshot taken before the switch
+  const st = useResource<StatusView>(s.mode === "paper" ? "/api/state" : null, 10_000);
+  const brainPaper = st.data?.accounts.find((a) => a.account === "PAPER" && a.reconciledAt !== null);
+  const acct =
+    brainPaper && brainPaper.equityUsd !== null && s.account
+      ? {
+          ...s.account,
+          equityUsd: brainPaper.equityUsd,
+          startUsd: brainPaper.startUsd ?? s.account.startUsd,
+          reason: brainPaper.modeReason,
+        }
+      : s.account;
   const margin = s.mode === "paper" && /margin/i.test(acct?.reason ?? "");
   return (
     <section className="set-sec">
@@ -2044,7 +2052,7 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
               });
               setBusy(false);
               setR(b);
-              if (b.ok && b.file) download(b.name ?? "cortex54.c54backup", b.file);
+              if (b.ok && b.file) download(b.name ?? "savant.savantbackup", b.file);
             }}
           >
             {busy ? "PACKING…" : "SAVE A BACKUP"}
@@ -2060,7 +2068,7 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
         <input
           className="field plain"
           type="file"
-          accept=".c54backup,application/json"
+          accept=".savantbackup,.c54backup,application/json"
           onChange={async (e) => setFile((await e.target.files?.[0]?.text()) ?? null)}
         />
         <div className="set-grid">
@@ -2089,6 +2097,11 @@ export function DataSection({ s, save, saving }: { s: SettingsView; save: Save; 
         <p className="cost">
           Stops Savant here and deletes its settings, keys, memory and journal from this computer. Your broker
           account and its positions are not touched. Save a backup first if you may want them back.
+        </p>
+        <p className="cost">
+          Uninstalling: do this reset first, then delete the app (drag Savant to the Bin on a Mac, or remove
+          it in Windows Settings → Apps). Deleting the app alone leaves your settings and keys in the Savant
+          folder in your home folder, and backups you saved stay where you put them.
         </p>
         <label className="set-field">
           <span className="label dim">TYPE RESET TO CONFIRM</span>

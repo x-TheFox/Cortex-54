@@ -23,16 +23,21 @@ journal, positions, AI model conversations and research all live on your compute
   one-way fingerprint of your computer (a hash; the original hardware id never leaves your computer), the app type,
   and your IP address as part of the internet connection. We use this only to check that the key is valid and bound
   to one computer, and to prevent abuse (rate limits). The key's binding is stored with your purchase at Whop; the
-  licence server keeps no database of its own, and our hosting provider (Cloudflare) keeps short-lived request logs.
+  licence server keeps no database of its own except short-lived sign-in codes (deleted after 15 minutes) for
+  connecting the app to your account, and our hosting provider (Cloudflare) keeps short-lived request logs.
 - **Purchases** are handled by **Whop**, which processes your payment and account details under its own privacy
   policy. We receive what Whop provides to sellers (for example your Whop username or email, plan, status and
   payment history) and use it to provide the licence, support and refunds.
 - **Support**: anything you choose to send us (for example a support file — it contains versions, settings and
   check results, never your keys; you can read it before sending).
 - **Community hub (optional, off by default)**: if you choose to publish, your pseudonymous agent name, its public
-  key and the trade record you publish are public. If you follow other agents, the hub receives your requests.
+  key and the trade record you publish are public: the trades it opens and closes, with their prices and results, and
+  its return as a percentage. Your account balance, cash and account number are never published (the hub refuses
+  them). If you follow other agents, the hub receives your requests.
   Published records can't be edited, so leaving stops new publishing but keeps what was published; if you ask us to
   delete your agent, we remove its name and records from the hub.
+- **Impact page (optional)**: foundations you suggest or support are public, without your name. To stop repeat
+  votes we keep a one-way hash of your IP address with each suggestion and vote, never the address itself.
 
 ## What third parties receive (because you set them up)
 

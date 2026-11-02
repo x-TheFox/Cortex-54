@@ -10,14 +10,31 @@ export function TermsGate({ s, reload }: { s: SettingsView; reload: () => void }
   const [ok, setOk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
   const again = s.terms?.acceptedAt != null;
+  // UX-07: the button is never disabled by the checkbox (a click right after ticking used to land on a disabled
+  // button), and the gate closes as soon as the server says yes instead of waiting for the settings reload.
   const accept = async () => {
+    if (busy) return;
+    if (!ok) {
+      setErr("Tick the box above to accept first.");
+      return;
+    }
     setBusy(true);
-    const r = await post<{ ok: boolean; message: string }>("/api/settings/terms", { accept: true });
-    setBusy(false);
-    if (r.ok) reload();
-    else setErr(r.message);
+    setErr(null);
+    try {
+      const r = await post<{ ok: boolean; message: string }>("/api/settings/terms", { accept: true });
+      if (r.ok) {
+        setDone(true);
+        reload();
+      } else setErr(r.message);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
   };
+  if (done) return null;
   const doc = (href: string, label: string) => (
     <a href={href} target="_blank" rel="noreferrer">
       {label}
@@ -52,12 +69,19 @@ export function TermsGate({ s, reload }: { s: SettingsView; reload: () => void }
           {doc("/legal/privacy.html", "Privacy")} · {doc("/legal/refunds.html", "Refunds")}
         </p>
         <label className="toggle">
-          <input type="checkbox" checked={ok} onChange={(e) => setOk(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={ok}
+            onChange={(e) => {
+              setOk(e.target.checked);
+              setErr(null);
+            }}
+          />
           <span>I have read and accept the Terms, the Licence and the Risk disclosure.</span>
         </label>
         {err && <p className="red">{err}</p>}
         <div className="onb-nav">
-          <button type="button" className="onb-btn primary" disabled={!ok || busy} onClick={accept}>
+          <button type="button" className="onb-btn primary" aria-disabled={!ok || busy} onClick={accept}>
             {busy ? "Saving…" : "Accept and continue"}
           </button>
         </div>

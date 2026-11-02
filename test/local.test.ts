@@ -101,7 +101,7 @@ describe("background service plans (ADR-064)", () => {
   const argv = ["/usr/bin/node", "--import", "tsx", "/app/local/cli.ts", "start"];
   it("launchd keeps it alive and logs to the Savant home", () => {
     const p = plan("darwin", argv, { CORTEX_HOME: "/Users/x/.cortex54" }, "/Users/x");
-    expect(p.file).toBe("/Users/x/Library/LaunchAgents/com.cortex54.daemon.plist");
+    expect(p.file).toBe("/Users/x/Library/LaunchAgents/com.savant.daemon.plist");
     expect(p.content).toContain("<key>KeepAlive</key><true/>");
     expect(p.content).toContain("<string>/app/local/cli.ts</string>");
     expect(p.enable[0]).toEqual(["launchctl", "load", "-w", p.file]);
@@ -109,7 +109,7 @@ describe("background service plans (ADR-064)", () => {
   it("systemd user unit restarts on failure; Windows uses an at-logon task", () => {
     const l = plan("linux", argv, { CORTEX_HOME: "/home/x/.cortex54" }, "/home/x");
     expect(l.content).toContain("Restart=always");
-    expect(l.enable.at(-1)).toEqual(["systemctl", "--user", "enable", "--now", "cortex54.service"]);
+    expect(l.enable.at(-1)).toEqual(["systemctl", "--user", "enable", "--now", "savant.service"]);
     const w = plan("win32", argv, { CORTEX_HOME: "C:\\Users\\x\\.cortex54" });
     expect(w.enable[0]?.slice(0, 5)).toEqual(["schtasks", "/Create", "/F", "/SC", "ONLOGON"]);
   });

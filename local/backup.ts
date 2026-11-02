@@ -47,7 +47,7 @@ const key = (pass: string, salt: Buffer, k = KDF) =>
 
 /** A consistent copy of a live SQLite database (WAL included) without stopping it. */
 export function snapshotDb(db: DatabaseSync): Buffer {
-  const dir = join(tmpdir(), `cortex54-snap-${randomBytes(6).toString("hex")}`);
+  const dir = join(tmpdir(), `savant-snap-${randomBytes(6).toString("hex")}`);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const f = join(dir, "snap.sqlite");
   try {
@@ -194,7 +194,8 @@ export function restoredConfig(b: OpenedBackup, current: LocalConfig | null): Lo
   return cfg;
 }
 
-export const backupFileName = (d = new Date()) => `cortex54-backup-${d.toISOString().slice(0, 10)}.c54backup`;
+export const backupFileName = (d = new Date()) =>
+  `savant-backup-${d.toISOString().slice(0, 10)}.savantbackup`;
 
 export function homeFiles(home: string): FileName[] {
   return FILES.filter((f) => existsSync(join(home, f)));

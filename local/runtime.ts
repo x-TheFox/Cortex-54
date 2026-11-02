@@ -9,6 +9,7 @@ import { type ClairicApi, WorkersAiClairic } from "../src/clef/clairic.ts";
 import { CloudflareRestAi, ShimClairic, ShimClef } from "../src/clef/portable.ts";
 import { Brain, type PulseReport } from "../src/cortex/Brain.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "../src/cortex/hot-schema.ts";
+import { type Readiness, readiness } from "../src/cortex/readiness.ts";
 import { getKV, setKV } from "../src/cortex/store.ts";
 import { healChains } from "../src/court/catalog.ts";
 import type { LlmRouter } from "../src/court/llm.ts";
@@ -267,6 +268,7 @@ export class LocalCortex {
     if (push) notifier = new PushNotifier(notifier, push, noGuard);
     // ADR-071: the app's feed gets every card, whatever else is configured
     notifier = new InboxNotifier(this.sql, notifier, now);
+    this.notifier = notifier;
 
     this.router = built.report.entries.length ? poolRouter(built, cfg.llm.prefs) : null;
     this.jobs = new LocalJobs({ researchDir: join(root, "research"), home, url: this.url(), cfg });
@@ -339,7 +341,7 @@ export class LocalCortex {
     return capped
       ? {
           ok: true,
-          message: `Done: borrowing is capped at 1x and shorting is off at Alpaca (the account reports multiplier ${acct.multiplier ?? "?"}). New trades resume at the next pulse.`,
+          message: `Done: borrowing is capped at 1x and shorting is off at Alpaca (the account reports multiplier ${acct.multiplier ?? "?"}). The banner at the top says whether anything else still holds new trades.`,
         }
       : {
           ok: false,
@@ -388,15 +390,26 @@ export class LocalCortex {
     return base ? loginLink({ WEB_SESSION_SECRET: this.o.cfg.secrets.web_session }, base) : null;
   }
 
+  /** Audit UX-03/05/10: every entry gate in one answer; the wizard, cockpit banner, FEED and tray all use it. */
+  readiness(): Readiness {
+    const lic = readLicense(this.o.home);
+    const st = this.brain.status();
+    const paper = st.accounts.find((a) => a.account === "PAPER") ?? null;
+    return readiness({
+      killed: existsSync(join(this.o.home, "KILLED")),
+      license: lic.required ? (lic.ok ? { required: true, ok: true } : lic) : { required: false, ok: true },
+      realAccount: this.o.cfg.mode !== "demo",
+      termsAccepted: loadConfig(this.o.home)?.terms?.version === TERMS_VERSION,
+      modelsOk: !(this.pool?.notes.some((n) => n.level === "block") ?? false),
+      account: paper,
+      warmingUp: st.lastPulseAt === null || st.regimes.length === 0,
+    });
+  }
+
   /** ADR-076: the one-line problem the tray shows (null when all is well). */
   problem(): string | null {
-    if (existsSync(join(this.o.home, "KILLED"))) return "Kill switch is on: no new entries";
-    const lic = readLicense(this.o.home);
-    if (this.o.cfg.mode === "paper" && entriesBlocked(lic) && lic.required && !lic.ok)
-      return `Licence: ${lic.reason} No new trades until it's fixed; open positions keep their stops.`;
-    if (this.o.cfg.mode === "paper" && loadConfig(this.o.home)?.terms?.version !== TERMS_VERSION)
-      return "Accept the terms (Settings) before Savant trades your account";
-    if (this.pool?.notes.some((n) => n.level === "block")) return "The court needs AI models (Settings)";
+    const r = this.readiness();
+    if (!r.ready && r.level === "amber") return r.headline; // the tray has room for one short line
     const bad = runtimeChecks(this.health() as Parameters<typeof runtimeChecks>[0]).find((c) => !c.ok);
     return bad ? `${bad.name}: ${bad.detail}` : null;
   }
@@ -426,7 +439,23 @@ export class LocalCortex {
     const r = await run;
     this.lastReport = r;
     this.syncPower();
+    await this.announceReadiness().catch(() => undefined);
     return r;
+  }
+  private notifier: Notifier | null = null;
+
+  /** Audit UX-10: a FEED card whenever what holds new trades changes (and one when it clears). */
+  private async announceReadiness(): Promise<void> {
+    // only blockers the user must fix get a card (and the all-clear after one); self-clearing holds stay in the banner
+    const r = this.readiness();
+    const key = r.level === "amber" ? r.headline : "clear";
+    const prev = getKV(this.sql, "readiness_said") ?? "clear";
+    if (prev === key) return;
+    setKV(this.sql, "readiness_said", key, Date.now());
+    if (key === "clear" && !r.ready) return;
+    await this.notifier?.post("alarms", {
+      content: r.ready ? `✅ ${r.headline}. ${r.detail}` : `⏸ ${r.headline}. ${r.detail}`,
+    });
   }
   private inflight: Promise<void> = Promise.resolve();
   private pulseStartedAt: number | null = null;
@@ -587,7 +616,7 @@ export class LocalCortex {
   private webBrain(): WebBrain {
     const b = this.brain;
     return {
-      status: async () => b.status(),
+      status: async () => ({ ...b.status(), readiness: this.readiness() }),
       feed: async (q) => readFeed(this.sql, q),
       settings: this.o.settings,
       memory: async () => b.memoryView(),

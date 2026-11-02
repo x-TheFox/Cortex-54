@@ -52,7 +52,7 @@
       <!-- ───────────────────────────── HERO ───────────────────────────── -->
       <section class="hero" id="top" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow">An autonomous trading agent · v0.1 for macOS, Windows, Linux</p>
+          <p class="eyebrow">An autonomous trading agent · for macOS, Windows and Linux</p>
           <h1 class="hero-title" id="hero-title">
             <span class="line"><span>Let the models argue.</span></span>
             <span class="line"><span><em>Let code decide.</em></span></span>
@@ -64,12 +64,12 @@
           </p>
           <div class="hero-actions">
             <button class="btn btn-ink btn-lg" type="button" data-demo-open>
-              Open the live demo <span aria-hidden="true">→</span>
+              Try the interactive demo <span aria-hidden="true">→</span>
             </button>
             <a class="btn btn-line btn-lg" href="%%CHECKOUT_HREF%%" data-checkout>Get Savant</a>
           </div>
           <p class="fine">
-            The demo is the real cockpit on synthetic data, in your browser. No sign-up, no real money.
+            A real cockpit on sample data, in your browser. The free desktop demo runs on live crypto prices. No sign-up, no real money.
             <a href="#risk">Not financial advice — read the risks.</a>
           </p>
         </div>
@@ -125,8 +125,8 @@
           <p class="kicker"><span>I</span> Intake</p>
           <h2 id="intake-title">Thinking costs money. <em>It spends it like money.</em></h2>
           <p class="lede">
-            Cheap code reads everything. Small models read what is left. The expensive hearing is kept for the few
-            ideas that survive — at most %%T3_PER_DAY%% a day. Every idea that dies gets a written reason.
+            It reads hundreds of headlines a day and throws away the noise for free. Only the few ideas that survive
+            get a full hearing — at most %%T3_PER_DAY%% a day. Every idea that dies gets a written reason.
           </p>
         </header>
 
@@ -584,12 +584,12 @@
         </div>
 
         <div class="exhibit lab" data-reveal>
-          <p class="exhibit-tag">Exhibit C · the backtest lab</p>
-          <h3>We publish the losers too.</h3>
+          <p class="exhibit-tag">Exhibit C · the graduation lab</p>
+          <h3>Nothing trades until it earns it.</h3>
           <p>
-            Three years of history, fees and slippage modelled, multiple-testing corrected. Only what passes may trade
-            on the paper account; the rest are watched in a separate lab account. This is our own research, not live
-            performance — and a backtest that agrees with the literature is still a backtest.
+            Every strategy is replayed over three years of history with fees and slippage charged and a multiple-testing
+            correction applied. Only a strategy that clears the bar may trade on paper; the rest stay in a separate lab
+            account, still measured, never trading your money. This is our own research, not live performance.
           </p>
           <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable table must be reachable by keyboard -->
           <section class="table-wrap" tabindex="0" aria-label="Backtest results">
@@ -598,16 +598,16 @@
                 <tr><th scope="col">Strategy</th><th scope="col">Trades</th><th scope="col">Win</th><th scope="col">Expectancy</th><th scope="col">Profit factor</th><th scope="col">Verdict</th></tr>
               </thead>
               <tbody>
-                <tr class="v-pass"><th scope="row">RSI(2) pullback · equities</th><td>104</td><td>78%</td><td>+0.27R</td><td>2.51</td><td>Passes → trades on paper</td></tr>
-                <tr><th scope="row">Breakout baseline · crypto</th><td>545</td><td>47%</td><td>+0.05R</td><td>1.17</td><td>Unproven · kept as plumbing</td></tr>
-                <tr class="v-lose"><th scope="row">Inverse-ETF breakout</th><td>109</td><td>46%</td><td>−0.06R</td><td>0.85</td><td>Loses → lab only</td></tr>
-                <tr class="v-lose"><th scope="row">Oversold bounce · crypto</th><td>184</td><td>44%</td><td>−0.08R</td><td>0.68</td><td>Loses → lab only</td></tr>
-                <tr class="v-lose"><th scope="row">Trend · crypto</th><td>174</td><td>43%</td><td>−0.08R</td><td>0.83</td><td>Loses → lab only</td></tr>
-                <tr class="v-lose"><th scope="row">Turn of month · crypto</th><td>70</td><td>46%</td><td>−0.14R</td><td>0.59</td><td>Loses → lab only</td></tr>
+                <tr class="v-pass"><th scope="row">RSI(2) pullback · equities</th><td>104</td><td>78%</td><td>+0.27R</td><td>2.51</td><td>Graduated → trades on paper</td></tr>
+                <tr><th scope="row">Breakout baseline · crypto</th><td>545</td><td>47%</td><td>+0.05R</td><td>1.17</td><td>Trades at small size while it proves itself</td></tr>
+                <tr class="v-lose"><th scope="row">Inverse-ETF breakout</th><td>109</td><td>46%</td><td>−0.06R</td><td>0.85</td><td>Below the bar → held in the lab</td></tr>
+                <tr class="v-lose"><th scope="row">Oversold bounce · crypto</th><td>184</td><td>44%</td><td>−0.08R</td><td>0.68</td><td>Below the bar → held in the lab</td></tr>
+                <tr class="v-lose"><th scope="row">Trend · crypto</th><td>174</td><td>43%</td><td>−0.08R</td><td>0.83</td><td>Below the bar → held in the lab</td></tr>
+                <tr class="v-lose"><th scope="row">Turn of month · crypto</th><td>70</td><td>46%</td><td>−0.14R</td><td>0.59</td><td>Below the bar → held in the lab</td></tr>
               </tbody>
             </table>
           </section>
-          <p class="note">Run 2026-10-24. Past and simulated results do not predict future results.</p>
+          <p class="note">Hypothetical backtest, run 2026-10-24 on historical data with modelled costs. Backtests and paper results are simulations and do not predict future results.</p>
         </div>
       </section>
 
@@ -634,7 +634,7 @@
               decoding="async"
               alt="The Savant cockpit showing synthetic paper and live account panels, a trend chart and the plain-English TODAY line."
             />
-            <span class="window-cta"><span>Open the live demo</span></span>
+            <span class="window-cta"><span>Try the interactive demo</span></span>
           </button>
           <p class="window-cap">Screenshot of the demo cockpit · synthetic data</p>
         </div>
@@ -699,7 +699,8 @@
         <p class="fine get-fine">
           Updates are signed and never install without your click. Your licence is renewed with our licence server about
           once a day and keeps working offline for up to 14 days; without one the demo always works, and a paper or live
-          account keeps its stops but opens nothing new. macOS builds are ad-hoc signed and Windows SmartScreen asks once.
+          account keeps its stops but opens nothing new. First launch asks your system once to allow Savant — the install guide
+          in the docs shows the two clicks.
         </p>
       </section>
 
@@ -737,7 +738,7 @@
               you live.
             </p>
           </div>
-          <p class="risk-demo">The live demo on this page runs on synthetic data. It is not a real account, real money or
+          <p class="risk-demo">The interactive demo on this page runs on synthetic data. It is not a real account, real money or
             real trading results.</p>
         </div>
       </section>
@@ -746,7 +747,7 @@
     <footer class="foot">
       <div class="foot-row">
         <p class="wordmark">Savant</p>
-        <p class="foot-motto">Models reason, code computes, the risk engine decides, the operator governs.</p>
+        <p class="foot-motto">Models reason, code computes, the risk engine decides, you govern.</p>
       </div>
       <div class="foot-row foot-small">
         <p>

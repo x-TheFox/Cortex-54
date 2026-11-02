@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { SettingsView } from "./api.ts";
+import { useEffect, useState } from "react";
+import { type SettingsView, type StatusView, useResource } from "./api.ts";
 import {
   AlertsSection,
   ClefSection,
@@ -22,6 +22,14 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
   const [step, setStep] = useState(0);
   const { save, saving } = useSaver(reload);
   const blocked = s.pool?.notes.some((n) => n.level === "block") ?? true;
+  // UX-05: the last screen reads live settings and the brain's own "ready to trade" answer, not what step 1 saw
+  const last = path === "wizard" && step === STEPS.length - 1;
+  const st = useResource<StatusView>(last ? "/api/state" : null, 5_000);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload once on arriving at the last step
+  useEffect(() => {
+    if (last) reload();
+  }, [last]);
+  const ready = st.data?.readiness;
   const finish = async () => {
     const r = await save({ onboarded: true });
     if (r.ok) close();
@@ -113,6 +121,11 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
             {step === 5 && (
               <>
                 <p className="onb-lead">Here's where things stand.</p>
+                {ready && (
+                  <p className={`ready-banner ${ready.level}`} style={{ margin: "0 0 12px" }}>
+                    <b>{ready.headline}.</b> {ready.detail}
+                  </p>
+                )}
                 <Progress s={s} />
                 {blocked && (
                   <p className="note-line amber">

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  ALIASES,
   type Env,
   handle,
   legacyTarget,
@@ -74,6 +75,7 @@ describe("Savant downloads (ADR-094)", () => {
     const { f } = fakeGitHub();
     for (const t of Object.keys(TARGETS)) expect((await get(`/download/${t}`, f)).status).toBe(200);
     expect(legacyTarget("Savant_darwin-x86_64.dmg")).toBe("mac-intel");
+    for (const t of Object.values(ALIASES)) expect(TARGETS[t]).toBeDefined(); // audit WEB-01
     expect(legacyTarget("Savant_windows-x86_64-setup.exe")).toBe("windows");
     expect((await get("/download/Savant_linux-aarch64.deb", f)).status).toBe(200);
     expect((await get("/download/nope", f)).status).toBe(404);

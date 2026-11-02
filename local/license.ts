@@ -34,8 +34,7 @@ export { LicenseSchema, licenseBody };
 /** The publisher key this build trusts (base64 SPKI DER), injected by the release build; empty = licences off. */
 export const BUILT_IN_PUBKEY = process.env.CORTEX_LICENSE_PUBKEY_BUILTIN ?? "";
 /** The licence server (workers/license), injected by the release build. */
-export const LICENSE_SERVER =
-  process.env.SAVANT_LICENSE_URL_BUILTIN || "https://savant-license.samplayz2ks.workers.dev";
+export const LICENSE_SERVER = process.env.SAVANT_LICENSE_URL_BUILTIN || "https://api.getsavant.pro";
 
 /** Where people buy and manage Savant (the Whop store), injected by the release build. */
 export const STORE_URL = process.env.SAVANT_STORE_URL_BUILTIN || "https://whop.com/savant-agent/";

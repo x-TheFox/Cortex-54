@@ -2581,6 +2581,24 @@ describe("any account size, account changes, margin, local metering (ADR-081)", 
     expect(t.brain.status().accounts.find((x) => x.account === "PAPER")?.mode).toBe("NORMAL");
   });
 
+  it("a paper margin account is made cash-only automatically (UX-01)", async () => {
+    const t = setup({ adoptAccountSize: true });
+    const real = t.paper.account.bind(t.paper);
+    t.paper.account = async () => ({ ...(await real()), multiplier: "4" });
+    let mult = "4";
+    const p = t.paper as unknown as Record<string, unknown>;
+    p.configuration = async () => ({ max_margin_multiplier: mult });
+    p.configure = async (patch: { max_margin_multiplier?: string }) => {
+      mult = patch.max_margin_multiplier ?? mult;
+      return { max_margin_multiplier: mult };
+    };
+    await t.brain.pulse();
+    expect(mult).toBe("1");
+    expect(t.brain.status().accounts.find((x) => x.account === "PAPER")?.modeReason ?? "").not.toMatch(
+      /margin/,
+    );
+  });
+
   it("local metering: nothing without Cloudflare AI, only neurons with it", async () => {
     const none = setup({ budgetScope: "none" });
     await none.brain.pulse();

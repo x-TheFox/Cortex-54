@@ -77,7 +77,7 @@ function checkout(): { href: string; note: string } {
     ? { href: esc(url), note: "" }
     : {
         href: "#get",
-        note: '<p class="checkout-note" data-checkout-note>Checkout opens soon. The live demo works today.</p>',
+        note: '<p class="checkout-note" data-checkout-note>Checkout opens soon. The interactive demo works today.</p>',
       };
 }
 

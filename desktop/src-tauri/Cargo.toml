@@ -1,11 +1,11 @@
 [package]
-name = "cortex54-desktop"
+name = "savant-desktop"
 version = "0.1.0"
 description = "Savant desktop app: the local Cortex agent, the cockpit and a tray pill"
 edition = "2021"
 
 [lib]
-name = "cortex54_desktop_lib"
+name = "savant_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

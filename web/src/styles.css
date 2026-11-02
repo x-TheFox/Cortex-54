@@ -2142,3 +2142,18 @@ code.mono {
 .replay-list li {
   margin: 4px 0;
 }
+
+/* audit UX-03: the one line that says what holds new trades */
+.ready-banner {
+  font: 400 13px / 1.5 var(--ui);
+  margin: 8px 16px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--cyan);
+  border-radius: 4px;
+}
+.ready-banner.amber {
+  border-color: var(--amber);
+}
+.ready-banner b {
+  font-weight: 600;
+}
