@@ -2068,3 +2068,44 @@ code.mono {
   font: 400 12.5px var(--num);
   color: var(--cyan);
 }
+
+/* ADR-099: the model browser */
+.set-radio {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0 10px;
+}
+.set-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 4px;
+}
+.set-tabs .chip .dim {
+  margin-left: 4px;
+}
+.model-list {
+  list-style: none;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 2px 10px 8px;
+  margin: 10px 0;
+}
+.model-list li + li .toggle {
+  border-top: 1px solid var(--rule);
+  padding-top: 6px;
+}
+.model-list code.mono {
+  overflow-wrap: anywhere;
+}
+.tag-free {
+  font: 700 10px var(--ui);
+  letter-spacing: 0.1em;
+  color: var(--green);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-left: 4px;
+}

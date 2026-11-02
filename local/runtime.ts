@@ -10,6 +10,7 @@ import { CloudflareRestAi, ShimClairic, ShimClef } from "../src/clef/portable.ts
 import { Brain, type PulseReport } from "../src/cortex/Brain.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "../src/cortex/hot-schema.ts";
 import { getKV, setKV } from "../src/cortex/store.ts";
+import { healChains } from "../src/court/catalog.ts";
 import type { LlmRouter } from "../src/court/llm.ts";
 import { buildPool, costUsd, type PoolReport, poolRouter } from "../src/court/pool.ts";
 import { buildProviders } from "../src/court/providers.ts";
@@ -37,6 +38,7 @@ import { ntfyUrl, PushNotifier } from "../src/notify/push.ts";
 import { handleWeb, loginLink, type WebBrain, type WebSettings } from "../src/web/api.ts";
 import { pill, pillAuthorized, swiftbar } from "../src/web/pill.ts";
 import { snapshotDb } from "./backup.ts";
+import { healed, loadBench, loadCatalog, refreshCatalog } from "./catalog.ts";
 import { type LocalConfig, loadConfig } from "./config.ts";
 import { runtimeChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
@@ -142,6 +144,8 @@ export interface LocalOptions {
   /** tests: inject fakes instead of real network clients */
   /** ADR-071: the settings page's backend (the CLI provides it, with a reload that applies saved settings) */
   settings?: WebSettings;
+  /** ADR-099: the model catalog healed the chains; the CLI restarts the court with them */
+  onModelsChanged?: () => void;
   overrides?: {
     broker?: BrokerApi;
     /** tests: a fake live broker (never a real one) */
@@ -224,14 +228,15 @@ export class LocalCortex {
         : null);
 
     // ADR-072: built-in free providers + the user's endpoints, as one pool in round robin
-    const built = buildPool(
-      {
-        ...DOCTRINE,
-        universe: { ...DOCTRINE.universe, enabled: DOCTRINE.universe.enabled && Boolean(alpacaKey) },
-      },
-      buildProviders(k),
-      cfg.llm,
-    );
+    // ADR-099: the chains healed from this install's model catalog and benchmark, plus the models the user allowed
+    const base = healed(home, {
+      ...DOCTRINE,
+      universe: { ...DOCTRINE.universe, enabled: DOCTRINE.universe.enabled && Boolean(alpacaKey) },
+    }).d;
+    const catalog = loadCatalog(home);
+    const raw = buildPool(base, buildProviders(k), cfg.llm, undefined, catalog);
+    // a second pass orders the whole pool (endpoints and catalog models too) by benchmark score
+    const built = { ...raw, d: healChains(raw.d, catalog, loadBench(home)).d };
     // ADR-075 / ADR-097: the user's court capacity. Unlimited by default once the pool has a paid model (or when the
     // user switches it on); a free-only pool keeps the doctrine's default so its providers' daily quotas last the day.
     const unlimited = courtUnlimited(cfg, built.report);
@@ -431,6 +436,36 @@ export class LocalCortex {
    * Audit AGT-04: a pulse that runs far past its cadence is stuck on some await. Alarm, and keep the stops working on
    * their own timer until it finishes (every pulse step is also time-boxed inside the brain).
    */
+  private catalogTimer: ReturnType<typeof setInterval> | null = null;
+  private refreshing = false;
+
+  /** ADR-099: refresh the catalog (and benchmark when due); restart the court on healed chains when they changed. */
+  async refreshModels(force = false): Promise<{ changed: boolean; report: unknown } | null> {
+    if (this.refreshing) return null;
+    this.refreshing = true;
+    try {
+      const cfg = this.o.cfg;
+      const r = await refreshCatalog({
+        home: this.o.home,
+        d: DOCTRINE,
+        keys: cfg.keys,
+        pool: cfg.llm,
+        providers: buildPool(DOCTRINE, buildProviders(cfg.keys), cfg.llm).providers,
+        force,
+      });
+      if (r.changed) {
+        console.log(`[models] chains healed: ${JSON.stringify(r.report)}`);
+        this.o.onModelsChanged?.();
+      }
+      return { changed: r.changed, report: r.report };
+    } catch (e) {
+      console.error(`[models] catalog refresh failed: ${String(e).slice(0, 200)}`);
+      return null;
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
   /** ADR-096: the OS power assertion (keeps the computer awake during hearings, or always). */
   readonly power = new PowerGuard();
 
@@ -492,12 +527,20 @@ export class LocalCortex {
     this.schedule(1);
     this.watchdog = setInterval(() => void this.watch(), 15_000);
     this.watchdog.unref?.();
+    // ADR-099: refresh the model catalog shortly after start and daily; benchmarks run weekly or when it changes
+    if (!this.o.overrides) {
+      const t = setTimeout(() => void this.refreshModels(), 120_000);
+      t.unref?.();
+      this.catalogTimer = setInterval(() => void this.refreshModels(), 86_400_000);
+      this.catalogTimer.unref?.();
+    }
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.watchdog) clearInterval(this.watchdog);
+    if (this.catalogTimer) clearInterval(this.catalogTimer);
     this.power.stop();
     await this.inflight; // never close the databases under a running pulse
     await new Promise<void>((res) => {

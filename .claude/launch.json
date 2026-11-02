@@ -21,6 +21,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["landing:preview"],
       "port": 5176
+    },
+    {
+      "name": "app-demo",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["cortex", "demo", "--port", "8755"],
+      "port": 8755
     }
   ]
 }

@@ -46,6 +46,19 @@ export interface HubAction {
   applyPack?: string;
 }
 
+/** ADR-099: browse a provider's models, or change which ones the court may use. */
+export interface ModelsAction {
+  provider?: string;
+  search?: string;
+  free?: boolean;
+  page?: number;
+  mode?: "recommended" | "free" | "all" | "pick";
+  pick?: string[];
+  unpick?: string[];
+  cost_scope?: "free_only" | "all";
+  refresh?: boolean;
+}
+
 export interface WebSettings {
   view(): Promise<unknown>;
   /** BYOK model discovery: an empty key means "use the key already saved for this side" */
@@ -87,6 +100,8 @@ export interface WebSettings {
   }): Promise<{ ok: boolean; message: string }>;
   /** ADR-095: the community hub (join, share, follow, memory packs) */
   hub?(q: HubAction): Promise<{ ok: boolean; message: string; [k: string]: unknown }>;
+  /** ADR-099: the model browser (catalog pages, which models are allowed, free only or everything) */
+  catalog?(q: ModelsAction): Promise<{ ok: boolean; message: string; [k: string]: unknown }>;
   /** ADR-087: accept the current terms, EULA and risk disclosure (first launch, and again when they change) */
   terms?(q: { accept: boolean }): Promise<{ ok: boolean; message: string }>;
   /** ADR-076: stop the service and delete everything Savant keeps on this computer */
@@ -321,6 +336,32 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
               })
             : { ok: false, message: "Not available here." },
         );
+      case "/api/settings/catalog": {
+        if (!b.settings.catalog) return json({ ok: false, message: "Not available here." });
+        const list = (k: string) =>
+          Array.isArray(body[k])
+            ? (body[k] as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 500)
+            : undefined;
+        const mode = str("mode");
+        const scope = str("cost_scope");
+        const pick = list("pick");
+        const unpick = list("unpick");
+        return json(
+          await b.settings.catalog({
+            ...(str("provider") ? { provider: str("provider") } : {}),
+            ...(typeof body.search === "string" ? { search: body.search.slice(0, 100) } : {}),
+            ...(typeof body.free === "boolean" ? { free: body.free } : {}),
+            ...(typeof body.page === "number" ? { page: Math.max(1, Math.floor(body.page)) } : {}),
+            ...(mode && ["recommended", "free", "all", "pick"].includes(mode)
+              ? { mode: mode as NonNullable<ModelsAction["mode"]> }
+              : {}),
+            ...(pick ? { pick } : {}),
+            ...(unpick ? { unpick } : {}),
+            ...(scope === "free_only" || scope === "all" ? { cost_scope: scope } : {}),
+            ...(body.refresh === true ? { refresh: true } : {}),
+          }),
+        );
+      }
       case "/api/settings/hub": {
         if (!b.settings.hub) return json({ ok: false, message: "Not available here." });
         const share = body.share as { title?: unknown; description?: unknown } | undefined;

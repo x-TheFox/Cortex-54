@@ -65,6 +65,25 @@ export const PoolPrefsSchema = z.object({
   allow_same_model: z.boolean().default(false),
   /** ADR-075: models the user demoted from the scoreboard (`provider/model`); they leave the rotation */
   demoted: z.array(z.string().min(3).max(260)).max(100).default([]),
+  /**
+   * ADR-099: which models may be used at all. free_only = only free models (free tiers, `:free` OpenRouter models,
+   * free and local endpoints); all = paid models too (they bill the provider account behind the key).
+   */
+  cost_scope: z.enum(["free_only", "all"]).optional(),
+  /**
+   * ADR-099: per built-in provider, which of its models the court may use. recommended = the verified models (and
+   * their healed substitutes); free = every free model the provider lists; all = every model it lists; pick = only
+   * the models picked in the model browser. Endpoints keep their own enabled-model list.
+   */
+  models: z
+    .record(
+      z.string().max(40),
+      z.object({
+        mode: z.enum(["recommended", "free", "all", "pick"]).default("recommended"),
+        picked: z.array(z.string().min(1).max(200)).max(1000).default([]),
+      }),
+    )
+    .optional(),
 });
 export type PoolPrefs = z.infer<typeof PoolPrefsSchema>;
 
@@ -162,11 +181,24 @@ const FALLBACK_MODELS = /^claude-(fable-5-1|opus-5-5|opus-5|sonnet-5-5)$/;
  * Build the pool from the built-in providers (with the doctrine's verified free hops) and the user's endpoints, and
  * return the doctrine whose bull / bear / panel chains are that pool in preference order. Pure.
  */
+/** ADR-099: the most models one built-in provider may contribute from its catalog (keeps chains reviewable). */
+export const MAX_CATALOG_MODELS_PER_PROVIDER = 40;
+
+/** ADR-099: may the court use this model, given the user's cost scope and the provider's model choice? Pure. */
+export function modelAllowed(prefs: PoolPrefs, provider: string, model: string, free: boolean): boolean {
+  if ((prefs.cost_scope ?? "all") === "free_only" && !free) return false;
+  const m = prefs.models?.[provider];
+  if (m?.mode !== "pick") return true;
+  return m.picked.includes(model);
+}
+
 export function buildPool(
   d: Doctrine,
   builtin: Partial<Record<string, LlmProvider>>,
   cfg: PoolConfig,
   fetcher?: Fetcher,
+  /** ADR-099: the providers' model lists, for models the user allowed beyond the verified ones */
+  catalog?: { providers: Record<string, { ok: boolean; models: string[]; free?: string[] }> } | null,
 ): {
   providers: Partial<Record<string, LlmProvider>>;
   d: Doctrine;
@@ -192,12 +224,40 @@ export function buildPool(
     }
   };
   const pricing: Pricing = {};
-  // built-in free hops in the doctrine's verified order (only providers with a key)
+  const prefs = cfg.prefs;
+  // built-in free hops in the doctrine's verified order (only providers with a key, and only allowed models)
   for (const h of [...r.bull_chain, ...r.bear_chain, ...r.panel.chain])
-    if (builtin[h.provider]) add({ provider: h.provider, model: h.model, tier: "free", source: h.provider });
+    if (builtin[h.provider] && modelAllowed(prefs, h.provider, h.model, true))
+      add({ provider: h.provider, model: h.model, tier: "free", source: h.provider });
   const caps: Record<string, number> = { ...r.daily_call_caps };
+  // ADR-099: more models from a built-in provider's own list, when the user chose free / all / picked models
+  for (const [p, choice] of Object.entries(prefs.models ?? {})) {
+    if (!builtin[p] || choice.mode === "recommended") continue;
+    const c = catalog?.providers[p];
+    const listed = c?.ok ? c.models : [];
+    const free = new Set(
+      c?.free ?? (p === "openrouter" ? listed.filter((m) => m.endsWith(":free")) : listed),
+    );
+    const want =
+      choice.mode === "pick"
+        ? choice.picked
+        : choice.mode === "free"
+          ? listed.filter((m) => free.has(m))
+          : listed;
+    let n = 0;
+    for (const m of want) {
+      if (n >= MAX_CATALOG_MODELS_PER_PROVIDER) break;
+      const isFree = free.has(m) || (choice.mode === "pick" && !c?.ok);
+      if (!modelAllowed(prefs, p, m, isFree)) continue;
+      add({ provider: p, model: m, tier: isFree ? "free" : "paid", source: p });
+      n++;
+      // a provider's free-tier call cap doesn't apply once the user lets it bill paid models
+      if (!isFree) delete caps[p];
+    }
+  }
   for (const e of cfg.endpoints) {
     if (!e.enabled || e.models.length === 0) continue;
+    if ((prefs.cost_scope ?? "all") === "free_only" && e.tier === "paid") continue;
     const p = `ep:${e.id}`;
     providers[p] = endpointProvider(e, fetcher);
     if (e.daily_cap) caps[p] = e.daily_cap;

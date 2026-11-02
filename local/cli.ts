@@ -213,6 +213,7 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
     sql: () => c.sql, // ADR-095: memory packs
     pairLink: () => c.pairLink(),
     cashOnly: (acct) => c.makeCashOnly(acct),
+    refreshModels: () => c.refreshModels(true),
     liveAccount: () => {
       const a = c.brain.status().accounts.find((x) => x.account === "LIVE" && x.configured);
       return a
@@ -232,7 +233,7 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
         write();
         cfg = loadConfig(home) ?? cfg;
         seen = JSON.stringify(cfg);
-        c = new LocalCortex({ home, root: ROOT, cfg, settings });
+        c = new LocalCortex({ home, root: ROOT, cfg, settings, onModelsChanged: () => settings.reloadNow() });
         await c.start();
       } finally {
         reloading = false;
@@ -255,7 +256,13 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
           await c.stop();
           cfg = loadConfig(home) ?? cfg;
           seen = JSON.stringify(cfg);
-          c = new LocalCortex({ home, root: ROOT, cfg, settings });
+          c = new LocalCortex({
+            home,
+            root: ROOT,
+            cfg,
+            settings,
+            onModelsChanged: () => settings.reloadNow(),
+          });
           await c.start();
           console.log(`[settings] applied (${cfg.mode} mode)`);
         } catch (e) {
@@ -266,7 +273,7 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
       })();
     },
   });
-  c = new LocalCortex({ home, root: ROOT, cfg, settings });
+  c = new LocalCortex({ home, root: ROOT, cfg, settings, onModelsChanged: () => settings.reloadNow() });
   await c.start();
   // ADR-073: changes made outside the app (an agent running `savant llm add`, `savant setup --set …`) apply live
   let seen = JSON.stringify(cfg);

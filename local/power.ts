@@ -7,7 +7,7 @@ import { type ChildProcess, spawn } from "node:child_process";
  *
  *   macOS    `caffeinate -i -s -w <pid>`  (idle and system sleep; ends by itself if Savant exits)
  *   Windows  SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED) from a small PowerShell helper
- *   Linux    `systemd-inhibit --what=idle:sleep … sleep infinity`  (where systemd-logind exists)
+ *   Linux    `systemd-inhibit --what=idle:sleep …` around a loop that waits for Savant's pid (where logind exists)
  *
  * Every helper is tied to Savant's own process id or killed on release and on exit, so an assertion never outlives
  * the app. If the platform has no helper, holding is a no-op and Savant keeps working (stops and exits don't need
@@ -44,8 +44,10 @@ export function assertionCommand(
         "--who=Savant",
         `--why=${why.replace(/[^\w ,.-]/g, "").slice(0, 80)}`,
         "--mode=block",
-        "sleep",
-        "infinity",
+        // ends by itself when Savant's process does, even after a crash
+        "sh",
+        "-c",
+        `while kill -0 ${pid} 2>/dev/null; do sleep 30; done`,
       ],
     ];
   return null;

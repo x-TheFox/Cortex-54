@@ -369,7 +369,16 @@ export interface SettingsView {
   agentPrompt?: string;
   /** ADR-075: today's tokens and cost per priced endpoint */
   spend?: { provider: string; input: number; output: number; usd: number; cap: number | null }[];
-  court?: { max_per_day: number | null; default_per_day: number };
+  court?: {
+    max_per_day: number | null;
+    default_per_day: number;
+    unlimited?: boolean | null;
+    unlimited_default?: boolean;
+  };
+  /** ADR-096 */
+  power?: { keep_awake: "hearings" | "always" | "off" };
+  /** ADR-098 */
+  eli5?: { enabled: boolean };
   /** ADR-076 */
   lan?: { enabled: boolean; port: number };
   secretStore?: { mode: "file" | "keychain"; backend: string | null };
