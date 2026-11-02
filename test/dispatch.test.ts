@@ -30,9 +30,16 @@ describe("cron matcher (UTC)", () => {
 
   it("dispatches each slot once", () => {
     const now = at("2026-10-23T13:20:00Z");
-    const due = dueJobs(now, {});
+    // a fresh install also warms up every job the entry gates need (audit AGT-01)
+    const fresh = dueJobs(now, {});
+    expect(fresh.map((d) => d.job.key)).toEqual(["crypto", "equity-open", "world", "screeners", "kronos"]);
+    const ran = Object.fromEntries(fresh.map((d) => [d.job.key, d.slot]));
+    expect(dueJobs(now + 60_000, ran)).toEqual([]);
+    // an install that is warm only gets the slots that came due
+    const warm = { crypto: now - 3_600_000, "equity-open": now - 3_600_000, kronos: now - 3_600_000, screeners: now - 3_600_000 };
+    const due = dueJobs(now, warm);
     expect(due.map((d) => d.job.key)).toEqual(["world"]);
-    expect(dueJobs(now + 60_000, { world: due[0]?.slot ?? 0 })).toEqual([]);
+    expect(dueJobs(now + 60_000, { ...warm, world: due[0]?.slot ?? 0 })).toEqual([]);
     expect(DISPATCH_GRACE_MS).toBe(20 * 60_000);
   });
 });

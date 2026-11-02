@@ -230,6 +230,9 @@ interface Hearing {
   calls: () => number;
 }
 
+/** Audit RISK-01: below this, crypto trades often can't fit the venue minimum inside the risk cap. */
+export const SMALL_CRYPTO_ACCOUNT_CENTS = 10_000;
+
 /** Audit HUB-05: how many court ideas one followed agent may put in front of this robot per UTC day. */
 export const FOLLOW_LEADS_PER_AGENT_PER_DAY = 3;
 
@@ -6123,6 +6126,17 @@ ${postmortem}`,
     now: number,
   ): void {
     this.lastRejections.set(contract.contract_id, reasons);
+    // audit RISK-01: a small account can't fit the broker's $10 crypto minimum inside its per-trade risk cap when the
+    // stop is wide. The caps stay; the user is told once a day why, and what works at their size.
+    if (contract.arena === "CRYPTO" && reasons.some((r) => r.includes("venue minimum"))) {
+      const row = this.account(account);
+      const eq = row ? this.effectiveEquityCents(row) : null;
+      if (eq !== null && eq < SMALL_CRYPTO_ACCOUNT_CENTS)
+        void this.alertOnce(
+          `small-account:${utcDay(now)}`,
+          `ℹ️ ${account}: the robot skipped a ${contract.symbol} trade because $${(eq / 100).toFixed(2)} is small for crypto. The broker's smallest crypto order is $10, and with a stop that far away a $10 order would risk more than your per-trade cap allows. Stocks work from $10 (fractional shares); crypto trades reliably from about $100.`,
+        );
+    }
     this.journal.enqueue(
       "rejections",
       {

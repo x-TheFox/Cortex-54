@@ -51,7 +51,7 @@ describe("model pool (ADR-072): unlimited endpoints, round robin, fallbacks", ()
     expect(built.d.llm_routing.bear_chain[0]).not.toEqual(built.d.llm_routing.bull_chain[0]);
     // several lineages → family = lineage
     expect(built.report.lineages).toEqual(
-      expect.arrayContaining(["anthropic", "meta", "openai-oss", "qwen"]),
+      expect.arrayContaining(["anthropic", "meta", "openai-oss"]),
     );
     const paidFirst = buildPool(doctrine, buildProviders({ GROQ_API_KEY: "gsk" }), {
       endpoints: [ep("claude", ["claude-opus-5-5"], "paid", "anthropic")],

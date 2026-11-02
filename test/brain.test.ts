@@ -1779,9 +1779,12 @@ describe("batch dispatcher (ADR-032)", () => {
     await t.brain.pulse();
     const stale = t.notifier.sent.filter((m) => m.msg.content?.includes("research job `kronos`"));
     expect(stale).toHaveLength(1);
-    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'DISPATCH_STALE'").get()).toEqual({
-      n: 1,
-    });
+    // every warm-up job (audit AGT-01) is watched the same way; kronos is reported exactly once
+    expect(
+      t.d1.db
+        .prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'DISPATCH_STALE' AND payload_json LIKE '%kronos%'")
+        .get(),
+    ).toEqual({ n: 1 });
   });
 
   it("audit W1-08: main's doctrine differing from the running one for > 2 h raises DEPLOY LAGGING", async () => {

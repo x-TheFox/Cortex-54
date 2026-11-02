@@ -89,9 +89,24 @@ export function dueJobs(now: number, last: Record<string, number>): { job: Dispa
   for (const job of DISPATCH_JOBS) {
     const slot = latestSlot(job.cron, now);
     if (slot !== null && slot > (last[job.key] ?? 0)) out.push({ job, slot });
+    // audit AGT-01: a job the trading gates depend on that never ran, or ran too long ago (a fresh install, or the
+    // computer was off), runs now instead of waiting hours for its next slot
+    else {
+      const maxAge = WARM_MAX_AGE_MS[job.key];
+      if (maxAge !== undefined && now - (last[job.key] ?? 0) > maxAge) out.push({ job, slot: now });
+    }
   }
   return out;
 }
+
+/** Audit AGT-01: jobs the entry gates need fresh, and how old their last run may be before it is redone at once. */
+export const WARM_MAX_AGE_MS: Record<string, number> = {
+  crypto: 6 * 3_600_000, // crypto regime gate (staleness 6 h)
+  "equity-open": 30 * 3_600_000, // equity posture (staleness 30 h)
+  world: 2 * 3_600_000,
+  kronos: 6 * 3_600_000,
+  screeners: 30 * 3_600_000,
+};
 
 /** workflow_dispatch through the GitHub REST API with a fine-grained token (Actions: write on one repo). */
 export class GitHubDispatcher implements WorkflowDispatcher {
