@@ -8,6 +8,8 @@
   "workers_dev": true,
   "observability": { "enabled": true },
   "routes": [{ "pattern": "hub.getsavant.pro", "custom_domain": true }],
+  // ADR-102: the impact pledge's daily revenue refresh and monthly close (secret: WHOP_API_KEY, read-only)
+  "triggers": { "crons": ["15 0 * * *"] },
   // audit BL-3: per-IP limit on POSTs (feed and packs)
   "ratelimits": [{ "name": "RL", "namespace_id": "5403", "simple": { "limit": 30, "period": 60 } }],
   "d1_databases": [

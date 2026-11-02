@@ -1,10 +1,14 @@
 import { type HubDb, handleHub } from "./handler.ts";
+import { handleImpact, runImpact, whopRevenue } from "./impact.ts";
 
 /** Savant community hub Worker (ADR-068): the one service the publisher hosts. */
 interface Env {
   DB: D1Database;
   /** Audit BL-3: per-IP limit on writes (wrangler `ratelimits`). */
   RL?: { limit(o: { key: string }): Promise<{ success: boolean }> };
+  /** ADR-102: a read-only Whop key (payment:basic:read) for the monthly revenue behind the impact pledge */
+  WHOP_API_KEY?: string;
+  WHOP_ACCOUNT_ID?: string;
 }
 
 function d1(db: D1Database): HubDb {
@@ -60,6 +64,24 @@ export default {
       }
       return res;
     }
+    // ADR-102: the impact pledge (getsavant.pro/impact)
+    const impact = await handleImpact(
+      req,
+      d1(env.DB),
+      Date.now(),
+      req.headers.get("cf-connecting-ip") ?? "unknown",
+    );
+    if (impact) return impact;
     return handleHub(req, d1(env.DB), Date.now());
+  },
+  // ADR-102: daily — refresh this month's revenue tracker, and close and publish last month once it is over
+  async scheduled(_c: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      runImpact(
+        d1(env.DB),
+        whopRevenue(env, (u, i) => fetch(u, i)),
+        Date.now(),
+      ).then((r) => console.log(`[impact] ${r}`)),
+    );
   },
 } satisfies ExportedHandler<Env>;

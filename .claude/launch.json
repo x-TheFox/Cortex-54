@@ -27,6 +27,22 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["cortex", "demo", "--port", "8755"],
       "port": 8755
+    },
+    {
+      "name": "hub-local",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "-c", "hub/wrangler.jsonc", "--local", "--port", "8791"],
+      "port": 8791
+    },
+    {
+      "name": "landing-local-hub",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["landing:preview"],
+      "env": {
+        "HUB_PROXY": "http://127.0.0.1:8791",
+        "PREVIEW_PORT": "5177"
+      },
+      "port": 5177
     }
   ]
 }

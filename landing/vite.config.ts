@@ -180,7 +180,8 @@ function csp(): Plugin {
 }
 
 const HUB_PROXY = {
-  target: "https://hub.getsavant.pro",
+  // HUB_PROXY=http://127.0.0.1:8791 points the pages at a local hub (wrangler dev) instead of production
+  target: process.env.HUB_PROXY || "https://hub.getsavant.pro",
   changeOrigin: true,
   rewrite: (p: string) => p.replace(/^\/hub/, ""),
 };
@@ -193,7 +194,7 @@ export default defineConfig({
   server: { port: 5175, strictPort: true, proxy: { "/hub": HUB_PROXY } },
   // AUDIT FX-03: SAVANT_API_PROXY=http://127.0.0.1:8791 sends /api to a local licence server (production: vercel.json)
   preview: {
-    port: 5176,
+    port: Number(process.env.PREVIEW_PORT) || 5176,
     strictPort: true,
     proxy: {
       "/hub": HUB_PROXY,
@@ -215,6 +216,7 @@ export default defineConfig({
         activate: fileURLToPath(new URL("./activate/index.html", import.meta.url)),
         community: fileURLToPath(new URL("./community/index.html", import.meta.url)),
         communityAgent: fileURLToPath(new URL("./community/agent/index.html", import.meta.url)),
+        impact: fileURLToPath(new URL("./impact/index.html", import.meta.url)),
       },
     },
     emptyOutDir: true,
