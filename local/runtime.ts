@@ -152,6 +152,9 @@ export interface LocalOptions {
   };
 }
 
+/** Audit AGT-04: a pulse running this long is treated as stuck (3× the exposed cadence, at least 3 minutes). */
+export const STALL_MS = Math.max(3 * DOCTRINE.cadence.pulse_seconds_exposed * 1000, 180_000);
+
 export class LocalCortex {
   readonly brain: Brain;
   readonly sql: ReturnType<typeof fileSql>;
@@ -392,7 +395,10 @@ export class LocalCortex {
 
   /** One pulse (also what the timer runs). */
   async pulse(): Promise<PulseReport> {
-    const run = this.brain.pulse();
+    this.pulseStartedAt = Date.now();
+    const run = this.brain.pulse().finally(() => {
+      this.pulseStartedAt = null;
+    });
     this.inflight = run.then(
       () => undefined,
       () => undefined,
@@ -402,6 +408,30 @@ export class LocalCortex {
     return r;
   }
   private inflight: Promise<void> = Promise.resolve();
+  private pulseStartedAt: number | null = null;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
+  private guarding = false;
+
+  /**
+   * Audit AGT-04: a pulse that runs far past its cadence is stuck on some await. Alarm, and keep the stops working on
+   * their own timer until it finishes (every pulse step is also time-boxed inside the brain).
+   */
+  async watch(now = Date.now()): Promise<"ok" | "stalled"> {
+    const started = this.pulseStartedAt;
+    if (started === null || now - started < STALL_MS) return "ok";
+    await this.brain
+      .alarm(
+        "pulse-stalled",
+        `⚠️ A market check has been running for ${Math.round((now - started) / 60_000)} min. Savant keeps checking your stops on their own until it finishes; no new trades meanwhile.`,
+      )
+      .catch(() => undefined);
+    if (!this.guarding) {
+      this.guarding = true;
+      await this.brain.protectOnly().catch(() => 0);
+      this.guarding = false;
+    }
+    return "stalled";
+  }
 
   private schedule(seconds: number): void {
     if (this.stopped) return;
@@ -434,11 +464,14 @@ export class LocalCortex {
       this.server.listen(this.o.cfg.port, this.o.cfg.lan.enabled ? "0.0.0.0" : this.o.cfg.bind, () => res());
     });
     this.schedule(1);
+    this.watchdog = setInterval(() => void this.watch(), 30_000);
+    this.watchdog.unref?.();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.watchdog) clearInterval(this.watchdog);
     await this.inflight; // never close the databases under a running pulse
     await new Promise<void>((res) => {
       if (!this.server) return res();
@@ -465,6 +498,9 @@ export class LocalCortex {
       mode: this.o.cfg.mode,
       now: Date.now(),
       last_pulse_at: last === null ? null : Number(last),
+      // audit AGT-04: how long the current pulse has been running (null when idle)
+      pulse_running_s:
+        this.pulseStartedAt === null ? null : Math.round((Date.now() - this.pulseStartedAt) / 1000),
       constitution_sha256: CONSTITUTION_SHA256,
       doctrine_sha256: DOCTRINE_SHA256,
       hot_schema_version: HOT_SCHEMA_VERSION,

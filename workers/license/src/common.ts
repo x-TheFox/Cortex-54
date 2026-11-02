@@ -12,6 +12,8 @@ export interface Env {
   WHOP_API_KEY: string;
   /** Ed25519 private key, PKCS#8 PEM (the publisher licence key, scripts/license.ts keygen) */
   LICENSE_SIGNING_KEY: string;
+  /** optional: the key for device credentials (audit LIC-05); defaults to a key derived from the signing key */
+  DEVICE_CREDENTIAL_SECRET?: string;
   /** only memberships of these products count (comma-separated prod_ ids); empty = any product of the account */
   WHOP_PRODUCT_IDS?: string;
   /** only memberships on these plans unlock trading (comma-separated plan_ ids); empty = any plan. The free demo plan
@@ -105,4 +107,49 @@ export function refusal(env: Env, m: Membership): Response | null {
       403,
     );
   return null;
+}
+
+// ---- audit LIC-04: computers removed from an account stay removed -------------------------------------------------
+
+/** Machine ids the customer removed (account page, or a move to another computer); never re-bound by first use. */
+export const revokedOf = (m: Membership): string[] =>
+  Array.isArray(m.metadata?.revoked_hwids)
+    ? (m.metadata.revoked_hwids as unknown[]).filter((x): x is string => typeof x === "string")
+    : [];
+
+/** Metadata with `hwid` added to the removed list (newest 20 kept) and the binding cleared. */
+export function revokeMachine(m: Membership, hwid: string | null): Record<string, unknown> {
+  const list = hwid ? [hwid, ...revokedOf(m).filter((x) => x !== hwid)].slice(0, 20) : revokedOf(m);
+  return { ...m.metadata, hwid: null, device_name: null, revoked_hwids: list };
+}
+
+// ---- audit LIC-05: device sign-in hands the app a credential bound to its machine, never the licence key ----------
+
+async function hmac(secret: string, msg: string): Promise<string> {
+  const k = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const s = new Uint8Array(await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(msg)));
+  return Array.from(s, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const credSecret = (env: Env) => env.DEVICE_CREDENTIAL_SECRET ?? env.LICENSE_SIGNING_KEY;
+
+/** `dk.<membership>.<mac>`: works only together with the machine id it was issued for. */
+export async function deviceCredential(env: Env, membership: string, machine: string): Promise<string> {
+  return `dk.${membership}.${(await hmac(credSecret(env), `${membership}:${machine}`)).slice(0, 40)}`;
+}
+
+/** The membership a device credential stands for, or null when it doesn't match this machine. */
+export async function checkDeviceCredential(env: Env, cred: string, machine: string): Promise<string | null> {
+  const m = /^dk\.([A-Za-z0-9_]{4,60})\.([0-9a-f]{40})$/.exec(cred);
+  if (!m) return null;
+  const want = (await hmac(credSecret(env), `${m[1]}:${machine}`)).slice(0, 40);
+  let diff = 0;
+  for (let i = 0; i < 40; i++) diff |= want.charCodeAt(i) ^ (m[2] as string).charCodeAt(i);
+  return diff === 0 ? (m[1] as string) : null;
 }

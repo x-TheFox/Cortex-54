@@ -8,6 +8,7 @@ import {
 } from "../../../src/license/format.ts";
 import { accountRoutes } from "./account.ts";
 import {
+  checkDeviceCredential,
   type Env,
   type Fetch,
   fail,
@@ -15,6 +16,7 @@ import {
   type Membership,
   REFRESH_HOURS,
   refusal,
+  revokedOf,
   TOKEN_DAYS,
   VALID,
   whop,
@@ -111,14 +113,30 @@ export async function handle(
       return fail("rate_limited", "Too many attempts. Wait a minute and try again.", 429);
   }
 
-  const m = await lookup(env, f, key);
+  // audit LIC-05: an app signed in through getsavant.pro holds a credential bound to its machine, not the key
+  let ref = key;
+  if (key.startsWith("dk.")) {
+    const mem = await checkDeviceCredential(env, key, machine);
+    if (!mem)
+      return fail("unknown_key", "This sign-in belongs to another computer. Sign in again here.", 404);
+    ref = mem;
+  }
+  const m = await lookup(env, f, ref);
   if (m instanceof Response) return m;
   const bound = typeof m.metadata?.hwid === "string" ? (m.metadata.hwid as string) : null;
+  // audit LIC-04: a computer the customer removed never re-binds itself; it needs a fresh sign-in
+  if (!bound && revokedOf(m).includes(machine) && url.pathname === "/v1/activate")
+    return fail(
+      "removed_from_account",
+      "This computer was removed from your Savant account. Sign in again from Settings → Licence to add it back.",
+      403,
+    );
 
   if (url.pathname === "/v1/release") {
     if (bound && bound !== machine)
       return fail("bound_to_another_machine", "Only the computer this key is active on can release it.", 409);
     if (bound) {
+      // a computer releasing itself is not "removed": it may activate again later
       const r = await whop(env, f, "PATCH", `/memberships/${m.id}`, {
         metadata: { ...m.metadata, hwid: null, device_name: null },
       });

@@ -281,7 +281,8 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
       /* half-written file: the next tick reads it whole */
     }
   });
-  // ADR-086: keep a Whop licence fresh (daily; a lapsed purchase reaches the app within a day while online)
+  // ADR-086 / audit LIC-01: check the licence with the server every 3 hours, so a refund, cancellation or a
+  // computer removed from the account reaches the app within a few hours while online
   const refresh = () =>
     void refreshLicense(home, cfg.keys.SAVANT_LICENSE_KEY)
       .then((r) => {

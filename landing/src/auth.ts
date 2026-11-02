@@ -3,7 +3,11 @@
  * The code exchange and every account call go through /api (Vercel proxies it to the Savant licence Worker), so the
  * page's CSP stays 'self'. Tokens live in this browser only (localStorage); signing out revokes the refresh token.
  */
-export const CLIENT_ID = "app_ge1Rv8QkJmsDdh";
+// AUDIT (docs/audit/FIX_LOG.md FX-03): build-time overrides so the site can sign in against the Whop sandbox or a local
+// stand-in. Unset in production builds → the shipped values below.
+const ENV = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
+export const CLIENT_ID = ENV.VITE_WHOP_CLIENT_ID || "app_ge1Rv8QkJmsDdh";
+const AUTHORIZE = ENV.VITE_WHOP_AUTHORIZE_URL || "https://api.whop.com/oauth/authorize";
 const KEY = "savant.auth";
 const PKCE = "savant.pkce";
 
@@ -52,7 +56,7 @@ export async function signIn(keep: Record<string, string> = {}): Promise<void> {
     code_challenge: await sha256(p.verifier),
     code_challenge_method: "S256",
   });
-  location.href = `https://api.whop.com/oauth/authorize?${q}`;
+  location.href = `${AUTHORIZE}?${q}`;
 }
 
 /** On the way back from Whop: exchange the code. Returns what signIn() kept, or null when this isn't a callback. */
@@ -60,7 +64,8 @@ export async function finishSignIn(): Promise<Record<string, string> | null> {
   const q = new URLSearchParams(location.search);
   const code = q.get("code");
   const state = q.get("state");
-  if (!code && !q.get("error")) return null;
+  // a callback always carries Whop's `state`; /activate/?code=XXXX-XXXX is the app's device code, not a callback
+  if (!state && !q.get("error")) return null;
   const p = read<{ verifier: string; state: string; keep: Record<string, string> }>(sessionStorage, PKCE);
   write(sessionStorage, PKCE, null);
   history.replaceState(null, "", location.pathname);

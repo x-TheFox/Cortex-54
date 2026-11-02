@@ -90,13 +90,45 @@ export function checkLicense(
 }
 
 export const licensePath = (home: string) => join(home, "license.json");
+const clockPath = (home: string) => join(home, "license-clock.json");
+
+/** Audit LIC-02: the latest time this computer is known to have reached (server issue times, earlier checks). */
+export function clockHighWater(home: string): number {
+  try {
+    const v = Number((JSON.parse(readFileSync(clockPath(home), "utf8")) as { at?: number }).at);
+    return Number.isFinite(v) ? v : 0;
+  } catch {
+    return 0;
+  }
+}
+export function noteClock(home: string, t: number): void {
+  if (!Number.isFinite(t) || t <= clockHighWater(home)) return;
+  try {
+    writeFileSync(clockPath(home), `${JSON.stringify({ at: t })}\n`, { mode: 0o600 });
+  } catch {
+    /* read-only home: the licence still expires on its own */
+  }
+}
+/** How far the clock may be behind the high-water mark before the licence stops counting (time zones, NTP drift). */
+export const CLOCK_SLACK_MS = 2 * 3_600_000;
 
 export function readLicense(home: string, pubkey = BUILT_IN_PUBKEY, now = Date.now()): LicenseState {
   if (!pubkey) return { required: false };
   const p = licensePath(home);
   if (!existsSync(p)) return checkLicense(null, pubkey, now);
   try {
-    return checkLicense(JSON.parse(readFileSync(p, "utf8")), pubkey, now, machineId(home));
+    const raw = JSON.parse(readFileSync(p, "utf8")) as { issued_at?: string; v?: number };
+    // audit LIC-02: a clock set back before the licence was issued (or before an earlier check) would keep a refunded
+    // licence alive forever; treat it as invalid until the clock is right again
+    const hw = Math.max(clockHighWater(home), raw.v === 2 ? Date.parse(raw.issued_at ?? "") || 0 : 0);
+    if (hw - now > CLOCK_SLACK_MS)
+      return {
+        required: true,
+        ok: false,
+        reason:
+          "This computer's clock is behind the real time. Set the date and time automatically, then reopen Savant.",
+      };
+    return checkLicense(raw, pubkey, now, machineId(home));
   } catch {
     return { required: true, ok: false, reason: "The licence file can't be read." };
   }
@@ -183,8 +215,10 @@ export async function pollDeviceSignIn(
       body: JSON.stringify({ device_secret: secret }),
       signal: AbortSignal.timeout(15_000),
     });
-    const d = (await res.json()) as { status?: string; key?: string };
-    if (d.status === "approved" && d.key) return { status: "approved", key: d.key };
+    const d = (await res.json()) as { status?: string; key?: string; credential?: string };
+    // audit LIC-05: the server hands out a credential bound to this machine (older servers sent the key itself)
+    const cred = d.credential ?? d.key;
+    if (d.status === "approved" && cred) return { status: "approved", key: cred };
     if (d.status === "pending" || d.status === "expired") return { status: d.status };
     return { status: "error" };
   } catch {
@@ -219,6 +253,7 @@ export async function activateKey(
   const st = checkLicense(r.license, pubkey, Date.now(), machine);
   if (st.required && !st.ok) return { ok: false, message: st.reason };
   writeFileSync(licensePath(home), `${JSON.stringify(r.license, null, 2)}\n`, { mode: 0o600 });
+  noteClock(home, Date.parse(r.license.issued_at));
   return { ok: true, message: r.message, state: st };
 }
 
@@ -245,9 +280,10 @@ export async function releaseKey(
 }
 
 /**
- * Daily refresh (the runtime calls this): a v2 token past its `refresh_after` is renewed with the stored key. A
- * network failure keeps the current token (it is valid for up to 14 days). A definite "no" from the server (refunded,
- * cancelled, moved to another computer) removes the token, which holds new entries.
+ * Refresh (the runtime calls this every 3 hours): audit LIC-01, a v2 token asks the server on every call (at most once
+ * every 2.5 h), so a refund, cancellation or a computer removed from the account reaches the app within a few hours,
+ * not a day. A network failure keeps the current token (valid for up to 14 days offline). A definite "no" from the
+ * server removes the token, which holds new entries.
  */
 export async function refreshLicense(
   home: string,
@@ -263,8 +299,9 @@ export async function refreshLicense(
     cur = null;
   }
   const now = o.now ?? Date.now();
-  if (cur?.v === 2 && Date.parse(cur.refresh_after) > now) return "fresh";
   if (cur?.v === 1) return "fresh"; // publisher-issued files don't refresh
+  const last = lastCheck(home);
+  if (cur?.v === 2 && last !== null && now - last >= 0 && now - last < CHECK_EVERY_MS) return "fresh";
   const f = o.fetcher ?? ((u, i) => fetch(u, i));
   let r: ActivateResponse;
   try {
@@ -279,6 +316,7 @@ export async function refreshLicense(
   } catch {
     return "offline";
   }
+  markCheck(home, now);
   if (!r.ok) {
     if (
       [
@@ -287,6 +325,7 @@ export async function refreshLicense(
         "bound_to_another_machine",
         "wrong_product",
         "free_plan",
+        "removed_from_account",
       ].includes(r.code)
     )
       rmSync(p, { force: true });
@@ -295,7 +334,27 @@ export async function refreshLicense(
   const st = checkLicense(r.license, o.pubkey ?? BUILT_IN_PUBKEY, now, machineId(home));
   if (st.required && !st.ok) return "offline";
   writeFileSync(p, `${JSON.stringify(r.license, null, 2)}\n`, { mode: 0o600 });
+  noteClock(home, Date.parse(r.license.issued_at));
   return "renewed";
+}
+
+/** Audit LIC-01: the server is asked at most this often (the runtime's timer runs every 3 h). */
+export const CHECK_EVERY_MS = 2.5 * 3_600_000;
+const checkPath = (home: string) => join(home, "license-checked.json");
+function lastCheck(home: string): number | null {
+  try {
+    const v = Number((JSON.parse(readFileSync(checkPath(home), "utf8")) as { at?: number }).at);
+    return Number.isFinite(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+function markCheck(home: string, t: number): void {
+  try {
+    writeFileSync(checkPath(home), `${JSON.stringify({ at: t })}\n`, { mode: 0o600 });
+  } catch {
+    /* ignore */
+  }
 }
 
 // ------------------------------------------------------------------ publisher side (scripts/license.ts)

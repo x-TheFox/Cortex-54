@@ -1,4 +1,17 @@
-import { type Env, type Fetch, fail, json, type Membership, planOf, refusal, VALID, whop } from "./common.ts";
+import {
+  deviceCredential,
+  type Env,
+  type Fetch,
+  fail,
+  json,
+  type Membership,
+  planOf,
+  refusal,
+  revokedOf,
+  revokeMachine,
+  VALID,
+  whop,
+} from "./common.ts";
 
 /**
  * Savant accounts (ADR-093). The account is the customer's Whop account (the one that bought the plan), so there is
@@ -16,12 +29,13 @@ import { type Env, type Fetch, fail, json, type Membership, planOf, refusal, VAL
  *   POST /v1/device/start  {machine, name}  (the app)            → {user_code, verify_url, device_secret}
  *   GET  /v1/device/info?code=              (signed in)           → which computer is asking
  *   POST /v1/device/approve {code, move?}   (signed in)           → binds the licence to that computer
- *   POST /v1/device/poll   {device_secret}  (the app)            → pending | approved {key} | expired
+ *   POST /v1/device/poll   {device_secret}  (the app)            → pending | approved {credential} | expired
  *
  * Device sign-in is the OAuth device-authorization pattern: the app shows a short code and opens
- * getsavant.pro/activate; the user signs in there and approves; the app picks up its licence key and activates it
- * through the normal /v1/activate path. A licence lives on one computer at a time: approving on a new computer moves
- * it, and the old one drops its licence at its next check (within 3 hours while it is online).
+ * getsavant.pro/activate; the user signs in there and approves; the app picks up a credential bound to its own machine
+ * (audit LIC-05: never the licence key, so an approved phishing code can't be reused elsewhere) and activates it through
+ * the normal /v1/activate path. A licence lives on one computer at a time: approving on a new computer moves it, and
+ * the old one is added to the removed list and drops its licence at its next check (within 3 hours while online).
  */
 
 const OAUTH = (env: Env) =>
@@ -100,11 +114,13 @@ function view(env: Env, m: Membership) {
     id: m.id,
     plan: !paid
       ? "Free demo"
-      : days === 365
-        ? "Yearly"
-        : days === 30
-          ? "Monthly"
-          : (m.product?.title ?? "Savant"),
+      : m.status === "trialing"
+        ? "Free trial"
+        : days === 365
+          ? "Yearly"
+          : days === 30
+            ? "Monthly"
+            : (m.product?.title ?? "Savant"),
     paid,
     status: m.status,
     trial: m.status === "trialing",
@@ -201,11 +217,16 @@ export async function accountRoutes(request: Request, env: Env, f: Fetch, url: U
     if (!/^[0-9a-f]{32,64}$/.test(machine)) return fail("bad_request", "Send a machine id.");
     const code = `${random(4, CODE_ALPHABET)}-${random(4, CODE_ALPHABET)}`;
     const secret = random(32);
+    const cf = (request as { cf?: { city?: string; region?: string; country?: string } }).cf;
     const rec = {
       machine,
       name: str(body, "name", 60) || "A computer",
       secret: await sha(secret),
       status: "pending",
+      // audit LIC-05: where the request came from, shown on the approve page
+      origin: [cf?.city, cf?.region, cf?.country].filter(Boolean).join(", ") || null,
+      ip: ip === "?" ? null : ip.replace(/(\.\d+)$|(:[0-9a-f]*)$/i, ".x"),
+      started_at: new Date().toISOString(),
     };
     await env.DEVICES.put(`code:${code}`, JSON.stringify(rec), { expirationTtl: DEVICE_TTL_S });
     await env.DEVICES.put(`secret:${rec.secret}`, code, { expirationTtl: DEVICE_TTL_S });
@@ -227,7 +248,7 @@ export async function accountRoutes(request: Request, env: Env, f: Fetch, url: U
     if (rec.status !== "approved") return json({ ok: true, status: "pending" });
     await env.DEVICES.delete(`code:${code}`);
     await env.DEVICES.delete(`secret:${h}`);
-    return json({ ok: true, status: "approved", key: rec.key, plan: rec.plan });
+    return json({ ok: true, status: "approved", credential: rec.credential, plan: rec.plan });
   }
 
   // ---- everything below needs a signed-in customer
@@ -242,9 +263,11 @@ export async function accountRoutes(request: Request, env: Env, f: Fetch, url: U
   if (p === "/v1/account/cancel" || p === "/v1/account/undo-cancel" || p === "/v1/account/deactivate") {
     const m = await owned(env, f, user, str(body, "membership", 60));
     if (m instanceof Response) return m;
+    // audit LIC-04: a removed computer goes on the removed list, so it can't re-bind itself at its next check
+    const hwid = typeof m.metadata?.hwid === "string" ? (m.metadata.hwid as string) : null;
     const patch =
       p === "/v1/account/deactivate"
-        ? { metadata: { ...m.metadata, hwid: null, device_name: null } }
+        ? { metadata: revokeMachine(m, hwid) }
         : { cancel_at_period_end: p === "/v1/account/cancel" };
     const r = await whop(env, f, "PATCH", `/memberships/${m.id}`, patch);
     if (!r.ok)
@@ -253,7 +276,7 @@ export async function accountRoutes(request: Request, env: Env, f: Fetch, url: U
       ok: true,
       message:
         p === "/v1/account/deactivate"
-          ? "That computer no longer holds the licence. It stops opening new trades at its next check."
+          ? "That computer no longer holds the licence. It stops opening new trades at its next check (within a few hours while it's online)."
           : p === "/v1/account/cancel"
             ? "Cancelled. You keep everything until the end of the paid period, and you won't be charged again."
             : "Your subscription will renew as usual.",
@@ -279,24 +302,36 @@ export async function accountRoutes(request: Request, env: Env, f: Fetch, url: U
       typeof m.metadata?.hwid === "string" && m.metadata.hwid ? (m.metadata.hwid as string) : null;
     const elsewhere =
       bound && bound !== rec.machine ? String(m.metadata?.device_name ?? "another computer") : null;
+    const cfNow = (request as { cf?: { country?: string } }).cf;
     if (p === "/v1/device/info")
-      return json({ ok: true, device: rec.name, plan: view(env, m).plan, elsewhere, status: rec.status });
+      return json({
+        ok: true,
+        device: rec.name,
+        plan: view(env, m).plan,
+        elsewhere,
+        status: rec.status,
+        origin: rec.origin ?? null,
+        ip: rec.ip ?? null,
+        started_at: rec.started_at ?? null,
+        // audit LIC-05: a request from another country than the approver is worth a second look
+        different_country: Boolean(
+          cfNow?.country && typeof rec.origin === "string" && !rec.origin.endsWith(cfNow.country),
+        ),
+      });
     if (elsewhere && body.move !== true)
       return json(
         { ok: false, code: "bound_elsewhere", message: `Savant is active on ${elsewhere}.`, elsewhere },
         409,
       );
-    if (!m.license_key)
-      return fail(
-        "not_configured",
-        "This plan has no licence key yet. Contact support from your Whop account.",
-        500,
-      );
     const now = new Date().toISOString();
+    const machine = String(rec.machine);
+    const base = elsewhere ? revokeMachine(m, bound) : (m.metadata ?? {});
     const r = await whop(env, f, "PATCH", `/memberships/${m.id}`, {
       metadata: {
-        ...m.metadata,
-        hwid: rec.machine,
+        ...base,
+        // approving this computer again takes it off the removed list
+        revoked_hwids: revokedOf({ ...m, metadata: base }).filter((x) => x !== machine),
+        hwid: machine,
         device_name: rec.name,
         activated_at: now,
         last_seen: now,
@@ -305,7 +340,12 @@ export async function accountRoutes(request: Request, env: Env, f: Fetch, url: U
     if (!r.ok) return fail("upstream", "Whop didn't accept the change. Try again in a minute.", 502);
     await env.DEVICES.put(
       `code:${code}`,
-      JSON.stringify({ ...rec, status: "approved", key: m.license_key, plan: view(env, m).plan }),
+      JSON.stringify({
+        ...rec,
+        status: "approved",
+        credential: await deviceCredential(env, m.id, machine),
+        plan: view(env, m).plan,
+      }),
       { expirationTtl: DEVICE_TTL_S },
     );
     return json({

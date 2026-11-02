@@ -181,11 +181,26 @@ export class LocalJobs implements WorkflowDispatcher {
     const archive = join(root, `${which}.tar.gz`);
     const get = spawnSync(
       "curl",
-      ["-fsSL", "--retry", "2", "-o", archive, `https://codeload.github.com/${v.repo}/tar.gz/${v.sha}`],
-      { stdio: "ignore" },
+      [
+        "-fsSL",
+        "--retry",
+        "2",
+        "--connect-timeout",
+        "20",
+        "--max-time",
+        "120",
+        "-o",
+        archive,
+        `https://codeload.github.com/${v.repo}/tar.gz/${v.sha}`,
+      ],
+      // audit AGT-04: a stalled download must never freeze the app (spawnSync blocks the whole process)
+      { stdio: "ignore", timeout: 130_000 },
     );
     if (get.status !== 0) throw new Error(`could not download ${v.repo} (check the internet connection)`);
-    const untar = spawnSync("tar", ["-xzf", archive, "-C", dir, "--strip-components=1"], { stdio: "ignore" });
+    const untar = spawnSync("tar", ["-xzf", archive, "-C", dir, "--strip-components=1"], {
+      stdio: "ignore",
+      timeout: 60_000,
+    });
     rmSync(archive, { force: true });
     if (untar.status !== 0) throw new Error(`could not unpack ${v.repo}`);
     writeFileSync(stamp, `${v.sha}\n`);

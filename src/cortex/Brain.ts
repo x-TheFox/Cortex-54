@@ -12,7 +12,13 @@ import {
   SubrequestBudgetExceeded,
   utcDay,
 } from "../budget/FreeTierBudget.ts";
-import { CLEF_CONTEXT_TOKENS, type ClefApi, type ClefResult, estimateTokens } from "../clef/ClefClient.ts";
+import {
+  CLEF_CONTEXT_TOKENS,
+  type ClefApi,
+  type ClefResult,
+  estimateTokens,
+  withTimeout,
+} from "../clef/ClefClient.ts";
 import { type CatalystFacts, type ClairicApi, FACT_FIELDS, interpretFacts } from "../clef/clairic.ts";
 import { buildTier2, interpretTier2, TIER2_PROMPT_VERSION } from "../clef/tier2.ts";
 import {
@@ -178,6 +184,12 @@ import { dueJobs, type WorkflowDispatcher } from "./dispatch.ts";
 import { getKV, one, type SqlLike, type SqlValue, setKV } from "./store.ts";
 
 // the cards used to live here; existing importers keep working
+
+/** Audit AGT-04: the longest any one pulse step may hold the pulse (broker / network I/O, and model calls). */
+export const STEP_MS = { io: 45_000, model: 120_000 } as const;
+/** Audit HUB-05: how many court ideas one followed agent may put in front of this robot per UTC day. */
+export const FOLLOW_LEADS_PER_AGENT_PER_DAY = 3;
+
 export {
   addBusinessDays,
   benchmarkLines,
@@ -686,7 +698,7 @@ export class Brain {
       const broker = this.deps.brokers[account];
       if (!broker) continue;
       try {
-        await this.syncAccount(account, broker);
+        await withTimeout(this.syncAccount(account, broker), STEP_MS.io, `${account} sync`);
         if (getKV(this.sql, `sync_fail_streak:${account}`) !== "0")
           setKV(this.sql, `sync_fail_streak:${account}`, "0", started);
         const row = this.account(account);
@@ -711,7 +723,9 @@ export class Brain {
     }
 
     // 2. Exits first: quotes → synthetic stops, targets, time stops; then protective broker stops.
-    const quotes = await this.quotesFor(this.symbolsInPlay()).catch(() => ({}) as Record<string, Quote>);
+    const quotes = await withTimeout(this.quotesFor(this.symbolsInPlay()), STEP_MS.io, "quotes").catch(
+      () => ({}) as Record<string, Quote>,
+    );
     for (const account of ACCOUNTS) {
       const broker = this.deps.brokers[account];
       if (!broker) continue;
@@ -756,7 +770,7 @@ export class Brain {
 
     // 2b. World intake (Phase 2): headlines into the triage queue for Phase 3. Never blocks trading.
     try {
-      report.newsQueued = await this.intakeNews();
+      report.newsQueued = await withTimeout(this.intakeNews(), STEP_MS.io, "news intake");
     } catch (e) {
       if (!(e instanceof SubrequestBudgetExceeded)) {
         await this.alertOnce("news-intake", `⚠️ news intake failed: ${errText(e).slice(0, 200)}`);
@@ -765,8 +779,9 @@ export class Brain {
 
     // 2c. Tier 1 triage (Phase 3): one batched clef-flash call over the queue. Never blocks trading.
     try {
-      for (let i = 0; i < this.d.funnel.tier1.max_batches_per_pulse; i++) {
-        const t = await this.triageTier1();
+      const t1Until = this.deps.now() + STEP_MS.model;
+      for (let i = 0; i < this.d.funnel.tier1.max_batches_per_pulse && this.deps.now() < t1Until; i++) {
+        const t = await withTimeout(this.triageTier1(), STEP_MS.model, "Tier 1 triage");
         report.triaged += t.triaged;
         report.promoted += t.promoted;
         if (t.triaged === 0) break;
@@ -779,7 +794,7 @@ export class Brain {
 
     // 2d. Tier 2 (Clef 27B) on one promoted candidate per pulse. Never blocks trading.
     try {
-      report.tier2 = await this.triageTier2();
+      report.tier2 = await withTimeout(this.triageTier2(), STEP_MS.model, "Tier 2");
     } catch (e) {
       if (!(e instanceof SubrequestBudgetExceeded)) {
         await this.alertOnce("triage-t2", `⚠️ Tier 2 failed: ${errText(e).slice(0, 200)}`);
@@ -788,8 +803,8 @@ export class Brain {
 
     // 2d'. ADR-059: re-underwrite open positions that hit a tripwire; daily surveillance dossiers. Never blocks trading.
     try {
-      await this.reviewPositions(started);
-      await this.dispatchWatches(started);
+      await withTimeout(this.reviewPositions(started), STEP_MS.model, "position review");
+      await withTimeout(this.dispatchWatches(started), STEP_MS.io, "watch dispatch");
     } catch (e) {
       if (!(e instanceof SubrequestBudgetExceeded)) {
         await this.alertOnce("reviews", `⚠️ position review failed: ${errText(e).slice(0, 200)}`);
@@ -799,7 +814,11 @@ export class Brain {
     // 2e. Court (Tier 3): one sprint per pulse, only when new entries are possible at all.
     if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
       try {
-        report.courtContracts = await this.runCourt();
+        report.courtContracts = await withTimeout(
+          this.runCourt(),
+          this.d.llm_routing.hearing_deadline_ms + STEP_MS.model,
+          "court",
+        );
       } catch (e) {
         if (!(e instanceof SubrequestBudgetExceeded)) {
           await this.alertOnce("court", `⚠️ court failed: ${errText(e).slice(0, 200)}`);
@@ -820,7 +839,7 @@ export class Brain {
           () => this.runTom(quotes),
           () => this.runRsi2(),
         ]) {
-          const r = await run();
+          const r = await withTimeout(run(), STEP_MS.model, "strategy step");
           report.contracts += r.contracts;
           report.entries += r.entries;
         }
@@ -831,17 +850,22 @@ export class Brain {
       }
     }
 
-    await this.checkBatchStaleness(started).catch(() => undefined);
-    await this.dispatchDue(started).catch(() => undefined);
-    await this.bookReview().catch(() => undefined);
-    await this.hubSync(started).catch(() => undefined);
-    await this.checkDispatchReceipts(started).catch(() => undefined);
+    // audit AGT-04: every housekeeping await is time-boxed, so one stuck connection can't freeze the pulse (and with it
+    // the stops of the next pulse). A step that times out is abandoned, not cancelled; it is retried next pulse.
+    const quick = (p: Promise<unknown>, what: string) =>
+      withTimeout(p, STEP_MS.io, what).catch(() => undefined);
+    await quick(this.checkBatchStaleness(started), "staleness");
+    await quick(this.dispatchDue(started), "dispatch");
+    await quick(this.bookReview(), "book review");
+    await quick(this.hubSync(started), "hub sync");
+    await quick(this.checkDispatchReceipts(started), "dispatch receipts");
+    await quick(this.drainHearings(started), "open court");
 
     // 4. Persist, report, schedule.
-    await this.sampleEquity(started).catch(() => undefined);
-    report.flushed = await this.flushJournal();
-    await this.updateHud().catch(() => undefined);
-    await this.flushTerminal().catch(() => undefined);
+    await quick(this.sampleEquity(started), "equity sample");
+    report.flushed = await withTimeout(this.flushJournal(), STEP_MS.io, "journal flush").catch(() => 0);
+    await quick(this.updateHud(), "hud");
+    await quick(this.flushTerminal(), "terminal");
     // Heartbeat stats for the day (reported in DAY_ROLL; the Governor's LIVE-gate heartbeat criterion).
     const prevPulse = Number(getKV(this.sql, "last_pulse_at") ?? 0);
     const gapS = prevPulse > 0 ? Math.round((started - prevPulse) / 1000) : 0;
@@ -1650,7 +1674,16 @@ export class Brain {
       account,
       "EXIT",
       pos.contract_id,
-      { symbol: pos.symbol, reason, pnl_cents: pnlCents },
+      {
+        symbol: pos.symbol,
+        reason,
+        pnl_cents: pnlCents,
+        // audit HUB-06: the trade's return on its own cost, so the hub ranks by % and never by account size
+        ret_pct: ((basis) =>
+          pnlCents !== null && basis > 0 ? Math.round((pnlCents / basis) * 10_000) / 100 : null)(
+          Number(pos.avg_entry) * Number(pos.qty) * 100,
+        ),
+      },
       now,
     );
     void this.deps.notifier.post("executions", {
@@ -4167,6 +4200,11 @@ ${postmortem}`,
       if (r.ok && rows.length) this.sql.exec("DELETE FROM hub_outbox WHERE seq <= ?", rows.at(-1)?.seq ?? 0);
       if (!r.ok) await this.alertOnce("hub-publish", `⚠️ hub publish failed: HTTP ${r.status} ${r.body}`);
     }
+    const known = new Set<string>([
+      ...Object.values(this.d.watchlists).flat(),
+      ...this.universe.watched(now),
+      ...this.symbolsInPlay(),
+    ]);
     for (const agent of hub.follow.slice(0, 10)) {
       const key = `hub_follow:${agent}`;
       const rows = await fetchFeed(http, hub.url, agent, Number(getKV(this.sql, key) ?? 0));
@@ -4179,10 +4217,16 @@ ${postmortem}`,
           win?: number;
         };
         if (p.origin !== "COURT" || !p.symbol || now - row.ts > 6 * 3_600_000) continue;
+        // audit HUB-05: a followed agent is untrusted. Only symbols this robot already trades, at most a few leads per
+        // agent per day, and every lead goes through Tier 1 triage like any headline (no preset materiality).
+        if (!/^[A-Z]{1,6}(\/USD)?$/.test(p.symbol) || !known.has(p.symbol)) continue;
+        const capKey = `follow:${agent}`;
+        if (this.daily(capKey, now) >= FOLLOW_LEADS_PER_AGENT_PER_DAY) continue;
         const id = `follow:${agent}:${row.seq}`;
         if (!this.markSeen(id, now)) continue;
+        this.bumpDaily(capKey, now);
         this.sql.exec(
-          "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 2, ?, ?, ?)",
+          "INSERT INTO triage_queue (candidate_id, tier, symbol, payload_json, enqueued_at) VALUES (?, 1, ?, ?, ?)",
           id,
           p.symbol,
           JSON.stringify({
@@ -4192,7 +4236,6 @@ ${postmortem}`,
             symbols: [p.symbol],
             source: `hub:${agent}`,
             createdAt: row.ts,
-            tier1: { material: 0.7, direction: "up", escalate: 1.5 },
           }),
           now,
         );
@@ -4274,6 +4317,8 @@ ${postmortem}`,
     const bands = this.sql.exec<{ breaker: string }>("SELECT breaker FROM accounts");
     return bands.some((b) => b.breaker !== "GREEN") ? Math.floor(max / 2) : max;
   }
+
+  private async drainHearings(_now: number): Promise<void> {}
 
   private async runCourt(): Promise<number> {
     const llm = this.deps.llm;
@@ -6190,6 +6235,28 @@ ${postmortem}`,
       await this.alertOnce("d1-flush", `⚠️ D1 flush failed (rows kept in outbox): ${msg.slice(0, 200)}`);
     }
     return total;
+  }
+
+  /**
+   * Audit AGT-04: stops, targets and time stops on their own. The local watchdog runs this on its own timer while a
+   * pulse is stuck, so protection never waits on a hung call. Exits are idempotent (client order ids, ADR-020).
+   */
+  async protectOnly(): Promise<number> {
+    const quotes = await withTimeout(this.quotesFor(this.symbolsInPlay()), STEP_MS.io, "quotes").catch(
+      () => ({}) as Record<string, Quote>,
+    );
+    let n = 0;
+    for (const account of ACCOUNTS) {
+      const broker = this.deps.brokers[account];
+      if (!broker) continue;
+      n += await withTimeout(this.manageExits(account, broker, quotes), STEP_MS.io, "exits").catch(() => 0);
+    }
+    return n;
+  }
+
+  /** An alarm from outside the pulse (the local watchdog), deduped like every other alarm. */
+  async alarm(key: string, text: string): Promise<void> {
+    await this.alertOnce(key, text);
   }
 
   private async alertOnce(key: string, text: string): Promise<void> {

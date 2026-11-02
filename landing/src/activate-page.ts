@@ -76,12 +76,24 @@ async function show(code: string): Promise<void> {
     h("p", { class: "lede" }, "Check that this code matches the one in the Savant app:"),
     h("p", { class: "acct-code" }, code),
     h("p", { class: "fine" }, `Plan: ${String(r.plan)}`),
+    // audit LIC-05: where the request came from, so a code someone else sent you stands out
+    r.origin || r.ip
+      ? h(
+          "p",
+          { class: r.different_country ? "acct-note acct-warn" : "fine" },
+          `Requested from ${[r.origin, r.ip].filter(Boolean).join(" · ")}${r.different_country ? ". That's not where you are now: only continue if you started this yourself on that computer." : "."}`,
+        )
+      : "",
     h(
       "p",
       { class: "dl" },
       btn("Sign in this computer", "btn-ink btn-lg", () => approve(code)),
     ),
-    h("p", { class: "fine" }, "Didn't start this from the Savant app? Close this page."),
+    h(
+      "p",
+      { class: "fine" },
+      "Didn't start this yourself in the Savant app a moment ago? Close this page: approving lets that computer use your plan.",
+    ),
   );
 }
 

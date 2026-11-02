@@ -187,7 +187,19 @@ export default defineConfig({
   plugins: [fromConfig(), csp()],
   // /hub mirrors the vercel.json rewrite to the community hub (ADR-095), so the community pages work locally too
   server: { port: 5175, strictPort: true, proxy: { "/hub": HUB_PROXY } },
-  preview: { port: 5176, strictPort: true, proxy: { "/hub": HUB_PROXY } },
+  // AUDIT FX-03: SAVANT_API_PROXY=http://127.0.0.1:8791 sends /api to a local licence server (production: vercel.json)
+  preview: {
+    port: 5176,
+    strictPort: true,
+    proxy: {
+      "/hub": HUB_PROXY,
+      ...(process.env.SAVANT_API_PROXY
+        ? {
+            "/api": { target: process.env.SAVANT_API_PROXY, rewrite: (p: string) => p.replace(/^\/api/, "") },
+          }
+        : {}),
+    },
+  },
   build: {
     outDir: fileURLToPath(new URL("../landing-dist", import.meta.url)),
     rollupOptions: {
