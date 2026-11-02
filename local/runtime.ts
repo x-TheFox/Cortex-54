@@ -42,6 +42,7 @@ import { runtimeChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
 import { entriesBlocked, readLicense } from "./license.ts";
 import { loadLocalScar, mergeScar } from "./memory.ts";
+import { PowerGuard } from "./power.ts";
 import { loadLocalCalibration } from "./proposals.ts";
 import { SimBroker } from "./simbroker.ts";
 import { fileD1, fileSql, type LocalD1 } from "./store.ts";
@@ -152,6 +153,15 @@ export interface LocalOptions {
   };
 }
 
+/** ADR-097: "unlimited" hearings, as a number the brain's daily counter can compare against. */
+export const UNLIMITED_HEARINGS = 1_000_000;
+
+/** ADR-097: does this install run unlimited court hearings? (explicit switch, else: the pool has a paid model) */
+export function courtUnlimited(cfg: LocalConfig, pool: PoolReport): boolean {
+  if (cfg.court.unlimited !== undefined) return cfg.court.unlimited;
+  return pool.entries.some((e) => e.tier === "paid" || e.tier === "local");
+}
+
 /** Audit AGT-04: a pulse running this long is treated as stuck (3× the exposed cadence, at least 3 minutes). */
 export const STALL_MS = Math.max(3 * DOCTRINE.cadence.pulse_seconds_exposed * 1000, 180_000);
 
@@ -222,8 +232,10 @@ export class LocalCortex {
       buildProviders(k),
       cfg.llm,
     );
-    // ADR-075: the user's court capacity (more hearings per day for pools with paid models)
-    const cap = cfg.court.max_per_day;
+    // ADR-075 / ADR-097: the user's court capacity. Unlimited by default once the pool has a paid model (or when the
+    // user switches it on); a free-only pool keeps the doctrine's default so its providers' daily quotas last the day.
+    const unlimited = courtUnlimited(cfg, built.report);
+    const cap = unlimited ? UNLIMITED_HEARINGS : cfg.court.max_per_day;
     const d = cap
       ? {
           ...built.d,
@@ -407,6 +419,7 @@ export class LocalCortex {
     );
     const r = await run;
     this.lastReport = r;
+    this.syncPower();
     return r;
   }
   private inflight: Promise<void> = Promise.resolve();
@@ -418,7 +431,18 @@ export class LocalCortex {
    * Audit AGT-04: a pulse that runs far past its cadence is stuck on some await. Alarm, and keep the stops working on
    * their own timer until it finishes (every pulse step is also time-boxed inside the brain).
    */
+  /** ADR-096: the OS power assertion (keeps the computer awake during hearings, or always). */
+  readonly power = new PowerGuard();
+
+  /** Hold or release the power assertion for what is running now. */
+  syncPower(): void {
+    const mode = this.o.cfg.power.keep_awake;
+    this.power.set("Savant is running", mode === "always");
+    this.power.set("a court hearing is in session", mode !== "off" && this.brain.hearingsRunning() > 0);
+  }
+
   async watch(now = Date.now()): Promise<"ok" | "stalled"> {
+    this.syncPower();
     const started = this.pulseStartedAt;
     if (started === null || now - started < STALL_MS) return "ok";
     await this.brain
@@ -466,7 +490,7 @@ export class LocalCortex {
       this.server.listen(this.o.cfg.port, this.o.cfg.lan.enabled ? "0.0.0.0" : this.o.cfg.bind, () => res());
     });
     this.schedule(1);
-    this.watchdog = setInterval(() => void this.watch(), 30_000);
+    this.watchdog = setInterval(() => void this.watch(), 15_000);
     this.watchdog.unref?.();
   }
 
@@ -474,6 +498,7 @@ export class LocalCortex {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.watchdog) clearInterval(this.watchdog);
+    this.power.stop();
     await this.inflight; // never close the databases under a running pulse
     await new Promise<void>((res) => {
       if (!this.server) return res();
@@ -501,6 +526,8 @@ export class LocalCortex {
       now: Date.now(),
       last_pulse_at: last === null ? null : Number(last),
       // audit AGT-04: how long the current pulse has been running (null when idle)
+      power: { held: this.power.held, why: this.power.why },
+      hearings_running: this.brain.hearingsRunning(),
       pulse_running_s:
         this.pulseStartedAt === null ? null : Math.round((Date.now() - this.pulseStartedAt) / 1000),
       constitution_sha256: CONSTITUTION_SHA256,

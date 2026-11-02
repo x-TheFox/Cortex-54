@@ -288,6 +288,37 @@ export class LlmRouter {
    */
   readonly cooldownMs = 5 * 60_000;
   private readonly cooling = new Map<string, number>();
+  /** ADR-097: providers whose every key is exhausted, until when */
+  private readonly providerCooling = new Map<string, number>();
+
+  /**
+   * ADR-097: true when every model the court could use is cooling down, rate-limited, over its daily quota or spend cap
+   * right now. The brain then holds new entries (REDUCE_ONLY semantics) until a provider recovers.
+   */
+  depleted(): boolean {
+    const r = this.d.llm_routing;
+    const hops = [...r.bull_chain, ...r.bear_chain, ...r.panel.chain].filter(
+      (h) => this.providers[h.provider],
+    );
+    if (hops.length === 0) return false;
+    const t = this.now();
+    return hops.every(
+      (h) =>
+        (this.cooling.get(`${h.provider}/${h.model}`) ?? 0) > t ||
+        (this.providerCooling.get(h.provider.replace(/~bear$/, "")) ?? 0) > t ||
+        (this.gate !== null && !this.gate.allow(h.provider)) ||
+        this.overBudget(h.provider),
+    );
+  }
+
+  /** ADR-097: the provider-level state the settings page shows. */
+  providerStatus(): { provider: string; cooling_until: number | null }[] {
+    const t = this.now();
+    return Object.keys(this.providers).map((p) => {
+      const u = this.providerCooling.get(p) ?? 0;
+      return { provider: p, cooling_until: u > t ? u : null };
+    });
+  }
 
   constructor(
     private readonly providers: Partial<Record<string, LlmProvider>>,
@@ -316,7 +347,8 @@ export class LlmRouter {
     }
     const t = this.now();
     const hot = (h: { provider: string; model: string }) =>
-      (this.cooling.get(`${h.provider}/${h.model}`) ?? 0) > t;
+      (this.cooling.get(`${h.provider}/${h.model}`) ?? 0) > t ||
+      (this.providerCooling.get(h.provider.replace(/~bear$/, "")) ?? 0) > t;
     chain = [...chain.filter((h) => !hot(h)), ...chain.filter(hot)];
     for (const hop of chain) {
       const family = this.familyOf(hop.provider, hop.model);
@@ -379,6 +411,12 @@ export class LlmRouter {
           log({ ...base, latencyMs: this.now() - t0, outcome, error: msg.slice(0, 200) });
           if (outcome !== "ERROR") {
             this.cooling.set(`${hop.provider}/${hop.model}`, this.now() + this.cooldownMs);
+            // ADR-097 outer tier: every key of this provider is exhausted → the whole provider sits out
+            if (
+              /all \d+ keys? rate-limited|keys? (?:rate-limited|revoked)/i.test(msg) ||
+              /\b(401|403)\b/.test(msg)
+            )
+              this.providerCooling.set(hop.provider.replace(/~bear$/, ""), this.now() + this.cooldownMs);
             break; // rate limits / timeouts: don't hammer, go to the next hop
           }
         }

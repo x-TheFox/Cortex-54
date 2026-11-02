@@ -77,7 +77,7 @@ export function makeBackup(o: {
     config: { ...cfg, cloud: o.includeKeys ? cfg.cloud : undefined },
     files: Object.fromEntries(
       Object.entries(o.files)
-        .filter(([, b]) => b && b.length)
+        .filter(([, b]) => b?.length)
         .map(([n, b]) => [n, (b as Buffer).toString("base64")]),
     ),
   };

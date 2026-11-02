@@ -267,7 +267,7 @@ export async function runOpenCourt(i: OpenCourtInput): Promise<OpenCourtResult> 
         const user = `${i.caseBrief}\n\nCourt record so far (round ${pass}):\n${untrusted("record", record.text() || "(no statements yet in open court)")}${toolText}${directive}\n\nIt is your turn, ${seat.title}. Reply with one JSON object.`;
         modelCalls++;
         reply = await i.ask(seat, { system: seatSystem(seat, rules), user }, pass);
-        if (!reply || reply.reply.action !== "tools" || warned || hard()) break;
+        if (reply?.reply.action !== "tools" || warned || hard()) break;
         const calls = reply.reply.tool_calls.slice(0, 6) as ToolCall[];
         scratch.push(...(await Promise.all(calls.map((c) => i.tools.run(c)))));
         if (round === o.maxToolRoundsPerTurn) reply = null; // never settled on an answer

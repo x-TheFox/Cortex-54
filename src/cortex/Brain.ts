@@ -429,6 +429,8 @@ export interface PulseReport {
   promoted: number;
   tier2: number;
   courtContracts: number;
+  /** ADR-097: every model provider and key was exhausted this pulse (new entries held) */
+  llmDepleted?: boolean;
   nextPulseSeconds: number;
 }
 
@@ -722,6 +724,7 @@ export class Brain {
       promoted: 0,
       tier2: 0,
       courtContracts: 0,
+      llmDepleted: false,
       nextPulseSeconds: this.d.cadence.pulse_seconds_flat,
     };
     this.budget.add("do_requests", 1, started);
@@ -851,8 +854,32 @@ export class Brain {
       }
     }
 
+    // ADR-097: every provider and every key is exhausted → hold new exposure (REDUCE_ONLY semantics) until one
+    // recovers from its cooldown. Exits, stops and breakers above are untouched.
+    const llmDepleted = this.deps.llm?.depleted() ?? false;
+    if (llmDepleted) {
+      report.llmDepleted = true;
+      await this.alertOnce(
+        "llm-depleted",
+        "⏸ Every AI provider and key is rate-limited or out of quota right now. Savant holds new trades until one recovers; open positions keep their stops.",
+      );
+      if (getKV(this.sql, "llm_depleted_since") === null) {
+        setKV(this.sql, "llm_depleted_since", String(started), started);
+        this.journal.append(
+          "SYSTEM",
+          "LLM_POOL_DEPLETED",
+          null,
+          { status: this.deps.llm?.providerStatus() ?? [] },
+          started,
+        );
+      }
+    } else if (getKV(this.sql, "llm_depleted_since") !== null) {
+      this.sql.exec("DELETE FROM settings WHERE key = 'llm_depleted_since'");
+      this.journal.append("SYSTEM", "LLM_POOL_RECOVERED", null, {}, started);
+    }
+
     // 2e. Court (Tier 3): one sprint per pulse, only when new entries are possible at all.
-    if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
+    if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY" && !llmDepleted) {
       try {
         // ADR-096: finished open-court hearings go to the jury first (routing happens here, inside the pulse)
         report.courtContracts += await withTimeout(
@@ -872,8 +899,8 @@ export class Brain {
       }
     }
 
-    // 3. New entries (never when killed/unknown or budget is in REDUCE_ONLY).
-    if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY") {
+    // 3. New entries (never when killed/unknown, budget in REDUCE_ONLY, or the whole model pool exhausted).
+    if (report.kill === "CLEAR" && budget.mode !== "REDUCE_ONLY" && !llmDepleted) {
       try {
         for (const run of [
           () => this.runResting(),

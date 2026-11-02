@@ -6,15 +6,11 @@
 import type { TriageItem } from "../clef/triage.ts";
 import type { Batch, Dossier } from "../contracts/batch.ts";
 import type { DecisionContract } from "../contracts/decision-contract.ts";
-import type { Rebuttal, SeatOpinion } from "../court/court.ts";
+import type { SeatOpinion } from "../court/court.ts";
 import { COLORS, type DiscordMessage } from "../discord/notifier.ts";
 import type { BookSummary } from "../portfolio/book.ts";
-import { stagnant } from "../portfolio/exits.ts";
 import type { Band } from "../risk/CircuitBreakerLadder.ts";
-import type { Facts } from "../risk/scar.ts";
-import { atr } from "../strategy/indicators.ts";
 import type { StatusView } from "./Brain.ts";
-import { one } from "./store.ts";
 
 const TERMINAL_KINDS: Record<string, string> = {
   ENTRY_FACTS: "🎯",

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Doctrine } from "../contracts/doctrine.ts";
 import { AnthropicProvider } from "./anthropic.ts";
+import { KeyPoolProvider, splitKeys } from "./keypool.ts";
 import { type Fetcher, type LlmProvider, LlmRouter, OpenAICompatProvider } from "./llm.ts";
 import { lineage, normalizeUrl } from "./models.ts";
 
@@ -39,7 +40,8 @@ export const EndpointSchema = z.object({
     .string()
     .regex(/^https?:\/\//)
     .refine((u) => endpointHostAllowed(u), { message: "this address is not allowed for a model endpoint" }),
-  key: z.string().max(2000).default(""),
+  /** one key, or several separated by commas or new lines (ADR-097: rotated round robin, failing over on 429/401) */
+  key: z.string().max(8000).default(""),
   /** enabled models (the user picks from discovery, or types names when the endpoint can't list them) */
   models: z.array(z.string().min(1).max(200)).max(50).default([]),
   tier: z.enum(["free", "paid", "local"]).default("paid"),
@@ -125,6 +127,17 @@ export const modelKey = (m: string) =>
     .pop() ?? m;
 
 export function endpointProvider(e: Endpoint, fetcher?: Fetcher): LlmProvider {
+  // ADR-097: several keys in one endpoint's key field form its inner round-robin pool
+  const keys = splitKeys(e.key);
+  if (keys.length > 1)
+    return new KeyPoolProvider(
+      `ep:${e.id}`,
+      keys.map((key) => oneEndpointProvider({ ...e, key }, fetcher)),
+    );
+  return oneEndpointProvider(e, fetcher);
+}
+
+function oneEndpointProvider(e: Endpoint, fetcher?: Fetcher): LlmProvider {
   const name = `ep:${e.id}`;
   if (e.format === "anthropic") {
     const url = normalizeUrl("anthropic", e.url);

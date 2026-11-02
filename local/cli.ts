@@ -13,7 +13,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { AlpacaClient } from "../src/broker/AlpacaClient.ts";
 import { type ApiFormat, listModels, normalizeUrl, PRESETS, presetForKey } from "../src/court/models.ts";
 import { buildPool } from "../src/court/pool.ts";
 import { buildProviders } from "../src/court/providers.ts";

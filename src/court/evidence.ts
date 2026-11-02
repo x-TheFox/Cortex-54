@@ -1,7 +1,6 @@
 import type { CatalystFacts } from "../clef/clairic.ts";
 import type { Dossier } from "../contracts/batch.ts";
 import type { Receipt } from "../contracts/decision-contract.ts";
-import type { Doctrine } from "../contracts/doctrine.ts";
 import { type Lateness, usSession } from "../portfolio/lateness.ts";
 import { reputationKey } from "../risk/scar.ts";
 import { atr, type Bar, ema, rsi } from "../strategy/indicators.ts";
