@@ -280,6 +280,8 @@ export class LocalCortex {
       // ADR-081: on the user's computer only their own Cloudflare AI allowance is a real limit (if they use it)
       budgetScope: this.clefMode === "cloudflare" ? "workers_ai" : "none",
       adoptAccountSize: true,
+      // ADR-096: the app keeps running between pulses, so open court debates in the background
+      background: !o.overrides?.market,
     });
     this.broker = broker;
     this.liveBroker = live;

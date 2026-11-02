@@ -104,18 +104,23 @@ export function checkBull(b: Bull, e: Evidence, d: Doctrine): BullCheck {
   return { ok: true, bull: { ...b, targets: [...new Set(clipped)].slice(0, 3) }, notes };
 }
 
-export const SYNTH_PROMPT_VERSION = "synth@6";
+export const SYNTH_PROMPT_VERSION = "synth@7";
 export const SUITABILITY = ["Very low", "Low", "Moderate", "High", "Very high"] as const;
 
 export function buildSynth(
   e: Evidence,
   bull: Bull,
   bear: Bear,
-  debate: { rebuttal?: Rebuttal | null; panel?: SeatOpinion[] } = {},
+  debate: {
+    rebuttal?: Rebuttal | null;
+    panel?: SeatOpinion[];
+    /** ADR-096: the open-court record (compacted) and how it ended */
+    openCourt?: { ended: string; passes: number; record: string } | null;
+  } = {},
 ): { state: unknown; questions: Record<string, ClefQuestion> } {
   return {
     state: {
-      task: "Judge a long trade after a full court debate (bull, bear, bull rebuttal, expert panel). Weigh arguments by their evidence, not by headcount. Prices in the bull brief were checked against the evidence by code. evidence.forecast (Kronos), if present, is LOW-confidence pattern-model context: weigh it lightly and never let it decide. evidence.research, if present, is a fresh web research dossier (sourced, dated, unverified): it is the court's best view of current events; weigh read=true findings above headline-only ones and penalize arguments that ignore a dated research finding against them.",
+      task: "Judge a long trade after a full court debate (bull, bear, bull rebuttal, expert panel and, when present, an open-court debate in which every seat could speak, use tools and rest). You are the jury: if open_court.ended is hard_cutoff, the debate was cut off by time and you rule on the record as it stands. Weigh arguments by their evidence, not by headcount. Prices in the bull brief were checked against the evidence by code. evidence.forecast (Kronos), if present, is LOW-confidence pattern-model context: weigh it lightly and never let it decide. evidence.research, if present, is a fresh web research dossier (sourced, dated, unverified): it is the court's best view of current events; weigh read=true findings above headline-only ones and penalize arguments that ignore a dated research finding against them.",
       evidence: evidenceForModels(e),
       bull: {
         thesis: bull.thesis,
@@ -148,6 +153,15 @@ export function buildSynth(
               headline: p.headline,
               points: p.points,
             })),
+          }
+        : {}),
+      ...(debate.openCourt
+        ? {
+            open_court: {
+              ended: debate.openCourt.ended,
+              rounds: debate.openCourt.passes,
+              record: debate.openCourt.record.slice(-12_000),
+            },
           }
         : {}),
     },

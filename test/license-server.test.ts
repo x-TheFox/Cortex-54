@@ -253,7 +253,7 @@ describe("Savant accounts and device sign-in (ADR-093)", () => {
       delete: async (k: string) => void m.delete(k),
     };
   };
-  const accEnv = (DEVICES = kv()) =>
+  const accEnv = (_DEVICES = kv()) =>
     env({
       WHOP_PAID_PLAN_IDS: "plan_monthly,plan_yearly",
       WHOP_OAUTH_CLIENT_ID: "app_test",

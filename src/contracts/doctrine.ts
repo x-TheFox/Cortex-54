@@ -177,6 +177,37 @@ export const DoctrineSchema = z.object({
     hearing_deadline_ms: z.number().int().positive().default(150_000),
     /** Audit W2-06: calls per provider per UTC day (free-tier RPD with margin); an exhausted provider is skipped. */
     daily_call_caps: z.record(z.string(), z.number().int().nonnegative()).default({}),
+    /**
+     * ADR-096 open court: after the opening, the floor opens until every seat rests (NO_OBJECTION), the bull
+     * withdraws, or the hard cutoff. Runs in the background where the host supports it (the app), never inside a pulse.
+     */
+    open_court: z
+      .object({
+        enabled: z.boolean().default(true),
+        soft_minutes: z.number().positive().max(240).default(30),
+        grace_minutes: z.number().positive().max(60).default(5),
+        /** extra seats filled from the specialist pool per hearing */
+        max_specialist_seats: z.number().int().min(0).max(12).default(6),
+        /** specialists shortlisted by keyword before Clef picks */
+        shortlist: z.number().int().min(1).max(40).default(16),
+        /** minimum Clef relevance for a specialist to be seated */
+        min_relevance: z.number().min(0).max(1).default(0.35),
+        max_context_chars: z.number().int().min(4_000).max(400_000).default(24_000),
+        /** hearings running at once */
+        max_concurrent: z.number().int().min(1).max(4).default(1),
+        web_tools: z.boolean().default(true),
+      })
+      .default({
+        enabled: true,
+        soft_minutes: 30,
+        grace_minutes: 5,
+        max_specialist_seats: 6,
+        shortlist: 16,
+        min_relevance: 0.35,
+        max_context_chars: 24_000,
+        max_concurrent: 1,
+        web_tools: true,
+      }),
   }),
   regime_gates: z.object({
     crypto_composite_min_for_longs: z.number().min(0).max(100),

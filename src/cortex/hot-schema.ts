@@ -3,7 +3,7 @@
  * Small, transactional, current-state only. History goes to D1 via the outbox.
  * Once deployed: bump HOT_SCHEMA_VERSION and append statements; never edit applied ones.
  */
-export const HOT_SCHEMA_VERSION = 9;
+export const HOT_SCHEMA_VERSION = 10;
 
 export const HOT_SCHEMA: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
@@ -110,4 +110,9 @@ export const HOT_SCHEMA: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS inbox (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, channel TEXT NOT NULL,
      msg_json TEXT NOT NULL)`,
   `CREATE INDEX IF NOT EXISTS inbox_channel ON inbox (channel, id)`,
+  // v10: every hearing's full record for the court replay and its plain-English explanation (ADR-096)
+  `CREATE TABLE IF NOT EXISTS court_transcripts (sprint_id TEXT PRIMARY KEY, candidate_id TEXT NOT NULL,
+     symbol TEXT NOT NULL, arena TEXT NOT NULL, started_at INTEGER NOT NULL, ended_at INTEGER NOT NULL,
+     ok INTEGER NOT NULL DEFAULT 0, verdict TEXT NOT NULL DEFAULT '', session_json TEXT NOT NULL, eli5_json TEXT)`,
+  `CREATE INDEX IF NOT EXISTS court_transcripts_at ON court_transcripts (started_at)`,
 ];

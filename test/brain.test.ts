@@ -61,6 +61,7 @@ function setup(
     clairic?: ClairicApi;
     adoptAccountSize?: boolean;
     budgetScope?: "cloudflare" | "workers_ai" | "none";
+    background?: boolean;
   } = {},
 ) {
   let now = T0;
@@ -95,6 +96,7 @@ function setup(
     clairic: opts.clairic ?? null,
     ...(opts.adoptAccountSize ? { adoptAccountSize: true } : {}),
     ...(opts.budgetScope ? { budgetScope: opts.budgetScope } : {}),
+    ...(opts.background ? { background: true } : {}),
   });
   brain.init({ test: true });
   return {
@@ -955,6 +957,21 @@ describe("court end-to-end (Phase 3)", () => {
     async complete(model, req) {
       calls.push(model);
       const sys = req.system;
+      if (sys.includes("OPEN COURT PROTOCOL"))
+        return {
+          text: req.user.includes("[Quant Analyst")
+            ? JSON.stringify({ action: "no_objection" })
+            : sys.includes("Quant Analyst")
+              ? JSON.stringify({
+                  action: "speak",
+                  statement: "Checked: reward to risk is 1.5 on the calculator.",
+                  stance: "support",
+                  confidence: 0.7,
+                })
+              : JSON.stringify({ action: "no_objection" }),
+          inputTokens: 100,
+          outputTokens: 20,
+        };
       const out = sys.includes("Bull Advocate again")
         ? rebuttalJson
         : sys.includes("expert panel")
@@ -1001,6 +1018,56 @@ describe("court end-to-end (Phase 3)", () => {
     source: "benzinga",
     url: null,
   };
+
+  it("open court (ADR-096): the opening runs in the pulse, the debate in the background, the jury at the next pulse", async () => {
+    const calls: string[] = [];
+    let now = T0;
+    const llm = new LlmRouter(
+      { gemini: provider(bullJson, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => now,
+    );
+    const clef = new ScriptedClef(answers);
+    const t = setup({ clef, llm, background: true });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    const r1 = await t.brain.pulse();
+    expect(r1.courtContracts).toBe(0); // the floor is open; nothing is decided inside this pulse
+    expect(t.brain.hearingList()).toHaveLength(0); // no ruling yet (the fake models may already have rested)
+    for (let i = 0; i < 50 && t.brain.hearingsRunning() > 0; i++)
+      await new Promise((res) => setTimeout(res, 0));
+    expect(t.brain.hearingsRunning()).toBe(0);
+    t.advance(60_000);
+    now = T0 + 60_000;
+    const r2 = await t.brain.pulse();
+    expect(r2.courtContracts).toBe(1);
+    const kinds = t.d1.db
+      .prepare("SELECT kind FROM journal WHERE kind LIKE 'OPEN_COURT%' OR kind = 'SEATS' ORDER BY seq")
+      .all() as { kind: string }[];
+    expect(kinds.map((k) => k.kind)).toEqual(["SEATS", "OPEN_COURT_START", "OPEN_COURT"]);
+    const list = t.brain.hearingList();
+    expect(list).toHaveLength(1);
+    const rec = t.brain.hearing(list[0]?.sprint_id as string);
+    const oc = rec?.session.openCourt;
+    expect(oc?.ended).toBe("unanimous");
+    expect(oc?.turns.some((x) => x.kind === "statement" && x.title === "Quant Analyst")).toBe(true);
+    expect(JSON.stringify(oc)).not.toContain("NO_OBJECTION");
+    expect(rec?.session.seats?.map((s) => s.id).slice(0, 8)).toEqual([
+      "bull",
+      "bear",
+      "quant",
+      "risk",
+      "macro",
+      "devil",
+      "execution",
+      "clerk",
+    ]);
+    const card = t.notifier.sent.find(
+      (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ Savant COURT"),
+    );
+    expect(JSON.stringify(card?.msg)).toContain("Open court");
+  });
 
   it("headline → Tier 1 → Tier 2 → bull/bear/synth → COURT contract → paper order", async () => {
     const calls: string[] = [];
