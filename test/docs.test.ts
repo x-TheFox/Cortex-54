@@ -48,11 +48,11 @@ describe("doc claims (W1-36)", () => {
   for (const [file, re, why] of absent)
     it(`${file} does not claim ${re}`, () => expect(read(file), why).not.toMatch(re));
 
-  it("CLAUDE.md lists every ADR in its status log at least up to the latest one", () => {
+  it("the status log (docs/STATUS.md, moved out of CLAUDE.md) lists every ADR up to the latest one", () => {
     const latest = Math.max(
       ...[...read("docs/DECISIONS.md").matchAll(/^## ADR-(\d{3})/gm)].map((m) => Number(m[1])),
     );
-    expect(read("CLAUDE.md")).toContain(`ADR-${String(latest).padStart(3, "0")}`);
+    expect(read("docs/STATUS.md")).toContain(`ADR-${String(latest).padStart(3, "0")}`);
   });
 });
 
