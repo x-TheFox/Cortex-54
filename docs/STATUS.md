@@ -131,3 +131,4 @@ Moved from CLAUDE.md §11 on 2026-11-02. Append new dated entries here, not in C
 - 2026-11-02: pre-ship round on `preship-round`: audit fixes (ADR-103), open court with 106 specialists (ADR-096), two-tier
   key routing and unlimited hearings (ADR-097), court replays + ELI5 (ADR-098), model catalog/benchmarks/chooser
   (ADR-099), billing on getsavant.pro (ADR-100), SEO (ADR-101), 20% impact pledge at /impact (ADR-102). Not deployed.
+- 2026-11-02: ADR-104 remaining audit items (ready-to-trade banner, auto cash-only paper, short tour, keychain by default, renames, site copy, privacy wording, api.getsavant.pro).

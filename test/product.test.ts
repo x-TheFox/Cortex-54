@@ -294,7 +294,7 @@ describe("local runtime: court capacity, phone access, tray health (ADR-075/076)
 
   it("the tray pill carries the one-line problem, and a backup snapshot reads the live databases", async () => {
     const c = make();
-    expect(c.problem()).toMatch(/court needs AI models|Heartbeat/);
+    expect(c.problem()).toMatch(/add an AI model|Heartbeat/);
     const snap = c.snapshot();
     expect(snap["hot.sqlite"]?.subarray(0, 15).toString()).toBe("SQLite format 3");
     expect(snap["journal.sqlite"]?.length).toBeGreaterThan(0);

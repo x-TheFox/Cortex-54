@@ -83,6 +83,16 @@ export interface StatusView {
   benchmark?: Partial<Record<AccountId, { btc: number[][]; spy: number[][] }>>;
   regimes: RegimeView[];
   accounts: AccountView[];
+  /** audit UX-03: every entry gate in one answer (local mode) */
+  readiness?: ReadinessView;
+}
+
+export interface ReadinessView {
+  ready: boolean;
+  headline: string;
+  detail: string;
+  fix: "license" | "terms" | "models" | "account" | "controls" | null;
+  level: "ok" | "info" | "amber";
 }
 
 export interface CourtRow {

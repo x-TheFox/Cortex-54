@@ -1343,3 +1343,21 @@ catalysts (AGT-06); SEC contact (AGT-07); hindsight masking for historical court
 and scrubbed ids, 0600 daemon log without the login token (UX-09, SEC-03); product sign-in wording (STALE-01).
 Still open (operator or follow-up): code signing/notarization (INS-01), Whop sandbox (PAY-01), remaining UX and
 marketing copy items in the audit report.
+
+## ADR-104 — Pre-release audit, remaining app and site items (2026-11-02)
+One "ready to trade" answer (`src/cortex/readiness.ts`) from every entry gate, in fix order (kill switch → licence →
+terms → models → loss lock → first scan → hold reason): the cockpit banner, the wizard's last screen, the tray line and
+a FEED card when a user-fixable blocker appears or clears (UX-03/05/10, MKT-07). A paper account that allows margin
+is switched to cash-only by the brain itself (borrowing capped at 1x, shorting off; it only tightens; LIVE stays the
+user's button) (UX-01). The wizard's account line follows the brain, not a stale snapshot (UX-02); `AQ.` Gemini keys are
+recognised (UX-04). The terms button no longer depends on a disabled state and closes at once (UX-07). The tour is 8
+steps with the real balance, the full 19 on request (UX-08, MKT-08, STALE-05). The desktop app keeps keys in the
+system keychain by default, once, falling back to the file; the user's choice sticks (SEC-02). Old names renamed with
+read-compat: keychain service `savant` (reads `cortex54`), services `com.savant.daemon` / `savant.service` / task
+`Savant` (old ones removed on install), backups `.savantbackup` (old ones still restore), crate `savant-desktop`,
+manifest text (POL-02/03, STALE-03). Customer wording: "you" for "the operator", no GitHub Actions or Stop numbers
+(STALE-04/06/07). Uninstall hint in Reset (UNI-01). Licence server at `api.getsavant.pro` (workers.dev kept for older
+apps) (STALE-02). Download aliases and a 404 that lists targets (WEB-01). Site copy per MARKETING.md (MKT-01…05),
+community counters hidden while the hub is young (MKT-06), privacy wording for sign-in codes, published fields and the
+impact page (LEG-04/05). Not done: notarization / Windows signing (INS-01), Whop sandbox (PAY-01), the 1.8 MB
+third-party notices page (WEB-04, served compressed).

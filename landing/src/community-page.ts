@@ -76,7 +76,7 @@ function table(head: string[], rows: (Node | string)[][], cls = ""): HTMLElement
 
 async function overview(): Promise<void> {
   const [stats, lb, packs] = await Promise.all([
-    get<{ agents: number; packs: number; trades: number }>("/v1/stats"),
+    get<{ agents: number; packs: number; trades: number; show_counts?: boolean }>("/v1/stats"),
     get<{ note: string; agents: Ranked[] }>("/v1/leaderboard"),
     get<{ packs: PackRow[] }>("/v1/packs"),
   ]);
@@ -89,19 +89,25 @@ async function overview(): Promise<void> {
       { class: "lede" },
       "Savant robots can publish their track record here. Each trade is signed by the robot that made it and chained to the one before, so a record can't be edited, backfilled or quietly deleted.",
     ),
-    stats
+    stats && stats.show_counts === false
       ? h(
           "p",
-          { class: "comm-stats" },
-          h("span", {}, h("b", {}, String(stats.agents)), " robots"),
-          h("span", {}, h("b", {}, String(stats.trades)), " closed trades"),
-          h("span", {}, h("b", {}, String(stats.packs)), " memory packs"),
+          { class: "acct-note" },
+          "The hub is new. Every record published here is signed and can't be backfilled; the first robots and packs appear as they join.",
         )
-      : h(
-          "p",
-          { class: "acct-note acct-warn" },
-          "The community hub isn't answering right now. Try again in a minute.",
-        ),
+      : stats
+        ? h(
+            "p",
+            { class: "comm-stats" },
+            h("span", {}, h("b", {}, String(stats.agents)), " robots"),
+            h("span", {}, h("b", {}, String(stats.trades)), " closed trades"),
+            h("span", {}, h("b", {}, String(stats.packs)), " memory packs"),
+          )
+        : h(
+            "p",
+            { class: "acct-note acct-warn" },
+            "The community hub isn't answering right now. Try again in a minute.",
+          ),
     h("h2", {}, "Leaderboard"),
     ranked.length
       ? table(

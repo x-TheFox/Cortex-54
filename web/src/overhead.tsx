@@ -169,7 +169,7 @@ export function AccountPanel({
           <textarea
             className="field"
             aria-label={`${a.account} postmortem`}
-            placeholder="Written postmortem: what tripped RED, and why it is safe to trade again"
+            placeholder="In your own words: what caused the big-loss lock, and why it is safe to trade again"
             value={pm}
             onChange={(e) => setPm(e.target.value)}
           />
@@ -219,8 +219,9 @@ export function CourtPanel({ run, busy }: { run: Run; busy: boolean }) {
         </div>
       </div>
       <p className="cost">
-        Every control on this panel is journaled as an operator action and{" "}
-        <b>restarts the 30-day autonomous clock</b> that gates real money. The safest input is usually none.
+        Every control on this panel is written in the journal as your action and{" "}
+        <b>restarts the 30 days of hands-off practice</b> that real money waits for. The safest input is
+        usually none.
       </p>
     </section>
   );

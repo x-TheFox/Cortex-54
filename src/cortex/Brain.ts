@@ -1030,7 +1030,7 @@ export class Brain {
       this.journal.append("SYSTEM", "DISPATCH_STALE", null, { job: key, slot }, now);
       await this.alertOnce(
         `dispatch-stale:${key}`,
-        `⚠️ research job \`${key}\` was dispatched ${Math.round((now - slot) / 60_000)} min ago but no batch arrived. Check the GitHub Actions run.`,
+        `⚠️ research job \`${key}\` was dispatched ${Math.round((now - slot) / 60_000)} min ago but no batch arrived. Check its run (Settings → System health on your computer, or the research workflow on a cloud setup).`,
       );
     }
   }
@@ -5635,7 +5635,7 @@ ${postmortem}`,
               title: card.data.title,
               color: COLORS.cyan,
               fields: card.data.sections.map((s) => ({ name: s.name, value: s.value.slice(0, 1024) })),
-              footer: { text: b.run_url ? "Governor · GitHub Actions" : "Governor" },
+              footer: { text: b.run_url ? "Governor · cloud run" : "Governor" },
               timestamp: new Date(b.produced_at).toISOString(),
             },
           ],
@@ -5823,7 +5823,7 @@ ${postmortem}`,
       const hours = (ageMs / 3_600_000).toFixed(1);
       await this.alertOnce(
         `stale-batch:${arena}`,
-        `⏳ ${arena} regime batch is ${hours}h old${arena === "EQUITIES" ? " (weekday hours)" : ""} (limit ${limit}h). Check the research workflow in GitHub Actions.`,
+        `⏳ ${arena} regime batch is ${hours}h old${arena === "EQUITIES" ? " (weekday hours)" : ""} (limit ${limit}h). It refreshes on the next research run; Settings → System health shows the jobs.`,
       );
     }
   }
@@ -6631,9 +6631,24 @@ ${postmortem}`,
       const [at, v] = cached.split(",");
       if (now - Number(at) < 30 * 60_000) return v === "1";
     }
-    const cfg = await broker.configuration().catch(() => null);
+    let cfg = await broker.configuration().catch(() => null);
     if (!cfg) return false; // unknown: fail closed, and ask again next pulse
-    const ok = Number(cfg.max_margin_multiplier) === 1;
+    if (Number(cfg.max_margin_multiplier) !== 1 && account === "PAPER" && broker.configure) {
+      // Audit UX-01: every new Alpaca paper account allows margin. Capping borrowing at 1x and turning shorting off
+      // only tightens (constitution U3), so on PAPER Savant does it itself instead of asking. LIVE stays the user's.
+      cfg = await broker
+        .configure({ max_margin_multiplier: "1", no_shorting: true })
+        .then(() => broker.configuration?.() ?? null)
+        .catch(() => cfg);
+      if (cfg && Number(cfg.max_margin_multiplier) === 1) {
+        this.journal.append(account, "CASH_ONLY_AUTO", null, { max_margin_multiplier: "1" }, now);
+        await this.deps.notifier.post("alarms", {
+          content:
+            "PAPER: Alpaca practice accounts allow borrowing by default. Savant switched yours to cash-only (borrowing capped at 1x, shorting off), because it never borrows.",
+        });
+      }
+    }
+    const ok = cfg !== null && Number(cfg.max_margin_multiplier) === 1;
     setKV(this.sql, key, `${now},${ok ? 1 : 0}`, now);
     return ok;
   }

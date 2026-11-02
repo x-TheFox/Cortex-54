@@ -334,7 +334,7 @@ export class LocalSettings implements WebSettings {
         const margin = Number(a.multiplier ?? 1) > 1;
         return {
           ok: true,
-          message: `Connected to your ${live ? "live (real-money)" : "paper"} account: equity $${Number(a.equity).toFixed(2)}.${margin ? " It allows margin: Savant holds new trades until you make it cash-only (button below, after saving)." : ""}`,
+          message: `Connected to your ${live ? "live (real-money)" : "paper"} account: equity $${Number(a.equity).toFixed(2)}.${margin ? (live ? " It allows margin: Savant holds new trades until you make it cash-only (button below, after saving)." : " It allows margin by default; Savant switches a paper account to cash-only by itself at the first pulse.") : ""}`,
         };
       }
       if (q.kind === "cloudflare") {
@@ -443,7 +443,7 @@ export class LocalSettings implements WebSettings {
             ok: false,
             message: "No system keychain was found on this computer; keys stay in the settings file.",
           };
-        c = { ...c, secret_store: patch.secret_store };
+        c = { ...c, secret_store: patch.secret_store, secret_store_chosen: true };
       }
       if (patch.keys && typeof patch.keys === "object") {
         const keys = { ...c.keys };

@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -14,9 +14,12 @@ export interface ServicePlan {
   content: string | null;
   enable: string[][];
   disable: string[][];
+  /** audit POL-03: the pre-rebrand service, stopped and removed on install/uninstall so two daemons never run */
+  legacy?: { file: string | null; disable: string[][] };
 }
 
-const LABEL = "com.cortex54.daemon";
+const LABEL = "com.savant.daemon";
+const LEGACY_LABEL = "com.cortex54.daemon";
 const xml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 export function plan(
@@ -52,10 +55,14 @@ ${argv.map((a) => `    <string>${xml(a)}</string>`).join("\n")}
       content,
       enable: [["launchctl", "load", "-w", file]],
       disable: [["launchctl", "unload", "-w", file]],
+      legacy: (() => {
+        const old = join(home, "Library", "LaunchAgents", `${LEGACY_LABEL}.plist`);
+        return { file: old, disable: [["launchctl", "unload", "-w", old]] };
+      })(),
     };
   }
   if (platform === "linux") {
-    const file = join(home, ".config", "systemd", "user", "cortex54.service");
+    const file = join(home, ".config", "systemd", "user", "savant.service");
     const q = (a: string) => (/[\s"']/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
     const content = `[Unit]
 Description=Savant trading agent (local mode)
@@ -76,9 +83,13 @@ WantedBy=default.target
       content,
       enable: [
         ["systemctl", "--user", "daemon-reload"],
-        ["systemctl", "--user", "enable", "--now", "cortex54.service"],
+        ["systemctl", "--user", "enable", "--now", "savant.service"],
       ],
-      disable: [["systemctl", "--user", "disable", "--now", "cortex54.service"]],
+      disable: [["systemctl", "--user", "disable", "--now", "savant.service"]],
+      legacy: {
+        file: join(home, ".config", "systemd", "user", "cortex54.service"),
+        disable: [["systemctl", "--user", "disable", "--now", "cortex54.service"]],
+      },
     };
   }
   if (platform === "win32") {
@@ -97,20 +108,35 @@ WantedBy=default.target
           "/RL",
           "LIMITED",
           "/TN",
-          "CORTEX54",
+          "Savant",
           "/TR",
           // audit F-A6-05: `set "VAR=value"` keeps a home path with spaces (C:\Users\Jane Doe\…) whole
           `cmd /c set "CORTEX_HOME=${env.CORTEX_HOME}" && ${cmd}`,
         ],
       ],
-      disable: [["schtasks", "/Delete", "/F", "/TN", "CORTEX54"]],
+      disable: [["schtasks", "/Delete", "/F", "/TN", "Savant"]],
+      legacy: { file: null, disable: [["schtasks", "/Delete", "/F", "/TN", "CORTEX54"]] },
     };
   }
   throw new Error(`no background service support for ${platform}`);
 }
 
+function removeLegacy(p: ServicePlan, done: string[]): void {
+  if (!p.legacy) return;
+  if (p.legacy.file && !existsSync(p.legacy.file) && p.platform !== "win32") return;
+  for (const c of p.legacy.disable) {
+    const r = spawnSync(c[0] as string, c.slice(1), { stdio: "pipe" });
+    if (r.status === 0) done.push(`${c.join(" ")} → ok (old name)`);
+  }
+  if (p.legacy.file && existsSync(p.legacy.file)) {
+    rmSync(p.legacy.file, { force: true });
+    done.push(`removed ${p.legacy.file}`);
+  }
+}
+
 export function install(p: ServicePlan): string[] {
   const done: string[] = [];
+  removeLegacy(p, done);
   if (p.file && p.content) {
     mkdirSync(dirname(p.file), { recursive: true });
     writeFileSync(p.file, p.content);
@@ -127,6 +153,7 @@ export function install(p: ServicePlan): string[] {
 
 export function uninstall(p: ServicePlan): string[] {
   const done: string[] = [];
+  removeLegacy(p, done);
   for (const c of p.disable) {
     const r = spawnSync(c[0] as string, c.slice(1), { stdio: "pipe" });
     done.push(`${c.join(" ")} → ${r.status === 0 ? "ok" : `exit ${r.status}`}`);

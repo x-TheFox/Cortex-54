@@ -92,7 +92,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://savant-license.samplayz2ks.workers.dev/:path*"
+      "destination": "https://api.getsavant.pro/:path*"
     },
     {
       "source": "/updates/latest.json",

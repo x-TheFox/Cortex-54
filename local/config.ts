@@ -105,6 +105,8 @@ export const LocalConfigSchema = z.object({
   lan: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   /** ADR-076: where keys are kept: this file (mode 600) or the system keychain (macOS Keychain, libsecret, DPAPI) */
   secret_store: z.enum(["file", "keychain"]).default("file"),
+  /** audit SEC-02: set once the store was chosen (automatically on the desktop app, or by the user) */
+  secret_store_chosen: z.boolean().optional(),
   /** ADR-065: the user's own cloud brain (savant deploy), which this machine serves as a research runner */
   cloud: z.object({ url: z.string(), worker: z.string(), ingest_hmac: z.string().min(32) }).optional(),
 });

@@ -34,7 +34,7 @@ import {
 import { deploy, verifyDeploy } from "./deploy.ts";
 import { type Check, configChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
-import { accountFor, secretBackend } from "./keychain.ts";
+import { accountFor, secretBackend, shouldAutoKeychain } from "./keychain.ts";
 import { activateKey, installLicense, readLicense, refreshLicense, releaseKey } from "./license.ts";
 import { applyPack, exportPack, loadLocalScar, mergeScar, stagePack } from "./memory.ts";
 import { claimOnce } from "./runner.ts";
@@ -47,7 +47,7 @@ import { fileSql } from "./store.ts";
  * `cortex` — the Savant command line (ADR-064). Every command has a plain-text and a `--json` form so a human or
  * an AI agent can drive setup end to end (docs/SETUP_WITH_AN_AGENT.md).
  *
- *   savant setup [--mode demo|paper] [--set KEY=VALUE ...] [--yes]   create or update ~/.cortex54/config.json
+ *   savant setup [--mode demo|paper] [--set KEY=VALUE ...] [--yes]   create or update ~/.savant/config.json
  *   savant doctor [--json]                                           check everything, say exactly what to fix
  *   savant start                                                     run the brain + web terminal (foreground)
  *   savant demo [--minutes N]                                        keyless demo in a throwaway home
@@ -198,8 +198,29 @@ async function setup(home: string): Promise<void> {
   );
 }
 
+/** Audit SEC-02: the desktop app keeps keys in the system keychain by default (once; the user can switch back). */
+function autoKeychain(home: string, cfg: LocalConfig): LocalConfig {
+  if (!shouldAutoKeychain(cfg)) return cfg;
+  const b = secretBackend(home);
+  let next: LocalConfig = { ...cfg, secret_store_chosen: true };
+  if (b.available()) {
+    try {
+      saveConfig({ ...next, secret_store: "keychain" }, home);
+      next = loadConfig(home) ?? { ...next, secret_store: "keychain" };
+      console.log(`[keys] moved to ${b.name}`);
+      return next;
+    } catch (e) {
+      console.log(
+        `[keys] the system keychain didn't take them; they stay in config.json (${String(e).slice(0, 120)})`,
+      );
+    }
+  }
+  saveConfig(next, home);
+  return next;
+}
+
 async function start(home: string, first: LocalConfig, minutes?: number): Promise<void> {
-  let cfg = first;
+  let cfg = process.env.CORTEX_PARENT_PID ? autoKeychain(home, first) : first;
   let c: LocalCortex;
   let reloading = false;
   const settings = new LocalSettings({
@@ -354,7 +375,7 @@ async function main(): Promise<void> {
       return start(home, cfg);
     }
     case "demo": {
-      const tmp = mkdtempSync(join(tmpdir(), "cortex54-demo-"));
+      const tmp = mkdtempSync(join(tmpdir(), "savant-demo-"));
       const cfg = { ...newConfig("demo"), port: Number(opt("port") ?? 8755) };
       saveConfig(cfg, tmp);
       process.on("exit", () => rmSync(tmp, { recursive: true, force: true }));
@@ -736,11 +757,11 @@ async function main(): Promise<void> {
         );
       if (sub === "on") {
         if (!b.available()) throw new Error("no system keychain found on this computer");
-        saveConfig({ ...cfg, secret_store: "keychain" }, home);
+        saveConfig({ ...cfg, secret_store: "keychain", secret_store_chosen: true }, home);
         return out(`Keys moved to ${b.name}; config.json no longer holds them.`, { ok: true });
       }
       if (sub === "off") {
-        saveConfig({ ...cfg, secret_store: "file" }, home);
+        saveConfig({ ...cfg, secret_store: "file", secret_store_chosen: true }, home);
         return out("Keys moved back to config.json (mode 600).", { ok: true });
       }
       throw new Error("savant keychain on | off | status");

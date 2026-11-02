@@ -1,7 +1,7 @@
 {
   "name": "Savant",
   "short_name": "Savant",
-  "description": "Cockpit for the CORTEX-54 trading agent",
+  "description": "Cockpit for your Savant trading robot",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

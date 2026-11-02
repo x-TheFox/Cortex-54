@@ -7,7 +7,9 @@
   "name": "savant-license",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
+  // audit STALE-02: served as api.getsavant.pro; workers.dev stays on for apps released before the move
   "workers_dev": true,
+  "routes": [{ "pattern": "api.getsavant.pro", "custom_domain": true }],
   "observability": { "enabled": true },
   "vars": {
     // only memberships of the Savant product count, and only its paid plans (monthly, yearly; trials included)

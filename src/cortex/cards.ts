@@ -267,7 +267,7 @@ export function postureCard(b: Batch, previous: string | null): DiscordMessage {
           })),
         ],
         footer: {
-          text: `${b.job} · produced ${new Date(b.produced_at).toISOString()}${b.run_url ? " · GitHub Actions" : ""}`,
+          text: `${b.job} · produced ${new Date(b.produced_at).toISOString()}${b.run_url ? " · cloud run" : " · on this computer"}`,
         },
         timestamp: new Date(b.produced_at).toISOString(),
       },

@@ -4,8 +4,8 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * OS keychain for the user's keys (ADR-076, was MLP3-012 "key-signing proxy"). Opt-in: `secret_store: "keychain"` in
- * config.json moves every API key out of the file into the system's own secret store, and config.json keeps only
+ * OS keychain for the user's keys (ADR-076, was MLP3-012 "key-signing proxy"). The desktop app turns it on by itself
+ * the first time it starts (audit SEC-02, `autoKeychain`); `secret_store: "keychain"` in config.json moves every API key out of the file into the system's own secret store, and config.json keeps only
  * generated local secrets (session, ingest, tray pill). Backends use the tools the OS ships, so no native module:
  *   macOS   – `security` (login Keychain, generic password), value passed on stdin, never in argv
  *   Linux   – `secret-tool` (libsecret / GNOME Keyring / KWallet), value on stdin
@@ -21,7 +21,9 @@ export interface SecretBackend {
   del(account: string): void;
 }
 
-const SERVICE = "cortex54";
+const SERVICE = "savant";
+/** audit POL-03: the pre-rebrand service name, still read so nobody's keys go missing; the next save moves them */
+const LEGACY_SERVICE = "cortex54";
 
 /** One keychain item per Savant home, so a demo home or a second profile never reads the main one's keys. */
 export const accountFor = (home: string) =>
@@ -47,7 +49,9 @@ export function macKeychain(keychain?: string): SecretBackend {
     name: "macOS Keychain",
     available: () => process.platform === "darwin" && has("security"),
     get(account) {
-      const r = run("security", ["find-generic-password", "-s", SERVICE, "-a", account, "-w", ...kc]);
+      let r = run("security", ["find-generic-password", "-s", SERVICE, "-a", account, "-w", ...kc]);
+      if (r.status !== 0)
+        r = run("security", ["find-generic-password", "-s", LEGACY_SERVICE, "-a", account, "-w", ...kc]);
       if (r.status !== 0) return null;
       return Buffer.from(r.stdout.trim(), "base64").toString("utf8");
     },
@@ -60,9 +64,11 @@ export function macKeychain(keychain?: string): SecretBackend {
       if (r.status !== 0 || /error|fail/i.test(r.stderr ?? ""))
         throw new Error(`Keychain refused the keys: ${(r.stderr || r.stdout || "").trim().slice(0, 160)}`);
       if (this.get(account) !== value) throw new Error("Keychain did not keep the keys (read-back mismatch)");
+      run("security", ["delete-generic-password", "-s", LEGACY_SERVICE, "-a", account, ...kc]);
     },
     del(account) {
       run("security", ["delete-generic-password", "-s", SERVICE, "-a", account, ...kc]);
+      run("security", ["delete-generic-password", "-s", LEGACY_SERVICE, "-a", account, ...kc]);
     },
   };
 }
@@ -72,8 +78,11 @@ export function secretTool(): SecretBackend {
     name: "system keyring (libsecret)",
     available: () => process.platform === "linux" && has("secret-tool"),
     get(account) {
-      const r = run("secret-tool", ["lookup", "service", SERVICE, "account", account]);
-      return r.status === 0 && r.stdout ? r.stdout : null;
+      for (const svc of [SERVICE, LEGACY_SERVICE]) {
+        const r = run("secret-tool", ["lookup", "service", svc, "account", account]);
+        if (r.status === 0 && r.stdout) return r.stdout;
+      }
+      return null;
     },
     set(account, value) {
       const r = run(
@@ -83,9 +92,11 @@ export function secretTool(): SecretBackend {
       );
       if (r.status !== 0)
         throw new Error(`Keyring refused the keys: ${(r.stderr ?? "").trim().slice(0, 160)}`);
+      run("secret-tool", ["clear", "service", LEGACY_SERVICE, "account", account]);
     },
     del(account) {
-      run("secret-tool", ["clear", "service", SERVICE, "account", account]);
+      for (const svc of [SERVICE, LEGACY_SERVICE])
+        run("secret-tool", ["clear", "service", svc, "account", account]);
     },
   };
 }
@@ -153,4 +164,16 @@ export function secretBackend(home: string): SecretBackend {
   if (process.platform === "darwin") return macKeychain(process.env.CORTEX_KEYCHAIN || undefined);
   if (process.platform === "win32") return dpapi(home);
   return secretTool();
+}
+
+/**
+ * Audit SEC-02: on the desktop app, keys live in the system keychain by default. Run once per home: a computer whose
+ * keychain works is switched over (the file keeps no keys); one without a working keychain keeps the file. Either way
+ * the choice is recorded, so a user who switches back to the file in Settings stays there.
+ */
+export function shouldAutoKeychain(cfg: {
+  secret_store: string;
+  secret_store_chosen?: boolean | undefined;
+}): boolean {
+  return cfg.secret_store === "file" && cfg.secret_store_chosen !== true;
 }
