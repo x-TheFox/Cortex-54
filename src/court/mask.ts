@@ -40,10 +40,10 @@ export function maskHistorical<T>(value: T, o: MaskOptions): T {
       const d = Date.parse(m.length === 10 ? `${m}T00:00:00Z` : m);
       const out = Number.isFinite(d) ? new Date(d + shift).toISOString() : "[date]";
       kept.push(m.length === 10 ? out.slice(0, 10) : out);
-      return `\u0000${kept.length - 1}\u0000`;
+      return `⟦${kept.length - 1}⟧`;
     });
     t = t.replace(MONTH_DAY, "[date]").replace(YEAR, "[year]");
-    t = t.replace(/\u0000(\d+)\u0000/g, (_, i) => kept[Number(i)] ?? "[date]");
+    t = t.replace(/⟦(\d+)⟧/g, (_, i) => kept[Number(i)] ?? "[date]");
     if (ent)
       t = t.replace(ent, (m) =>
         m.toUpperCase() === o.symbol.toUpperCase()
