@@ -77,7 +77,7 @@ import {
   KRONOS_ABOUT,
   researchView,
 } from "../court/evidence.ts";
-import type { ChainResult, HopAttempt, LlmRouter } from "../court/llm.ts";
+import { type ChainResult, type HopAttempt, type LlmRouter, scrubIds } from "../court/llm.ts";
 import {
   OPEN_COURT_PROMPT_VERSION,
   type OpenCourtResult,
@@ -6805,6 +6805,7 @@ ${postmortem}`,
     const last = Number(getKV(this.sql, `alert:${key}`) ?? 0);
     if (now - last < 3_600_000) return;
     setKV(this.sql, `alert:${key}`, String(now), now);
+    text = scrubIds(text); // audit UX-09: no organisation ids or keys in alarms
     this.journal.append("SYSTEM", "ALERT", key, { text }, now);
     await this.deps.notifier.post("alarms", { content: text.slice(0, 1900) });
   }

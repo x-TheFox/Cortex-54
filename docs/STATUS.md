@@ -128,3 +128,6 @@ Moved from CLAUDE.md §11 on 2026-11-02. Append new dated entries here, not in C
   sign-in, docs. ADR-094 downloads at getsavant.pro/download/<target> (savant-downloads Worker), SETTINGS in groups. ADR-095 community
   hub live (hub.getsavant.pro, SETTINGS → Community, getsavant.pro/community). Licence server live at savant-license.samplayz2ks.workers.dev (also getsavant.pro/api).
 - Clocks running in parallel: 7-day paper (Phase 1), 5-day posture cards (Phase 2).
+- 2026-11-02: pre-ship round on `preship-round`: audit fixes (ADR-103), open court with 106 specialists (ADR-096), two-tier
+  key routing and unlimited hearings (ADR-097), court replays + ELI5 (ADR-098), model catalog/benchmarks/chooser
+  (ADR-099), billing on getsavant.pro (ADR-100), SEO (ADR-101), 20% impact pledge at /impact (ADR-102). Not deployed.

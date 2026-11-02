@@ -299,7 +299,8 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
   setInterval(refresh, 3 * 3_600_000).unref();
   const link = await c.loginLink();
   out(
-    `Savant ${cfg.mode} mode running at ${c.url()}\nWeb app (single-use login, 10 min): ${link}\nStop with Ctrl+C.`,
+    // audit SEC-03: under the desktop app stdout goes to a log file, so the one-time login token is never written there
+    `Savant ${cfg.mode} mode running at ${c.url()}\nWeb app (single-use login, 10 min): ${process.env.CORTEX_PARENT_PID ? `${c.url()} (open it from the app)` : link}\nStop with Ctrl+C.`,
     {
       ok: true,
       url: c.url(),

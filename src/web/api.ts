@@ -183,7 +183,8 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
   }
 
   const sess = await session(request, env);
-  if (!sess) return json({ error: "sign in with /terminal in Discord" }, 401);
+  // audit STALE-01 / UX-12: product wording (sessions come from the app, `savant link`, or Discord /terminal on a cloud brain)
+  if (!sess) return json({ error: "Signed out. Open Savant from its window or tray to sign in again." }, 401);
   // audit F-A5-10: a signed-out cookie can't read either
   if (await b.isRevoked(`revoked:${sess.n}`)) return json({ error: "signed out; sign in again" }, 401);
 

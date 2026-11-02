@@ -27,13 +27,55 @@ export interface LlmProvider {
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
+/** Audit UX-09 / SEC-03: account and organisation ids, keys and emails never reach the FEED, alarms or logs. Pure. */
+export function scrubIds(s: string): string {
+  return s
+    .replace(/\b(org|organization|proj|project|user|acct|account)[-_][A-Za-z0-9]{6,}\b/gi, "$1_…")
+    .replace(
+      /"(organization|org_id|organization_id|project_id|user_id|request_id)"\s*:\s*"[^"]*"/gi,
+      '"$1":"…"',
+    )
+    .replace(/\b(sk|gsk|nvapi|AIza|AQ)[-_.][A-Za-z0-9_-]{10,}/g, "[key]")
+    .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, "[email]");
+}
+
+/** A provider error as a person reads it: what happened, in words, plus a short scrubbed detail. Pure. */
+export function humanProviderError(provider: string, status: number, body: string): string {
+  const name =
+    (
+      { gemini: "Google Gemini", groq: "Groq", nim: "NVIDIA NIM", openrouter: "OpenRouter" } as Record<
+        string,
+        string
+      >
+    )[provider.replace(/~bear$/, "")] ?? provider;
+  let detail = "";
+  try {
+    const j = JSON.parse(body) as { error?: { message?: string } | string; message?: string };
+    detail = typeof j.error === "string" ? j.error : (j.error?.message ?? j.message ?? "");
+  } catch {
+    detail = body;
+  }
+  detail = scrubIds(detail.replace(/\s+/g, " ")).slice(0, 140);
+  const what =
+    status === 429
+      ? `${name} is rate-limiting this model right now; the court tries the next one`
+      : status === 401 || status === 403
+        ? `${name} rejected the key (check it in Settings → AI models)`
+        : status === 404
+          ? `${name} doesn't offer this model any more; the court uses another`
+          : status >= 500
+            ? `${name} is busy or down right now; the court tries the next model`
+            : `${name} refused the request`;
+  return detail ? `${what} (${detail})` : what;
+}
+
 export class ProviderError extends Error {
   constructor(
     readonly provider: string,
     readonly status: number,
     message: string,
   ) {
-    super(`${provider} ${status}: ${message.slice(0, 200)}`);
+    super(`${provider} ${status}: ${humanProviderError(provider, status, message)}`);
   }
 }
 
