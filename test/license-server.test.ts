@@ -389,4 +389,85 @@ describe("Savant accounts and device sign-in (ADR-093)", () => {
     expect(readLicense(home, keys.publicKeyB64)).toMatchObject({ required: true, ok: true });
     expect(await pollDeviceSignIn(s.secret, o)).toEqual({ status: "expired" }); // used once
   });
+
+  it("shows the caller's payments and refunds inside 14 days, only their own (ADR-100)", async () => {
+    const day = 86_400_000;
+    const pays: Record<string, Record<string, unknown>> = {
+      pay_new: {
+        id: "pay_new",
+        status: "paid",
+        membership_id: "mem_alice",
+        user_id: "user_alice",
+        paid_at: new Date(Date.now() - 3 * day).toISOString(),
+        total: 35,
+        currency: "usd",
+      },
+      pay_old: {
+        id: "pay_old",
+        status: "paid",
+        membership_id: "mem_alice",
+        user_id: "user_alice",
+        paid_at: new Date(Date.now() - 40 * day).toISOString(),
+        total: 35,
+        currency: "usd",
+      },
+      pay_bob: {
+        id: "pay_bob",
+        status: "paid",
+        membership_id: "mem_bob",
+        user_id: "user_bob",
+        paid_at: new Date().toISOString(),
+        total: 35,
+        currency: "usd",
+      },
+    };
+    const refunds: { id: string; key: string | null }[] = [];
+    const base = whopWithUsers([
+      alice,
+      { ...alice, id: "mem_bob", user_id: "user_bob", license_key: "KEY-BOB" },
+    ]);
+    const f = async (u: string, i?: RequestInit) => {
+      const url = new URL(u);
+      const path = url.pathname.replace(/^\/api\/v1/, "");
+      if (path === "/payments")
+        return Response.json({
+          data: Object.values(pays).filter((x) => x.membership_id === url.searchParams.get("membership_id")),
+        });
+      const m = /^\/payments\/(pay_\w+)(\/refund)?$/.exec(path);
+      if (m) {
+        const pay = pays[m[1] as string];
+        if (!pay) return new Response("{}", { status: 404 });
+        if (m[2]) {
+          refunds.push({ id: m[1] as string, key: new Headers(i?.headers).get("idempotency-key") });
+          pay.status = "paid";
+          pay.refunded_amount = pay.total;
+        }
+        return Response.json(pay);
+      }
+      return base.f(u, i);
+    };
+    const e = { ...accEnv(), DEVICES: kv() };
+    const list = (await (await handle(as("alice", "/v1/account/payments"), e, f)).json()) as {
+      payments: { id: string; refundable: boolean }[];
+    };
+    expect(list.payments.map((x) => [x.id, x.refundable])).toEqual([
+      ["pay_new", true],
+      ["pay_old", false],
+    ]);
+    expect((await handle(as("alice", "/v1/account/refund", { payment: "pay_bob" }), e, f)).status).toBe(404);
+    expect((await handle(as("alice", "/v1/account/refund", { payment: "pay_old" }), e, f)).status).toBe(409);
+    const ok = await handle(
+      as("alice", "/v1/account/refund", { payment: "pay_new", reason: "not for me" }),
+      e,
+      f,
+    );
+    expect(ok.status).toBe(200);
+    expect(refunds).toEqual([{ id: "pay_new", key: "savant-refund-pay_new" }]);
+    expect(
+      await (await handle(as("alice", "/v1/account/refund", { payment: "pay_new" }), e, f)).json(),
+    ).toMatchObject({
+      message: "This payment was already refunded.",
+    });
+    expect(refunds).toHaveLength(1);
+  });
 });

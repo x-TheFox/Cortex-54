@@ -158,11 +158,101 @@ function planCard(p: Plan, note: (m: string, ok: boolean) => void, reload: () =>
       );
     if (p.manage_url)
       actions.append(
-        h("a", { class: "btn btn-line", href: p.manage_url, rel: "noopener" }, "Manage billing and invoices"),
+        h("a", { class: "btn btn-line", href: p.manage_url, rel: "noopener" }, "Payment method (Whop)"),
       );
     card.append(actions);
   }
   return card;
+}
+
+interface Payment {
+  id: string;
+  plan: string;
+  amount: string;
+  currency: string;
+  paid_at: string | null;
+  status: string;
+  refunded: boolean;
+  refundable: boolean;
+  refundable_until: string | null;
+  receipt_url: string | null;
+}
+
+/** ADR-100: payments, receipts and self-serve refunds, here on getsavant.pro. */
+function payments(note: (m: string, ok: boolean) => void): HTMLElement {
+  const box = h(
+    "section",
+    { class: "acct-pay" },
+    h("h2", {}, "Payments"),
+    h("p", { class: "fine" }, "Loading…"),
+  );
+  const load = async () => {
+    const r = await api("/v1/account/payments");
+    const list = (r.ok ? (r.payments as Payment[]) : []) ?? [];
+    const days = Number(r.refund_days ?? 14);
+    const rows = list.map((x) => {
+      const status = x.refunded ? "Refunded" : x.status === "paid" ? "Paid" : x.status.replace(/_/g, " ");
+      const action = x.refundable
+        ? btn("Request refund", "btn-line btn-sm", async () => {
+            const why = prompt(
+              `Refund ${x.amount} ${x.currency.toUpperCase()}? It goes back to your card, and Savant stops trading at its next licence check (demo keeps working). Tell us why (optional):`,
+            );
+            if (why === null) return;
+            const res = await api("/v1/account/refund", { payment: x.id, reason: why });
+            note(
+              String(res.message ?? (res.ok ? "Refunded." : "The refund didn't go through.")),
+              Boolean(res.ok),
+            );
+            if (res.ok) await load();
+          })
+        : h("span", { class: "fine" }, x.refunded ? "" : `Refunds after ${days} days: write to support`);
+      return h(
+        "tr",
+        {},
+        h("td", {}, x.paid_at ? new Date(x.paid_at).toLocaleDateString() : "—"),
+        h("td", {}, x.plan),
+        h("td", {}, `${x.amount} ${x.currency.toUpperCase()}`),
+        h("td", {}, status),
+        h("td", {}, x.receipt_url ? h("a", { href: x.receipt_url, rel: "noopener" }, "Receipt") : ""),
+        h("td", {}, action),
+      );
+    });
+    box.replaceChildren(
+      h("h2", {}, "Payments"),
+      rows.length
+        ? h(
+            "div",
+            { class: "comm-scroll" },
+            h(
+              "table",
+              { class: "comm-table" },
+              h(
+                "thead",
+                {},
+                h(
+                  "tr",
+                  {},
+                  ...["Date", "Plan", "Amount", "Status", "", ""].map((t) => h("th", { scope: "col" }, t)),
+                ),
+              ),
+              h("tbody", {}, ...rows),
+            ),
+          )
+        : h(
+            "p",
+            { class: "fine" },
+            r.ok ? "No charges yet (a free trial isn't charged)." : "Payments couldn't be loaded right now.",
+          ),
+      h(
+        "p",
+        { class: "fine" },
+        `Any charge in the last ${days} days can be refunded right here, in full, no questions asked. `,
+        h("a", { href: "/legal/refunds.html" }, "Refund policy"),
+      ),
+    );
+  };
+  void load();
+  return box;
 }
 
 async function show(): Promise<void> {
@@ -199,6 +289,7 @@ async function show(): Promise<void> {
         ]
       : []),
     h("div", { class: "acct-grid" }, ...plans.map((p) => planCard(p, note, () => void show()))),
+    ...(paid.length ? [payments(note)] : []),
     h("h2", {}, "Download ", h("span", { class: "fine", "data-dl-version": "" })),
     h(
       "p",

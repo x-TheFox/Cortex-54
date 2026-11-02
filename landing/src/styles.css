@@ -1644,6 +1644,39 @@ tbody tr:last-child > * {
 }
 
 /* ── risk ───────────────────────────────────────────────────────────────── */
+/* ADR-101: FAQ (the same answers feed the page's FAQPage data) */
+.faq {
+  margin: clamp(80px, 10vw, 150px) 0 0;
+  padding: 0 var(--gutter);
+}
+.faq-inner {
+  max-width: calc(var(--max) - 2 * var(--gutter));
+  margin: 0 auto;
+}
+.faq h2 {
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  margin-bottom: 28px;
+}
+.faq-item {
+  border-top: 1px solid var(--rule);
+  padding: 18px 0;
+  max-width: 72ch;
+}
+.faq-item:last-child {
+  border-bottom: 1px solid var(--rule);
+}
+.faq-item summary {
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.faq-item p {
+  margin: 12px 0 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
 .risk {
   margin: clamp(96px, 12vw, 180px) 0 0;
   padding: clamp(64px, 8vw, 120px) var(--gutter);

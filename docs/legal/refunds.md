@@ -1,24 +1,25 @@
 ---
 title: Savant — Refund and Cancellation Policy
-version: 1
-effective: 2026-10-27
+version: 2
+effective: 2026-11-02
 ---
 
 # Refund and Cancellation Policy
 
-**Version 1 · effective 27 October 2026**
+**Version 2 · effective 2 November 2026**
 
 - **Try first.** Demo mode is free, and every paid plan starts with a **7-day free trial**. Cancel during the trial
   and you are never charged.
-- **Cancel any time** from your Whop orders (whop.com → Orders). Cancelling stops the next renewal; you keep access
-  until the end of the period you already paid for.
+- **Cancel any time** from your account at getsavant.pro/account (or your Whop orders). Cancelling stops the next
+  renewal; you keep access until the end of the period you already paid for.
 - **Refunds.** If you're charged and Savant isn't working for you, ask for a refund within **14 days of that charge**
   and we'll refund it in full. After 14 days, charges are non-refundable except where the law requires otherwise or
   where Savant didn't work as described and we couldn't fix it.
 - **Yearly plans** follow the same 14-day rule from the yearly charge.
-- **How to ask:** message the Savant support chat on Whop from your orders page. Refunds go back to the original
-  payment method through Whop.
-- **What a refund means for the app:** the licence ends within about a day. Demo mode keeps working; paper and live
+- **How to ask:** within the 14 days, press **Request refund** next to the charge at getsavant.pro/account and it
+  is refunded at once. After that, write to support. Refunds go back to the original payment method (Whop processes
+  the payment).
+- **What a refund means for the app:** the licence ends within a few hours. Demo mode keeps working; paper and live
   trading stop opening new positions while existing positions keep their stops and exits.
 - **Your statutory rights** (for example consumer withdrawal rights in the EU/UK) are not affected. If you're in the
   EU or UK, you agree that the digital content is supplied immediately when you activate your licence, and you keep

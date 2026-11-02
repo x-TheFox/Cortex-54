@@ -26,6 +26,8 @@ import {
  *   POST /v1/account/cancel       {membership}                    → cancel at the end of the paid period
  *   POST /v1/account/undo-cancel  {membership}                    → keep the subscription after all
  *   POST /v1/account/deactivate   {membership}                    → free the licence from its computer
+ *   GET  /v1/account/payments                                     → the user's charges, receipts and refund status
+ *   POST /v1/account/refund        {payment, reason}               → self-serve refund under the 14-day policy
  *   POST /v1/device/start  {machine, name}  (the app)            → {user_code, verify_url, device_secret}
  *   GET  /v1/device/info?code=              (signed in)           → which computer is asking
  *   POST /v1/device/approve {code, move?}   (signed in)           → binds the licence to that computer
@@ -282,6 +284,73 @@ export async function accountRoutes(request: Request, env: Env, f: Fetch, url: U
             : "Your subscription will renew as usual.",
     });
   }
+  // ---- ADR-100: billing on getsavant.pro (payments, receipts, self-serve refunds); Whop only processes the money
+  if (p === "/v1/account/payments" && request.method === "GET") {
+    const list = await memberships(env, f, user);
+    if (list instanceof Response) return list;
+    const out: PaymentView[] = [];
+    for (const m of list.slice(0, 10)) {
+      const r = await whop(
+        env,
+        f,
+        "GET",
+        `/payments?${new URLSearchParams({ membership_id: m.id, first: "24" })}`,
+      );
+      if (!r.ok) continue;
+      const d = (await r.json()) as { data?: WhopPayment[] };
+      for (const x of d.data ?? []) out.push(paymentView(x, m, view(env, m).plan));
+    }
+    out.sort((a, b) => (b.paid_at ?? "").localeCompare(a.paid_at ?? ""));
+    return json({ ok: true, payments: out, refund_days: REFUND_DAYS });
+  }
+  if (p === "/v1/account/refund" && request.method === "POST") {
+    const id = str(body, "payment", 60);
+    if (!/^pay_[A-Za-z0-9]+$/.test(id)) return fail("bad_request", "Which payment?");
+    const r = await whop(env, f, "GET", `/payments/${encodeURIComponent(id)}`);
+    if (!r.ok) return fail("not_found", "That payment wasn't found.", 404);
+    const pay = (await r.json()) as WhopPayment;
+    const list = await memberships(env, f, user);
+    if (list instanceof Response) return list;
+    const m = list.find((x) => x.id === pay.membership_id);
+    // only the caller's own payment, for a Savant plan
+    if (!m || (pay.user_id && pay.user_id !== user.id))
+      return fail("not_found", "That payment isn't on your account.", 404);
+    const v = paymentView(pay, m, view(env, m).plan);
+    if (v.refunded) return json({ ok: true, message: "This payment was already refunded." });
+    if (!v.refundable)
+      return fail(
+        "outside_window",
+        v.status !== "paid"
+          ? "This payment wasn't collected, so there's nothing to refund."
+          : `Refunds are automatic within ${REFUND_DAYS} days of a charge. For this one, write to support from the help page and we'll look at it.`,
+        409,
+      );
+    const reason = str(body, "reason", 500).replace(/[\r\n]+/g, " ");
+    const res = await f(
+      `${(env.WHOP_API_BASE ?? "https://api.whop.com/api/v1").replace(/\/$/, "")}/payments/${encodeURIComponent(id)}/refund`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.WHOP_API_KEY}`,
+          "content-type": "application/json",
+          "idempotency-key": `savant-refund-${id}`,
+        },
+        body: JSON.stringify({
+          metadata: { via: "getsavant.pro", ...(reason ? { reason: reason.slice(0, 480) } : {}) },
+        }),
+      },
+    );
+    if (!res.ok)
+      return fail(
+        "upstream",
+        "The refund couldn't be issued right now. Try again in a minute, or write to support.",
+        502,
+      );
+    return json({
+      ok: true,
+      message: `Refunded ${v.amount} ${v.currency.toUpperCase()} to your original payment method. It usually shows within 5–10 business days. The licence ends within a few hours; demo mode keeps working.`,
+    });
+  }
   if (p === "/v1/device/info" || p === "/v1/device/approve") {
     if (!env.DEVICES) return fail("not_configured", "Device sign-in isn't set up yet.", 503);
     const code = (p === "/v1/device/info" ? (url.searchParams.get("code") ?? "") : str(body, "code", 20))
@@ -356,4 +425,79 @@ export async function accountRoutes(request: Request, env: Env, f: Fetch, url: U
     });
   }
   return fail("not_found", "Not found.", 404);
+}
+
+// ---- ADR-100: payments --------------------------------------------------------------------------------------------
+
+/** The refund policy's automatic window (docs/legal/refunds.md). */
+export const REFUND_DAYS = 14;
+
+/** The fields we read from a Whop payment (both the v1 and the newer shapes). */
+interface WhopPayment {
+  id: string;
+  status?: string;
+  substatus?: string;
+  membership_id?: string | null;
+  user_id?: string | null;
+  paid_at?: string | number | null;
+  created_at?: string | number | null;
+  currency?: string;
+  total?: number | string | { amount?: string } | null;
+  subtotal?: number | string | null;
+  usd_total?: number | string | null;
+  refunded_amount?: number | string | null;
+  refunded_at?: string | number | null;
+  receipt_url?: string | null;
+}
+
+export interface PaymentView {
+  id: string;
+  membership: string;
+  plan: string;
+  amount: string;
+  currency: string;
+  paid_at: string | null;
+  status: string;
+  refunded: boolean;
+  refundable: boolean;
+  refundable_until: string | null;
+  receipt_url: string | null;
+}
+
+const iso = (v: string | number | null | undefined): string | null => {
+  if (v === null || v === undefined || v === "") return null;
+  const t = typeof v === "number" ? (v < 1e12 ? v * 1000 : v) : Date.parse(v);
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+};
+const money = (v: WhopPayment["total"]): number => {
+  if (v && typeof v === "object") return Number(v.amount ?? 0);
+  return Number(v ?? 0);
+};
+
+export function paymentView(x: WhopPayment, m: Membership, plan: string, now = Date.now()): PaymentView {
+  const paid = iso(x.paid_at);
+  const amount = money(x.total ?? x.subtotal ?? x.usd_total);
+  const refundedAmt = money(x.refunded_amount);
+  const status = (x.substatus === "refunded" ? "refunded" : x.status) ?? "unknown";
+  const refunded =
+    status === "refunded" || (refundedAmt > 0 && refundedAmt >= amount) || Boolean(x.refunded_at);
+  const until = paid ? new Date(Date.parse(paid) + REFUND_DAYS * 86_400_000).toISOString() : null;
+  return {
+    id: x.id,
+    membership: m.id,
+    plan,
+    amount: amount.toFixed(2),
+    currency: (x.currency ?? "usd").toLowerCase(),
+    paid_at: paid,
+    status,
+    refunded,
+    refundable:
+      !refunded &&
+      (x.status === "paid" || status === "paid") &&
+      amount > 0 &&
+      until !== null &&
+      Date.parse(until) > now,
+    refundable_until: until,
+    receipt_url: x.receipt_url ?? null,
+  };
 }

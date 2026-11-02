@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import { CONSTITUTION, CONSTITUTION_SHA256, DOCTRINE, DOCTRINE_SHA256 } from "../src/generated/config.ts";
 import { CHECKOUT_URL, ORDERS_URL, PLANS, TRIAL_DAYS } from "./checkout.ts";
+import { faqHtml, jsonLd } from "./seo.ts";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
@@ -134,6 +135,9 @@ function tokens(): Record<string, string> {
     CAL_N: String(f.calibration.min_outcomes_before_trusting),
     MIN_STOP_ATR: `${DOCTRINE.sizing.min_stop_atr_multiple}`,
     HURDLE: `${DOCTRINE.fees.hurdle_multiple}`,
+    // ADR-101: structured data and the visible FAQ it describes
+    JSON_LD: jsonLd(),
+    FAQ_HTML: faqHtml(),
   };
 }
 
