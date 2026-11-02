@@ -16,6 +16,7 @@ import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
 import { labDoctrine } from "../src/cortex/lab.ts";
 import { buildEvidence } from "../src/court/evidence.ts";
 import { type LlmProvider, LlmRouter } from "../src/court/llm.ts";
+import { replaySteps } from "../src/court/replay.ts";
 import { NullNotifier } from "../src/discord/notifier.ts";
 import { Journal, verifyChain } from "../src/journal/Journal.ts";
 import type { AccountId } from "../src/lib/ids.ts";
@@ -957,6 +958,17 @@ describe("court end-to-end (Phase 3)", () => {
     async complete(model, req) {
       calls.push(model);
       const sys = req.system;
+      if (sys.includes("5-year-old")) {
+        const ids = [...req.user.matchAll(/"id":(\d+)/g)].map((m) => Number(m[1]));
+        return {
+          text: JSON.stringify({
+            summary: "Two robots argued about buying bitcoin and a judge decided.",
+            steps: ids.map((id) => ({ id, plain: `step ${id} in plain words` })),
+          }),
+          inputTokens: 100,
+          outputTokens: 50,
+        };
+      }
       if (sys.includes("OPEN COURT PROTOCOL"))
         return {
           text: req.user.includes("[Quant Analyst")
@@ -1067,6 +1079,17 @@ describe("court end-to-end (Phase 3)", () => {
       (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ Savant COURT"),
     );
     expect(JSON.stringify(card?.msg)).toContain("Open court");
+    // ADR-098: the replay, and its plain-English layer (made once, then kept)
+    const steps = replaySteps(rec?.session as never);
+    expect(steps[0]?.kind).toBe("case");
+    expect(steps.at(-1)?.kind).toBe("verdict");
+    expect(steps.some((x) => x.kind === "rest")).toBe(true);
+    const e1 = await t.brain.explainHearing(list[0]?.sprint_id as string);
+    expect(e1.ok).toBe(true);
+    expect(e1.eli5?.steps).toHaveLength(steps.length);
+    const n = calls.length;
+    expect((await t.brain.explainHearing(list[0]?.sprint_id as string)).eli5?.summary).toMatch(/bitcoin/);
+    expect(calls.length).toBe(n); // cached
   });
 
   it("headline → Tier 1 → Tier 2 → bull/bear/synth → COURT contract → paper order", async () => {

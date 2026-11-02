@@ -124,6 +124,10 @@ export interface WebBrain extends OperatorBrain {
   consumeOnce(id: string): Promise<boolean>;
   /** Audit W1-26: true once the session's nonce was revoked by /api/logout. */
   isRevoked(id: string): Promise<boolean>;
+  /** ADR-098: court replays (local app only) */
+  hearings?(limit: number): Promise<unknown>;
+  hearing?(id: string): Promise<unknown>;
+  explainHearing?(id: string): Promise<{ ok: boolean; message: string; [k: string]: unknown }>;
 }
 
 /** LIVE ratification from the app needs a session this young */
@@ -214,6 +218,16 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
       }
       case "/api/equity":
         return json(await b.equity(Number(url.searchParams.get("days") ?? 7)));
+      case "/api/hearings": {
+        // ADR-098: court replays; one hearing with ?id=
+        const id = url.searchParams.get("id");
+        if (id !== null) {
+          if (!/^[0-9a-f-]{36}$/.test(id)) return json({ error: "bad id" }, 400);
+          const h = b.hearing ? await b.hearing(id) : null;
+          return h ? json(h) : json({ error: "not found" }, 404);
+        }
+        return json(b.hearings ? await b.hearings(Number(url.searchParams.get("limit") ?? 30)) : []);
+      }
       case "/api/memory": {
         const [mem, report] = await Promise.all([
           b.memory(),
@@ -361,6 +375,12 @@ export async function handleWeb(request: Request, env: WebEnv, b: WebBrain): Pro
             ...(body.refresh === true ? { refresh: true } : {}),
           }),
         );
+      }
+      case "/api/settings/eli5": {
+        const id = str("id");
+        if (!/^[0-9a-f-]{36}$/.test(id) || !b.explainHearing)
+          return json({ ok: false, message: "Not available here." });
+        return json(await b.explainHearing(id));
       }
       case "/api/settings/hub": {
         if (!b.settings.hub) return json({ ok: false, message: "Not available here." });

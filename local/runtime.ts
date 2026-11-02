@@ -14,6 +14,7 @@ import { healChains } from "../src/court/catalog.ts";
 import type { LlmRouter } from "../src/court/llm.ts";
 import { buildPool, costUsd, type PoolReport, poolRouter } from "../src/court/pool.ts";
 import { buildProviders } from "../src/court/providers.ts";
+import { replaySteps } from "../src/court/replay.ts";
 import {
   type ChannelKey,
   type DiscordMessage,
@@ -604,6 +605,26 @@ export class LocalCortex {
         return m;
       },
       court: (s, by) => b.requestCourt(s, by),
+      // ADR-098: court replays, and their plain-English layer only when the user switched it on (it costs model calls)
+      hearings: async (n) => b.hearingList(n),
+      hearing: async (id) => {
+        const h = b.hearing(id);
+        return h
+          ? {
+              ...h,
+              steps: replaySteps(h.session),
+              eli5_enabled: Boolean(loadConfig(this.o.home)?.eli5.enabled),
+            }
+          : null;
+      },
+      explainHearing: async (id) =>
+        loadConfig(this.o.home)?.eli5.enabled
+          ? b.explainHearing(id)
+          : {
+              ok: false,
+              message:
+                "Turn on plain-English replays in Settings → AI models first (it uses extra AI calls).",
+            },
       why: (s) => b.why(s),
       roast: (s, t, by) => b.requestRoast(s, t, by),
       book: async () => {

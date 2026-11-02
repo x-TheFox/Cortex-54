@@ -103,6 +103,14 @@ import {
   REBUTTAL_SYSTEM,
   untrusted,
 } from "../court/prompts.ts";
+import {
+  ELI5_PROMPT_VERSION,
+  ELI5_SCHEMA,
+  ELI5_SYSTEM,
+  type Eli5,
+  Eli5Schema,
+  replaySteps,
+} from "../court/replay.ts";
 import { CORE_SEATS, type SeatDef, shortlist } from "../court/roster.ts";
 import { toolBox } from "../court/tools.ts";
 import { COLORS, type Notifier } from "../discord/notifier.ts";
@@ -4679,6 +4687,54 @@ ${postmortem}`,
       "SELECT sprint_id, symbol, arena, started_at, ended_at, ok, verdict FROM court_transcripts ORDER BY started_at DESC LIMIT ?",
       Math.max(1, Math.min(200, limit)),
     );
+  }
+
+  /**
+   * ADR-098: the plain-English ("explain like I'm 5") layer of a replay, made on request and kept. The caller checks
+   * that the user switched it on (it costs model calls). Long hearings are explained in chunks of 60 steps.
+   */
+  async explainHearing(sprintId: string): Promise<{ ok: boolean; message: string; eli5?: Eli5 }> {
+    const rec = this.hearing(sprintId);
+    if (!rec) return { ok: false, message: "No hearing by that id." };
+    if (rec.eli5) return { ok: true, message: "", eli5: rec.eli5 as Eli5 };
+    const llm = this.deps.llm;
+    if (!llm) return { ok: false, message: "No AI models are set up, so there is nobody to explain it." };
+    const steps = replaySteps(rec.session);
+    const chain = this.d.llm_routing.panel.chain.length
+      ? this.d.llm_routing.panel.chain
+      : this.d.llm_routing.bull_chain;
+    const out: Eli5 = { summary: "", steps: [] };
+    for (let i = 0; i < steps.length; i += 60) {
+      const part = steps.slice(i, i + 60).map((x) => ({
+        id: x.id,
+        who: x.who,
+        kind: x.kind,
+        text: x.text.slice(0, 700),
+        ...(x.detail ? { detail: x.detail } : {}),
+      }));
+      const r = await llm.run(
+        chain,
+        {
+          system: ELI5_SYSTEM,
+          user: `${i === 0 ? "" : "(continued: explain only these steps; keep the summary to one sentence)\n"}Hearing steps:\n${untrusted("hearing", JSON.stringify(part))}`,
+          maxOutputTokens: 4000,
+          schema: ELI5_SCHEMA as unknown as Record<string, unknown>,
+        },
+        (j) => Eli5Schema.parse(j),
+        [],
+        (a) => this.logLlm(sprintId, "ELI5", ELI5_PROMPT_VERSION, a, this.deps.now()),
+      );
+      if (!r) return { ok: false, message: "The AI models didn't answer. Try again in a minute." };
+      if (i === 0) out.summary = r.value.summary;
+      const ids = new Set(part.map((x) => x.id));
+      out.steps.push(...r.value.steps.filter((x) => ids.has(x.id)));
+    }
+    this.sql.exec(
+      "UPDATE court_transcripts SET eli5_json = ? WHERE sprint_id = ?",
+      JSON.stringify(out),
+      sprintId,
+    );
+    return { ok: true, message: "", eli5: out };
   }
 
   /** ADR-096: one hearing's full record. */
