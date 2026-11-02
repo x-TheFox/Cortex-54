@@ -138,7 +138,7 @@ function tracker(v: View): HTMLElement {
       { class: "fine" },
       c.slots >= v.max_slots
         ? `${v.max_slots} foundations, the most a month funds: they share the whole pool, however large.`
-        : `All of it is given. Each foundation gets up to ${usd(v.slot_target_cents)}; past ${usd(target)} a foundation ${next} joins and the pool is split again (up to ${v.max_slots}, then they share everything).`,
+        : `No cap: all of it is given, however small or large. Every ${usd(v.slot_target_cents)} of pool adds a foundation, so past ${usd(target)} foundation ${next} joins and the pool is split again (up to ${v.max_slots}; then the ${v.max_slots} share everything).`,
       c.computed_at
         ? ` Updated ${new Date(c.computed_at).toLocaleString()}.`
         : " First update after the next daily refresh.",
@@ -352,7 +352,7 @@ async function render(flash?: { m: string; ok: boolean }): Promise<void> {
         "li",
         {},
         h("b", {}, "Count. "),
-        `On the 1st, the month's revenue is final: ${Math.round(v.share * 100)}% of it is the pool, all of it given. It is split equally among as many foundations as keep each share at or under ${usd(v.slot_target_cents)}, up to ${v.max_slots}; above that the ${v.max_slots} share the whole pool.`,
+        `On the 1st, the month's revenue is final: ${Math.round(v.share * 100)}% of it is the pool, all of it given, with no cap. The pool sets how many foundations share it: one per ${usd(v.slot_target_cents)} started (so even a few dollars funds one), up to ${v.max_slots}; above that the ${v.max_slots} split the whole pool equally, however large.`,
       ),
       h(
         "li",

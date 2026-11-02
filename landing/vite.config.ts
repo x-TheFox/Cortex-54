@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import { CONSTITUTION, CONSTITUTION_SHA256, DOCTRINE, DOCTRINE_SHA256 } from "../src/generated/config.ts";
-import { CHECKOUT_URL, ORDERS_URL, PLANS, TRIAL_DAYS } from "./checkout.ts";
+import { CHECKOUT_URL, EDITION, ORDERS_URL, PLANS, TRIAL_DAYS } from "./checkout.ts";
 import { faqHtml, jsonLd } from "./seo.ts";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
@@ -93,6 +93,7 @@ function tokens(): Record<string, string> {
     CHECKOUT_NOTE: co.note,
     PRICE_MONTHLY: PLANS.monthly.price,
     PRICE_YEARLY: PLANS.yearly.price,
+    EDITION,
     CHECKOUT_MONTHLY: esc(PLANS.monthly.url),
     CHECKOUT_YEARLY: esc(PLANS.yearly.url),
     CHECKOUT_DEMO: esc(PLANS.demo.url),

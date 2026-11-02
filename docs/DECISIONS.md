@@ -1330,8 +1330,8 @@ Twitter cards, canonicals and Open Graph on community and docs, sitemap and robo
 
 ## ADR-102 — Community impact pledge (2026-11-02)
 Monthly, 20% of Savant's gross revenue (collected charges before processor fees, less that month's refunds) is given
-by the company to community-suggested foundations: each share at most $250 so the pool funds as many as
-that takes (1–10; past $2,500 the ten share it all, revised 2026-11-02), most-supported eligible suggestions,
+by the company to community-suggested foundations, with no cap on the amount: the pool sets how many share it (one per
+$250 started, 1–10; past $2,500 the ten split the whole pool, revised 2026-11-02), most-supported eligible suggestions,
 equal shares, winners sit out 3 months. Suggestions dedupe by domain or cleaned name. Allocations are an append-only
 public record; receipts are attached with `pnpm impact paid`. A corporate pledge: no donations taken, nobody's money
 held. Operator: set the hub's read-only `WHOP_API_KEY` secret before the first close.

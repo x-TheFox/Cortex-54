@@ -1,4 +1,4 @@
-import { PLANS, TRIAL_DAYS } from "./checkout.ts";
+import { EDITION, PLANS, TRIAL_DAYS } from "./checkout.ts";
 
 /**
  * Search-engine data for getsavant.pro (ADR-101). One FAQ list feeds both the visible FAQ section and its FAQPage
@@ -59,7 +59,7 @@ export function jsonLd(): string {
   const offers = [
     {
       "@type": "Offer",
-      name: "Monthly",
+      name: `Monthly · ${EDITION}`,
       price: amount(PLANS.monthly.price),
       priceCurrency: "USD",
       url: `${SITE}/#pricing`,
@@ -73,7 +73,7 @@ export function jsonLd(): string {
     },
     {
       "@type": "Offer",
-      name: "Yearly",
+      name: `Yearly · ${EDITION}`,
       price: amount(PLANS.yearly.price),
       priceCurrency: "USD",
       url: `${SITE}/#pricing`,
