@@ -291,3 +291,25 @@ describe("court tools (ADR-096)", () => {
     expect(htmlToText("<b>a &amp; b</b>").text).toBe("a & b");
   });
 });
+
+describe("hindsight masking (audit AGT-03)", () => {
+  it("renames the symbol, shifts dates, hides years and named entities", async () => {
+    const { maskHistorical } = await import("../src/court/mask.ts");
+    const ev = {
+      symbol: "SOL/USD",
+      now: "2022-11-07T12:00:00Z",
+      catalyst: {
+        headline: "FTX halts withdrawals as SOL slides; Binance walks away (Nov 8, 2022)",
+        createdAt: 1_667_822_400_000,
+      },
+      quote: { bid: 30.1 },
+    };
+    const m = maskHistorical(ev, { symbol: "SOL/USD", entities: ["FTX", "Binance"] });
+    const s = JSON.stringify(m);
+    expect(s).not.toMatch(/FTX|Binance|SOL|2022|Nov 8/);
+    expect(m.symbol).toBe("ASSET-X/USD");
+    expect(m.now.startsWith("2025-08")).toBe(true);
+    expect(m.catalyst.createdAt).toBe(1_667_822_400_000 + 1_000 * 86_400_000);
+    expect(m.quote.bid).toBe(30.1); // numbers that aren't times are untouched
+  });
+});

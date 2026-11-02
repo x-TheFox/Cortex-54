@@ -795,9 +795,24 @@ export function resolveClef(cfg: LocalConfig, built: ReturnType<typeof buildPool
     return { clef: new WorkersAiClef(cf), clairic: new WorkersAiClairic(cf), label: "cloudflare" };
   }
   if (cfg.clef === "cloudflare") return { clef: null, clairic: null, label: "off" };
-  // the stand-in: a paid model if the user has one (usually the strongest), else the first in the pool
+  // the stand-in: a paid or local model if the user has one, else the free model with the largest daily quota.
+  // Audit AGT-05: Tier 1 wants up to ~150 calls a day; Gemini Flash's free tier allows 20, so it goes last.
   const entries = built.report.entries;
-  const pick = entries.find((e) => e.tier === "paid") ?? entries[0];
+  const quota = (e: (typeof entries)[number]) =>
+    e.tier === "paid"
+      ? 0
+      : e.tier === "local"
+        ? 1
+        : e.provider === "groq" && /gpt-oss-20b/.test(e.model)
+          ? 2
+          : e.provider === "groq"
+            ? 3
+            : e.provider === "nim"
+              ? 4
+              : e.provider === "gemini"
+                ? 9
+                : 5;
+  const pick = [...entries].sort((a, b) => quota(a) - quota(b))[0];
   const prov = pick ? built.providers[pick.provider] : undefined;
   if (pick && prov)
     return {

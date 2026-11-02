@@ -3348,11 +3348,24 @@ ${postmortem}`,
           .catch(() => undefined),
         this.quotesFor([c.symbol]).catch(() => ({}) as Record<string, Quote>),
       ]);
-      const res = screenAsset(
+      let res = screenAsset(
         { symbol: c.symbol, arena: c.arena, asset, bars, quote: quotes[c.symbol] },
         this.d,
         this.c,
       );
+      // audit AGT-06: overnight a stock's quote is wide by nature. When the spread is the only thing that failed and
+      // the market is closed, the symbol is admitted; every order still passes the validator's own spread check at the
+      // moment it is placed, so nothing trades on a wide quote.
+      if (
+        !res.ok &&
+        c.arena === "EQUITIES" &&
+        res.reasons.every((r) => r.startsWith("spread ") || r === "no two-sided quote") &&
+        !(await this.deps.brokers[via]
+          ?.clock()
+          .then((k) => k.is_open)
+          .catch(() => true))
+      )
+        res = { ...res, ok: true, reasons: [] };
       this.universe.record(c.symbol, c.arena, res, source, why, now);
       this.journal.append(
         "SYSTEM",

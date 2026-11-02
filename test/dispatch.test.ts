@@ -36,7 +36,12 @@ describe("cron matcher (UTC)", () => {
     const ran = Object.fromEntries(fresh.map((d) => [d.job.key, d.slot]));
     expect(dueJobs(now + 60_000, ran)).toEqual([]);
     // an install that is warm only gets the slots that came due
-    const warm = { crypto: now - 3_600_000, "equity-open": now - 3_600_000, kronos: now - 3_600_000, screeners: now - 3_600_000 };
+    const warm = {
+      crypto: now - 3_600_000,
+      "equity-open": now - 3_600_000,
+      kronos: now - 3_600_000,
+      screeners: now - 3_600_000,
+    };
     const due = dueJobs(now, warm);
     expect(due.map((d) => d.job.key)).toEqual(["world"]);
     expect(dueJobs(now + 60_000, { ...warm, world: due[0]?.slot ?? 0 })).toEqual([]);

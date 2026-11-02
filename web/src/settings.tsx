@@ -1343,6 +1343,49 @@ export function CourtSection({ s, save, saving }: { s: SettingsView; save: Save;
   );
 }
 
+// ------------------------------------------------------------------ SEC filings contact (audit AGT-07)
+
+export function SecSection({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
+  const [email, setEmail] = useState("");
+  const [r, setR] = useState<Result | null>(null);
+  const set = s.keys?.SEC_USER_AGENT?.set ?? false;
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  return (
+    <section className="set-sec">
+      <h4>Company filings (SEC EDGAR)</h4>
+      <p className="cost">
+        The research desk reads new SEC filings (8-Ks, earnings) for the stocks it follows. The SEC asks every
+        reader to give a contact email; it is sent only to sec.gov, with each request.{" "}
+        {set ? "An email is set." : "Without one, filings are skipped."}
+      </p>
+      <label className="set-field">
+        <span className="label dim">CONTACT EMAIL</span>
+        <input
+          className="field plain"
+          type="email"
+          autoComplete="email"
+          value={email}
+          placeholder={set ? "set — type to replace" : "you@example.com"}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </label>
+      <div className="set-actions">
+        <button
+          type="button"
+          className="chip go"
+          disabled={saving || !valid}
+          onClick={async () =>
+            setR(await save({ keys: { SEC_USER_AGENT: `Savant research ${email.trim()}` } }))
+          }
+        >
+          SAVE
+        </button>
+      </div>
+      <Note r={r} />
+    </section>
+  );
+}
+
 // ------------------------------------------------------------------ keep awake + plain-English replays (ADR-096/098)
 
 export function AwakeSection({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
@@ -2526,7 +2569,12 @@ export function SettingsPage({
           {saving && <span className="note-line cyan">Applying…</span>}
         </header>
         {cur.id === "account" && <LicenseSection s={s} reload={reload} />}
-        {cur.id === "trading" && <TradingSection {...props} />}
+        {cur.id === "trading" && (
+          <>
+            <TradingSection {...props} />
+            {s.mode === "paper" && <SecSection {...props} />}
+          </>
+        )}
         {cur.id === "ai" && (
           <>
             <ModelsSection {...props} />

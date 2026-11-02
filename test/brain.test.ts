@@ -1782,7 +1782,9 @@ describe("batch dispatcher (ADR-032)", () => {
     // every warm-up job (audit AGT-01) is watched the same way; kronos is reported exactly once
     expect(
       t.d1.db
-        .prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'DISPATCH_STALE' AND payload_json LIKE '%kronos%'")
+        .prepare(
+          "SELECT COUNT(*) AS n FROM journal WHERE kind = 'DISPATCH_STALE' AND payload_json LIKE '%kronos%'",
+        )
         .get(),
     ).toEqual({ n: 1 });
   });
