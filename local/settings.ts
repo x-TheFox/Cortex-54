@@ -17,7 +17,7 @@ import { DEFAULT_HUB_URL } from "../src/hub/client.ts";
 import { agentIdOf, canonical, generateAgentKey, publicKeyOf } from "../src/hub/protocol.ts";
 import { TERMS_VERSION } from "../src/legal/version.ts";
 import { ntfyUrl } from "../src/notify/push.ts";
-import type { HubAction, WebSettings } from "../src/web/api.ts";
+import type { HubAction, ModelsAction, WebSettings } from "../src/web/api.ts";
 import { AGENT_PROMPT } from "./agent-prompt.ts";
 import {
   backupFileName,
@@ -27,6 +27,7 @@ import {
   restoredConfig,
   restoreInto,
 } from "./backup.ts";
+import { catalogPage, loadBench, loadCatalog } from "./catalog.ts";
 import { KEY_NAMES, type KeyName, type LocalConfig, LocalConfigSchema, saveConfig } from "./config.ts";
 import { configChecks, runtimeChecks } from "./health.ts";
 import { secretBackend } from "./keychain.ts";
@@ -143,6 +144,8 @@ export interface SettingsDeps {
   pairLink?: () => Promise<string | null>;
   /** ADR-076: stop the service and wipe the Savant home */
   wipe?: () => Promise<void>;
+  /** ADR-099: refresh the model catalog now (and benchmark) */
+  refreshModels?: () => Promise<unknown>;
   /** ADR-081: cap the paper account's borrowing at 1x at the broker */
   cashOnly?: (account: "PAPER" | "LIVE") => Promise<{ ok: boolean; message: string }>;
   /** ADR-081: the PAPER account's mode and why (so the page can offer the fix) */
@@ -197,7 +200,14 @@ export class LocalSettings implements WebSettings {
       court: {
         max_per_day: c.court.max_per_day ?? null,
         default_per_day: DOCTRINE.funnel.tier3.max_sprints_per_day,
+        unlimited: c.court.unlimited ?? null,
+        // ADR-097: what applies when the switch was never touched (unlimited once the pool has a paid or local model)
+        unlimited_default:
+          (c.llm.endpoints ?? []).some((e) => e.enabled && e.tier !== "free") ||
+          Object.values(c.llm.prefs.models ?? {}).some((m) => m.mode === "all" || m.mode === "pick"),
       },
+      power: c.power,
+      eli5: c.eli5,
       lan: { enabled: c.lan.enabled, port: c.port },
       secretStore: { mode: c.secret_store, backend: keychainName(this.d.home) },
       proposals: readProposals(this.d.home),
@@ -395,16 +405,35 @@ export class LocalSettings implements WebSettings {
           c = { ...c, terms: { version: TERMS_VERSION, accepted_at: Math.floor(t.accepted_at) } };
       }
       if (patch.court && typeof patch.court === "object") {
-        const v = (patch.court as { max_per_day?: unknown }).max_per_day;
+        const pc = patch.court as { max_per_day?: unknown; unlimited?: unknown };
+        const v = pc.max_per_day;
+        const max =
+          typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 10_000
+            ? v
+            : v === null
+              ? undefined
+              : c.court.max_per_day;
+        const unl =
+          typeof pc.unlimited === "boolean"
+            ? pc.unlimited
+            : pc.unlimited === null
+              ? undefined
+              : c.court.unlimited;
         c = {
           ...c,
-          court:
-            typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= 60
-              ? { max_per_day: v }
-              : v === null
-                ? {}
-                : c.court,
+          court: {
+            ...(max !== undefined ? { max_per_day: max } : {}),
+            ...(unl !== undefined ? { unlimited: unl } : {}),
+          },
         };
+      }
+      if (patch.power && typeof patch.power === "object") {
+        const k = (patch.power as { keep_awake?: unknown }).keep_awake;
+        if (k === "hearings" || k === "always" || k === "off") c = { ...c, power: { keep_awake: k } };
+      }
+      if (patch.eli5 && typeof patch.eli5 === "object") {
+        const e = (patch.eli5 as { enabled?: unknown }).enabled;
+        if (typeof e === "boolean") c = { ...c, eli5: { enabled: e } };
       }
       if (patch.lan && typeof patch.lan === "object")
         c = { ...c, lan: { enabled: (patch.lan as { enabled?: unknown }).enabled === true } };
@@ -656,6 +685,127 @@ export class LocalSettings implements WebSettings {
           return [];
         }
       });
+  }
+
+  /**
+   * ADR-099: the model browser. Every call answers with the providers, the cost scope and one page of the asked
+   * provider's catalog; a change (mode, pick/unpick, cost scope) is saved and applied first.
+   */
+  async catalog(q: ModelsAction): Promise<{ ok: boolean; message: string; [k: string]: unknown }> {
+    let c = this.d.cfg();
+    let message = "";
+    const p = q.provider ?? "";
+    const isEndpoint = p.startsWith("ep:");
+    const builtin = ["gemini", "groq", "nim", "openrouter"].includes(p);
+    if (q.refresh) {
+      if (!this.d.refreshModels) return { ok: false, message: "Not available here." };
+      void this.d.refreshModels();
+      message =
+        "Checking every provider's model list now. Benchmarks run in the background; this takes a few minutes.";
+    }
+    if (q.cost_scope || q.mode || q.pick || q.unpick) {
+      const prefs = { ...c.llm.prefs, models: { ...(c.llm.prefs.models ?? {}) } };
+      let endpoints = c.llm.endpoints;
+      if (q.cost_scope) prefs.cost_scope = q.cost_scope;
+      if (builtin && (q.mode || q.pick || q.unpick)) {
+        const cur = prefs.models[p] ?? { mode: "recommended" as const, picked: [] as string[] };
+        let picked = [...new Set([...cur.picked, ...(q.pick ?? [])])].filter(
+          (m) => !(q.unpick ?? []).includes(m),
+        );
+        picked = picked.slice(0, 1000);
+        prefs.models[p] = { mode: q.mode ?? (q.pick?.length ? "pick" : cur.mode), picked };
+      } else if (isEndpoint && (q.pick || q.unpick)) {
+        endpoints = endpoints.map((e) =>
+          `ep:${e.id}` === p
+            ? {
+                ...e,
+                models: [...new Set([...e.models, ...(q.pick ?? [])])]
+                  .filter((m) => !(q.unpick ?? []).includes(m))
+                  .slice(0, 50),
+              }
+            : e,
+        );
+      } else if (!q.cost_scope) return { ok: false, message: "Unknown provider." };
+      const r = await this.save({ llm: { endpoints, prefs } });
+      if (!r.ok) return r;
+      c = this.d.cfg();
+      message ||=
+        q.cost_scope === "free_only"
+          ? "Free models only. Paid models and paid endpoints sit out until you switch back."
+          : q.cost_scope === "all"
+            ? "Paid models are allowed. They bill the account behind each key."
+            : "Saved. The court uses the new model list from now on.";
+    }
+    const cat = loadCatalog(this.d.home);
+    const bench = loadBench(this.d.home);
+    const scores = Object.fromEntries(
+      (bench?.results ?? []).map((r) => [`${r.provider}/${r.model}`, r.score]),
+    );
+    const providers = [
+      ...["gemini", "groq", "nim", "openrouter"]
+        .filter((k) =>
+          Boolean(
+            c.keys[
+              (
+                {
+                  gemini: "GEMINI_API_KEY",
+                  groq: "GROQ_API_KEY",
+                  nim: "NVIDIA_API_KEY",
+                  openrouter: "OPENROUTER_API_KEY",
+                } as const
+              )[k as "gemini"]
+            ],
+          ),
+        )
+        .map((k) => ({
+          id: k,
+          name:
+            (
+              {
+                gemini: "Google Gemini",
+                groq: "Groq",
+                nim: "NVIDIA NIM",
+                openrouter: "OpenRouter",
+              } as Record<string, string>
+            )[k] ?? k,
+          endpoint: false,
+          mode: c.llm.prefs.models?.[k]?.mode ?? "recommended",
+          picked: c.llm.prefs.models?.[k]?.picked.length ?? 0,
+        })),
+      ...c.llm.endpoints.map((e) => ({
+        id: `ep:${e.id}`,
+        name: e.name,
+        endpoint: true,
+        mode: "pick",
+        picked: e.models.length,
+      })),
+    ].map((x) => ({
+      ...x,
+      listed: cat?.providers[x.id]?.models.length ?? 0,
+      free: cat?.providers[x.id]?.free?.length ?? 0,
+      ok: cat?.providers[x.id]?.ok ?? null,
+    }));
+    const pickedNow = isEndpoint
+      ? (c.llm.endpoints.find((e) => `ep:${e.id}` === p)?.models ?? [])
+      : (c.llm.prefs.models?.[p]?.picked ?? []);
+    return {
+      ok: true,
+      message,
+      cost_scope: c.llm.prefs.cost_scope ?? "all",
+      providers,
+      ...(p
+        ? {
+            page: catalogPage(cat, p, {
+              ...(q.search !== undefined ? { search: q.search } : {}),
+              ...(q.free !== undefined ? { free: q.free } : {}),
+              ...(q.page !== undefined ? { page: q.page } : {}),
+              picked: pickedNow,
+              scores,
+            }),
+          }
+        : {}),
+      bench_at: bench?.at ?? null,
+    };
   }
 
   async hub(q: HubAction): Promise<{ ok: boolean; message: string; [k: string]: unknown }> {

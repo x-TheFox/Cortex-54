@@ -10,9 +10,11 @@ import { CloudflareRestAi, ShimClairic, ShimClef } from "../src/clef/portable.ts
 import { Brain, type PulseReport } from "../src/cortex/Brain.ts";
 import { HOT_SCHEMA, HOT_SCHEMA_VERSION } from "../src/cortex/hot-schema.ts";
 import { getKV, setKV } from "../src/cortex/store.ts";
+import { healChains } from "../src/court/catalog.ts";
 import type { LlmRouter } from "../src/court/llm.ts";
 import { buildPool, costUsd, type PoolReport, poolRouter } from "../src/court/pool.ts";
 import { buildProviders } from "../src/court/providers.ts";
+import { replaySteps } from "../src/court/replay.ts";
 import {
   type ChannelKey,
   type DiscordMessage,
@@ -37,11 +39,13 @@ import { ntfyUrl, PushNotifier } from "../src/notify/push.ts";
 import { handleWeb, loginLink, type WebBrain, type WebSettings } from "../src/web/api.ts";
 import { pill, pillAuthorized, swiftbar } from "../src/web/pill.ts";
 import { snapshotDb } from "./backup.ts";
+import { healed, loadBench, loadCatalog, refreshCatalog } from "./catalog.ts";
 import { type LocalConfig, loadConfig } from "./config.ts";
 import { runtimeChecks } from "./health.ts";
 import { LocalJobs } from "./jobs.ts";
 import { entriesBlocked, readLicense } from "./license.ts";
 import { loadLocalScar, mergeScar } from "./memory.ts";
+import { PowerGuard } from "./power.ts";
 import { loadLocalCalibration } from "./proposals.ts";
 import { SimBroker } from "./simbroker.ts";
 import { fileD1, fileSql, type LocalD1 } from "./store.ts";
@@ -141,6 +145,8 @@ export interface LocalOptions {
   /** tests: inject fakes instead of real network clients */
   /** ADR-071: the settings page's backend (the CLI provides it, with a reload that applies saved settings) */
   settings?: WebSettings;
+  /** ADR-099: the model catalog healed the chains; the CLI restarts the court with them */
+  onModelsChanged?: () => void;
   overrides?: {
     broker?: BrokerApi;
     /** tests: a fake live broker (never a real one) */
@@ -151,6 +157,18 @@ export interface LocalOptions {
     http?: (u: string, i?: RequestInit) => Promise<Response>;
   };
 }
+
+/** ADR-097: "unlimited" hearings, as a number the brain's daily counter can compare against. */
+export const UNLIMITED_HEARINGS = 1_000_000;
+
+/** ADR-097: does this install run unlimited court hearings? (explicit switch, else: the pool has a paid model) */
+export function courtUnlimited(cfg: LocalConfig, pool: PoolReport): boolean {
+  if (cfg.court.unlimited !== undefined) return cfg.court.unlimited;
+  return pool.entries.some((e) => e.tier === "paid" || e.tier === "local");
+}
+
+/** Audit AGT-04: a pulse running this long is treated as stuck (3× the exposed cadence, at least 3 minutes). */
+export const STALL_MS = Math.max(3 * DOCTRINE.cadence.pulse_seconds_exposed * 1000, 180_000);
 
 export class LocalCortex {
   readonly brain: Brain;
@@ -211,16 +229,19 @@ export class LocalCortex {
         : null);
 
     // ADR-072: built-in free providers + the user's endpoints, as one pool in round robin
-    const built = buildPool(
-      {
-        ...DOCTRINE,
-        universe: { ...DOCTRINE.universe, enabled: DOCTRINE.universe.enabled && Boolean(alpacaKey) },
-      },
-      buildProviders(k),
-      cfg.llm,
-    );
-    // ADR-075: the user's court capacity (more hearings per day for pools with paid models)
-    const cap = cfg.court.max_per_day;
+    // ADR-099: the chains healed from this install's model catalog and benchmark, plus the models the user allowed
+    const base = healed(home, {
+      ...DOCTRINE,
+      universe: { ...DOCTRINE.universe, enabled: DOCTRINE.universe.enabled && Boolean(alpacaKey) },
+    }).d;
+    const catalog = loadCatalog(home);
+    const raw = buildPool(base, buildProviders(k), cfg.llm, undefined, catalog);
+    // a second pass orders the whole pool (endpoints and catalog models too) by benchmark score
+    const built = { ...raw, d: healChains(raw.d, catalog, loadBench(home)).d };
+    // ADR-075 / ADR-097: the user's court capacity. Unlimited by default once the pool has a paid model (or when the
+    // user switches it on); a free-only pool keeps the doctrine's default so its providers' daily quotas last the day.
+    const unlimited = courtUnlimited(cfg, built.report);
+    const cap = unlimited ? UNLIMITED_HEARINGS : cfg.court.max_per_day;
     const d = cap
       ? {
           ...built.d,
@@ -277,6 +298,8 @@ export class LocalCortex {
       // ADR-081: on the user's computer only their own Cloudflare AI allowance is a real limit (if they use it)
       budgetScope: this.clefMode === "cloudflare" ? "workers_ai" : "none",
       adoptAccountSize: true,
+      // ADR-096: the app keeps running between pulses, so open court debates in the background
+      background: !o.overrides?.market,
     });
     this.broker = broker;
     this.liveBroker = live;
@@ -392,16 +415,85 @@ export class LocalCortex {
 
   /** One pulse (also what the timer runs). */
   async pulse(): Promise<PulseReport> {
-    const run = this.brain.pulse();
+    this.pulseStartedAt = Date.now();
+    const run = this.brain.pulse().finally(() => {
+      this.pulseStartedAt = null;
+    });
     this.inflight = run.then(
       () => undefined,
       () => undefined,
     );
     const r = await run;
     this.lastReport = r;
+    this.syncPower();
     return r;
   }
   private inflight: Promise<void> = Promise.resolve();
+  private pulseStartedAt: number | null = null;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
+  private guarding = false;
+
+  /**
+   * Audit AGT-04: a pulse that runs far past its cadence is stuck on some await. Alarm, and keep the stops working on
+   * their own timer until it finishes (every pulse step is also time-boxed inside the brain).
+   */
+  private catalogTimer: ReturnType<typeof setInterval> | null = null;
+  private refreshing = false;
+
+  /** ADR-099: refresh the catalog (and benchmark when due); restart the court on healed chains when they changed. */
+  async refreshModels(force = false): Promise<{ changed: boolean; report: unknown } | null> {
+    if (this.refreshing) return null;
+    this.refreshing = true;
+    try {
+      const cfg = this.o.cfg;
+      const r = await refreshCatalog({
+        home: this.o.home,
+        d: DOCTRINE,
+        keys: cfg.keys,
+        pool: cfg.llm,
+        providers: buildPool(DOCTRINE, buildProviders(cfg.keys), cfg.llm).providers,
+        force,
+      });
+      if (r.changed) {
+        console.log(`[models] chains healed: ${JSON.stringify(r.report)}`);
+        this.o.onModelsChanged?.();
+      }
+      return { changed: r.changed, report: r.report };
+    } catch (e) {
+      console.error(`[models] catalog refresh failed: ${String(e).slice(0, 200)}`);
+      return null;
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  /** ADR-096: the OS power assertion (keeps the computer awake during hearings, or always). */
+  readonly power = new PowerGuard();
+
+  /** Hold or release the power assertion for what is running now. */
+  syncPower(): void {
+    const mode = this.o.cfg.power.keep_awake;
+    this.power.set("Savant is running", mode === "always");
+    this.power.set("a court hearing is in session", mode !== "off" && this.brain.hearingsRunning() > 0);
+  }
+
+  async watch(now = Date.now()): Promise<"ok" | "stalled"> {
+    this.syncPower();
+    const started = this.pulseStartedAt;
+    if (started === null || now - started < STALL_MS) return "ok";
+    await this.brain
+      .alarm(
+        "pulse-stalled",
+        `⚠️ A market check has been running for ${Math.round((now - started) / 60_000)} min. Savant keeps checking your stops on their own until it finishes; no new trades meanwhile.`,
+      )
+      .catch(() => undefined);
+    if (!this.guarding) {
+      this.guarding = true;
+      await this.brain.protectOnly().catch(() => 0);
+      this.guarding = false;
+    }
+    return "stalled";
+  }
 
   private schedule(seconds: number): void {
     if (this.stopped) return;
@@ -434,11 +526,23 @@ export class LocalCortex {
       this.server.listen(this.o.cfg.port, this.o.cfg.lan.enabled ? "0.0.0.0" : this.o.cfg.bind, () => res());
     });
     this.schedule(1);
+    this.watchdog = setInterval(() => void this.watch(), 15_000);
+    this.watchdog.unref?.();
+    // ADR-099: refresh the model catalog shortly after start and daily; benchmarks run weekly or when it changes
+    if (!this.o.overrides) {
+      const t = setTimeout(() => void this.refreshModels(), 120_000);
+      t.unref?.();
+      this.catalogTimer = setInterval(() => void this.refreshModels(), 86_400_000);
+      this.catalogTimer.unref?.();
+    }
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.watchdog) clearInterval(this.watchdog);
+    if (this.catalogTimer) clearInterval(this.catalogTimer);
+    this.power.stop();
     await this.inflight; // never close the databases under a running pulse
     await new Promise<void>((res) => {
       if (!this.server) return res();
@@ -465,6 +569,11 @@ export class LocalCortex {
       mode: this.o.cfg.mode,
       now: Date.now(),
       last_pulse_at: last === null ? null : Number(last),
+      // audit AGT-04: how long the current pulse has been running (null when idle)
+      power: { held: this.power.held, why: this.power.why },
+      hearings_running: this.brain.hearingsRunning(),
+      pulse_running_s:
+        this.pulseStartedAt === null ? null : Math.round((Date.now() - this.pulseStartedAt) / 1000),
       constitution_sha256: CONSTITUTION_SHA256,
       doctrine_sha256: DOCTRINE_SHA256,
       hot_schema_version: HOT_SCHEMA_VERSION,
@@ -496,6 +605,26 @@ export class LocalCortex {
         return m;
       },
       court: (s, by) => b.requestCourt(s, by),
+      // ADR-098: court replays, and their plain-English layer only when the user switched it on (it costs model calls)
+      hearings: async (n) => b.hearingList(n),
+      hearing: async (id) => {
+        const h = b.hearing(id);
+        return h
+          ? {
+              ...h,
+              steps: replaySteps(h.session),
+              eli5_enabled: Boolean(loadConfig(this.o.home)?.eli5.enabled),
+            }
+          : null;
+      },
+      explainHearing: async (id) =>
+        loadConfig(this.o.home)?.eli5.enabled
+          ? b.explainHearing(id)
+          : {
+              ok: false,
+              message:
+                "Turn on plain-English replays in Settings → AI models first (it uses extra AI calls).",
+            },
       why: (s) => b.why(s),
       roast: (s, t, by) => b.requestRoast(s, t, by),
       book: async () => {
@@ -666,9 +795,24 @@ export function resolveClef(cfg: LocalConfig, built: ReturnType<typeof buildPool
     return { clef: new WorkersAiClef(cf), clairic: new WorkersAiClairic(cf), label: "cloudflare" };
   }
   if (cfg.clef === "cloudflare") return { clef: null, clairic: null, label: "off" };
-  // the stand-in: a paid model if the user has one (usually the strongest), else the first in the pool
+  // the stand-in: a paid or local model if the user has one, else the free model with the largest daily quota.
+  // Audit AGT-05: Tier 1 wants up to ~150 calls a day; Gemini Flash's free tier allows 20, so it goes last.
   const entries = built.report.entries;
-  const pick = entries.find((e) => e.tier === "paid") ?? entries[0];
+  const quota = (e: (typeof entries)[number]) =>
+    e.tier === "paid"
+      ? 0
+      : e.tier === "local"
+        ? 1
+        : e.provider === "groq" && /gpt-oss-20b/.test(e.model)
+          ? 2
+          : e.provider === "groq"
+            ? 3
+            : e.provider === "nim"
+              ? 4
+              : e.provider === "gemini"
+                ? 9
+                : 5;
+  const pick = [...entries].sort((a, b) => quota(a) - quota(b))[0];
   const prov = pick ? built.providers[pick.provider] : undefined;
   if (pick && prov)
     return {

@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import { CONSTITUTION, CONSTITUTION_SHA256, DOCTRINE, DOCTRINE_SHA256 } from "../src/generated/config.ts";
 import { CHECKOUT_URL, ORDERS_URL, PLANS, TRIAL_DAYS } from "./checkout.ts";
+import { faqHtml, jsonLd } from "./seo.ts";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 
@@ -134,6 +135,9 @@ function tokens(): Record<string, string> {
     CAL_N: String(f.calibration.min_outcomes_before_trusting),
     MIN_STOP_ATR: `${DOCTRINE.sizing.min_stop_atr_multiple}`,
     HURDLE: `${DOCTRINE.fees.hurdle_multiple}`,
+    // ADR-101: structured data and the visible FAQ it describes
+    JSON_LD: jsonLd(),
+    FAQ_HTML: faqHtml(),
   };
 }
 
@@ -176,7 +180,8 @@ function csp(): Plugin {
 }
 
 const HUB_PROXY = {
-  target: "https://hub.getsavant.pro",
+  // HUB_PROXY=http://127.0.0.1:8791 points the pages at a local hub (wrangler dev) instead of production
+  target: process.env.HUB_PROXY || "https://hub.getsavant.pro",
   changeOrigin: true,
   rewrite: (p: string) => p.replace(/^\/hub/, ""),
 };
@@ -187,7 +192,19 @@ export default defineConfig({
   plugins: [fromConfig(), csp()],
   // /hub mirrors the vercel.json rewrite to the community hub (ADR-095), so the community pages work locally too
   server: { port: 5175, strictPort: true, proxy: { "/hub": HUB_PROXY } },
-  preview: { port: 5176, strictPort: true, proxy: { "/hub": HUB_PROXY } },
+  // AUDIT FX-03: SAVANT_API_PROXY=http://127.0.0.1:8791 sends /api to a local licence server (production: vercel.json)
+  preview: {
+    port: Number(process.env.PREVIEW_PORT) || 5176,
+    strictPort: true,
+    proxy: {
+      "/hub": HUB_PROXY,
+      ...(process.env.SAVANT_API_PROXY
+        ? {
+            "/api": { target: process.env.SAVANT_API_PROXY, rewrite: (p: string) => p.replace(/^\/api/, "") },
+          }
+        : {}),
+    },
+  },
   build: {
     outDir: fileURLToPath(new URL("../landing-dist", import.meta.url)),
     rollupOptions: {
@@ -199,6 +216,7 @@ export default defineConfig({
         activate: fileURLToPath(new URL("./activate/index.html", import.meta.url)),
         community: fileURLToPath(new URL("./community/index.html", import.meta.url)),
         communityAgent: fileURLToPath(new URL("./community/agent/index.html", import.meta.url)),
+        impact: fileURLToPath(new URL("./impact/index.html", import.meta.url)),
       },
     },
     emptyOutDir: true,

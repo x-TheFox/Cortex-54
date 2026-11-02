@@ -75,10 +75,28 @@ export const LocalConfigSchema = z.object({
   /** ADR-087: which legal set the user accepted, and when (null = not yet; entries stay held until they do) */
   terms: z.object({ version: z.string(), accepted_at: z.number().int() }).nullable().default(null),
   /**
-   * ADR-075: court hearings per UTC day. Unset = the doctrine's 12 (protects free-tier quotas). A pool with paid
-   * models can run more; each hearing is ~9 model calls.
+   * ADR-075 / ADR-097: court hearings per UTC day. `unlimited` (the default for a pool with paid models, and a switch
+   * in Settings for anyone) removes the cap; otherwise `max_per_day`, or the doctrine's 12 when unset, which keeps a
+   * free-only pool inside its providers' daily quotas. Open court makes a hearing many model calls.
    */
-  court: z.object({ max_per_day: z.number().int().min(1).max(60).optional() }).default({}),
+  court: z
+    .object({
+      max_per_day: z.number().int().min(1).max(10_000).optional(),
+      unlimited: z.boolean().optional(),
+    })
+    .default({}),
+  /**
+   * ADR-096: keep the computer awake. hearings = while a court hearing runs (default); always = while Savant runs;
+   * off = never. Only system sleep is held; the display may still turn off.
+   */
+  power: z
+    .object({ keep_awake: z.enum(["hearings", "always", "off"]).default("hearings") })
+    .default({ keep_awake: "hearings" }),
+  /**
+   * ADR-098: plain-English replays. Off by default: when on, an extra model call explains each hearing, tool call and
+   * log line "like I'm 5" when you open its replay, which costs extra tokens on your models.
+   */
+  eli5: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   /**
    * ADR-076: phone access on this Wi-Fi. Off = the app listens on this computer only. On = it also answers on the
    * local network (plain HTTP inside your network), and a phone pairs with a one-time QR code. Settings and keys can

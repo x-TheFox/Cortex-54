@@ -6,15 +6,11 @@
 import type { TriageItem } from "../clef/triage.ts";
 import type { Batch, Dossier } from "../contracts/batch.ts";
 import type { DecisionContract } from "../contracts/decision-contract.ts";
-import type { Rebuttal, SeatOpinion } from "../court/court.ts";
+import type { SeatOpinion } from "../court/court.ts";
 import { COLORS, type DiscordMessage } from "../discord/notifier.ts";
 import type { BookSummary } from "../portfolio/book.ts";
-import { stagnant } from "../portfolio/exits.ts";
 import type { Band } from "../risk/CircuitBreakerLadder.ts";
-import type { Facts } from "../risk/scar.ts";
-import { atr } from "../strategy/indicators.ts";
 import type { StatusView } from "./Brain.ts";
-import { one } from "./store.ts";
 
 const TERMINAL_KINDS: Record<string, string> = {
   ENTRY_FACTS: "🎯",
@@ -331,6 +327,25 @@ export interface CourtSession {
     by: string;
   };
   panel?: SeatOpinion[];
+  /** ADR-096: who sat, and the open-court debate */
+  seats?: { id: string; title: string; emoji: string; kind: string }[];
+  openCourt?: {
+    ended: string;
+    passes: number;
+    ms: number;
+    toolCalls: number;
+    turns: {
+      seat: string;
+      title: string;
+      emoji: string;
+      pass: number;
+      kind: string;
+      text: string;
+      stance?: string;
+      tools: { tool: string; input: string; ok: boolean }[];
+      by: string | null;
+    }[];
+  };
   synth?: {
     winProb: number;
     calibrated: number;
@@ -686,6 +701,43 @@ export function courtSessionCard(s: CourtSession): DiscordMessage {
           1000,
         ),
       })),
+    });
+  }
+  if (s.openCourt && s.openCourt.turns.length > 0) {
+    // ADR-096: the open floor. Rested seats read as courtroom phrasing (raw NO_OBJECTION is never shown).
+    const oc = s.openCourt;
+    const said = oc.turns.filter(
+      (t) => t.kind === "statement" || t.kind === "withdraw" || t.kind === "directive",
+    );
+    const rested = oc.turns.filter(
+      (t) => t.kind === "rest" && t.pass === Math.max(...oc.turns.map((x) => x.pass)),
+    );
+    const ended =
+      oc.ended === "unanimous"
+        ? "every seat rested"
+        : oc.ended === "withdrawn"
+          ? "the bull withdrew"
+          : oc.ended === "hard_cutoff"
+            ? "time ran out; the jury ruled on the record"
+            : "the seats' models stopped answering";
+    embeds.push({
+      title: `🗣️ Open court — ${oc.passes} round${oc.passes === 1 ? "" : "s"}, ${said.length} statement${said.length === 1 ? "" : "s"}, ${oc.toolCalls} fact check${oc.toolCalls === 1 ? "" : "s"}`,
+      description: cut(
+        [
+          ...said
+            .slice(-8)
+            .map(
+              (t) =>
+                `${t.emoji} **${t.title}**${t.stance ? ` (${STANCE[t.stance] ?? t.stance})` : ""}: ${clean(t.text).slice(0, 300)}${t.tools.length ? ` _[checked: ${t.tools.map((x) => x.tool).join(", ")}]_` : ""}`,
+            ),
+          ...(rested.length ? [`*${rested.map((t) => `${t.emoji} ${t.text}`).join(" · ")}*`] : []),
+        ].join("\n"),
+        3800,
+      ),
+      color: COLORS.cyan,
+      footer: {
+        text: `${ended} · ${Math.round(oc.ms / 60_000)} min${s.seats ? ` · ${s.seats.length} seats` : ""}`,
+      },
     });
   }
   const ruling: Field[] = [];

@@ -1,3 +1,4 @@
+import { pooled, splitKeys } from "./keypool.ts";
 import { type Fetcher, GeminiProvider, type LlmProvider, OpenAICompatProvider } from "./llm.ts";
 
 export { DEFAULT_URL, lineage, listModels, normalizeUrl, PRESETS, presetForKey } from "./models.ts";
@@ -18,30 +19,41 @@ export interface ProviderKeys {
 export function buildProviders(k: ProviderKeys, fetcher?: Fetcher): Partial<Record<string, LlmProvider>> {
   const p: Partial<Record<string, LlmProvider>> = {};
   const f = fetcher ?? ((u: string, i?: RequestInit) => fetch(u, i));
-  if (k.GEMINI_API_KEY) p.gemini = new GeminiProvider(k.GEMINI_API_KEY, f);
-  if (k.GROQ_API_KEY)
-    p.groq = new OpenAICompatProvider(
-      "groq",
-      "https://api.groq.com/openai/v1",
-      k.GROQ_API_KEY,
-      { jsonMode: true, reasoningEffort: "low" },
-      f,
-    );
-  if (k.NVIDIA_API_KEY)
-    p.nim = new OpenAICompatProvider(
-      "nim",
-      "https://integrate.api.nvidia.com/v1",
-      k.NVIDIA_API_KEY,
-      { jsonMode: false, minOutputTokens: 4096 },
-      f,
-    );
-  if (k.OPENROUTER_API_KEY)
-    p.openrouter = new OpenAICompatProvider(
-      "openrouter",
-      "https://openrouter.ai/api/v1",
-      k.OPENROUTER_API_KEY,
-      { jsonMode: true },
-      f,
-    );
+  // ADR-097: each key field may hold several keys; they become the provider's inner round-robin pool
+  const add = (name: string, raw: string | undefined, make: (key: string) => LlmProvider) => {
+    const one = pooled(name, splitKeys(raw), make);
+    if (one) p[name] = one;
+  };
+  add("gemini", k.GEMINI_API_KEY, (key) => new GeminiProvider(key, f));
+  add(
+    "groq",
+    k.GROQ_API_KEY,
+    (key) =>
+      new OpenAICompatProvider(
+        "groq",
+        "https://api.groq.com/openai/v1",
+        key,
+        { jsonMode: true, reasoningEffort: "low" },
+        f,
+      ),
+  );
+  add(
+    "nim",
+    k.NVIDIA_API_KEY,
+    (key) =>
+      new OpenAICompatProvider(
+        "nim",
+        "https://integrate.api.nvidia.com/v1",
+        key,
+        { jsonMode: false, minOutputTokens: 4096 },
+        f,
+      ),
+  );
+  add(
+    "openrouter",
+    k.OPENROUTER_API_KEY,
+    (key) =>
+      new OpenAICompatProvider("openrouter", "https://openrouter.ai/api/v1", key, { jsonMode: true }, f),
+  );
   return p;
 }

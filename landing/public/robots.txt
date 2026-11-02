@@ -1,5 +1,8 @@
 User-agent: *
 Allow: /
 Disallow: /welcome/
+Disallow: /account/
+Disallow: /activate/
+Disallow: /hub/
 
 Sitemap: https://getsavant.pro/sitemap.xml

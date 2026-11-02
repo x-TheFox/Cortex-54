@@ -3,6 +3,7 @@ import type { SettingsView } from "./api.ts";
 import {
   AlertsSection,
   ClefSection,
+  Eli5Section,
   LicenseSection,
   ModelsSection,
   TradingSection,
@@ -35,7 +36,7 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
             <h2 className="onb-title">Let's get your robot ready.</h2>
             <p className="onb-lead">
               Savant trades on its own: it reads the news, argues every trade with two AI models, and a risk
-              engine decides the size. Right now it is running in <b>demo mode</b> with no keys. Five short
+              engine decides the size. Right now it is running in <b>demo mode</b> with no keys. Six short
               steps, with links to every free key, finish the setup. You can change anything later in
               SETTINGS.
             </p>
@@ -106,6 +107,7 @@ export function Onboarding({ s, reload, close }: { s: SettingsView; reload: () =
               <>
                 <p className="onb-lead">Optional. Everything always shows up in the app's FEED.</p>
                 <AlertsSection s={s} save={save} saving={saving} />
+                <Eli5Section s={s} save={save} saving={saving} />
               </>
             )}
             {step === 5 && (

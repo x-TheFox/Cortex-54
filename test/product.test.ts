@@ -218,16 +218,20 @@ describe("settings: court capacity, phone access, keys, reset (ADR-075/076)", ()
       ...extra,
     });
 
-  it("saves the court capacity (1–60, null = default) and phone access", async () => {
+  it("saves the court capacity (1–10,000, unlimited, null = default) and phone access", async () => {
     const h = tmp();
     saveConfig(newConfig("demo"), h);
     const s = make(h);
     expect((await s.save({ court: { max_per_day: 24 }, lan: { enabled: true } })).ok).toBe(true);
     expect(loadConfig(h)).toMatchObject({ court: { max_per_day: 24 }, lan: { enabled: true } });
-    await s.save({ court: { max_per_day: 999 } });
+    await s.save({ court: { max_per_day: 99_999 } });
     expect(loadConfig(h)?.court.max_per_day).toBe(24); // out of range: unchanged
     await s.save({ court: { max_per_day: null } });
     expect(loadConfig(h)?.court.max_per_day).toBeUndefined();
+    await s.save({ court: { unlimited: true } }); // ADR-097
+    expect(loadConfig(h)?.court.unlimited).toBe(true);
+    await s.save({ power: { keep_awake: "always" }, eli5: { enabled: true } });
+    expect(loadConfig(h)).toMatchObject({ power: { keep_awake: "always" }, eli5: { enabled: true } });
   });
 
   it("pairing needs phone access on; reset needs the typed word", async () => {

@@ -1,5 +1,6 @@
+import { useEffect, useState } from "react";
 import type { CourtRow, MemoryView, OptionsRow, RejectionRow, StatusView } from "./api.ts";
-import { useResource } from "./api.ts";
+import { post, useResource } from "./api.ts";
 import { ago, Bar, parse, pct, usd, when } from "./instruments.tsx";
 
 function Loading() {
@@ -148,11 +149,157 @@ function Prob(props: { label: string; value: number | undefined; tone: string })
   );
 }
 
+// ------------------------------------------------------------------ court replays (ADR-098)
+
+interface HearingRow {
+  sprint_id: string;
+  symbol: string;
+  arena: string;
+  started_at: number;
+  ended_at: number;
+  ok: number;
+  verdict: string;
+}
+interface ReplayStep {
+  id: number;
+  who: string;
+  emoji: string;
+  kind: string;
+  text: string;
+  detail?: string;
+}
+interface HearingView {
+  steps: ReplayStep[];
+  eli5: { summary: string; steps: { id: number; plain: string }[] } | null;
+  eli5_enabled: boolean;
+}
+
+function Replay({ id, onClose }: { id: string; onClose: () => void }) {
+  const h = useResource<HearingView>(`/api/hearings?id=${id}`);
+  const [i, setI] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [eli5, setEli5] = useState<HearingView["eli5"]>(null);
+  const [plain, setPlain] = useState(false);
+  const [msg, setMsg] = useState("");
+  const steps = h.data?.steps ?? [];
+  useEffect(() => {
+    if (h.data?.eli5) setEli5(h.data.eli5);
+  }, [h.data]);
+  useEffect(() => {
+    if (!playing) return;
+    if (i >= steps.length - 1) {
+      setPlaying(false);
+      return;
+    }
+    const t = setTimeout(() => setI((x) => x + 1), 2600);
+    return () => clearTimeout(t);
+  }, [playing, i, steps.length]);
+  if (h.loading && !h.data) return <Loading />;
+  if (h.error || !h.data) return <Failed error={h.error ?? "not found"} />;
+  const step = steps[i];
+  const explain = async () => {
+    if (eli5) return setPlain((x) => !x);
+    setMsg("Asking your AI models for a plain-English version…");
+    const r = await post<{ ok: boolean; message: string; eli5?: HearingView["eli5"] }>("/api/settings/eli5", {
+      id,
+    });
+    setMsg(r.ok ? "" : r.message);
+    if (r.ok && r.eli5) {
+      setEli5(r.eli5);
+      setPlain(true);
+    }
+  };
+  const plainOf = (sid: number) => eli5?.steps.find((x) => x.id === sid)?.plain;
+  return (
+    <div className="replay">
+      <div className="court-head">
+        <span className="white">REPLAY</span>
+        <span className="dimtext">
+          step {i + 1} of {steps.length}
+        </span>
+        <span className="spacer" />
+        <button type="button" className="chip" onClick={onClose}>
+          CLOSE
+        </button>
+      </div>
+      {plain && eli5 && <p className="prose replay-eli5">{eli5.summary}</p>}
+      {step && (
+        <article className={`replay-step k-${step.kind}`} aria-live="polite">
+          <p className="replay-who">
+            <span aria-hidden="true">{step.emoji}</span> {step.who}
+            {step.detail && <span className="dimtext"> · {step.detail}</span>}
+          </p>
+          <p className="prose">{plain ? (plainOf(step.id) ?? step.text) : step.text}</p>
+          {plain && plainOf(step.id) && <p className="sub">Original: {step.text.slice(0, 300)}</p>}
+        </article>
+      )}
+      <div className="set-actions">
+        <button type="button" className="chip" disabled={i === 0} onClick={() => setI(i - 1)}>
+          ← BACK
+        </button>
+        <button type="button" className="chip go" onClick={() => setPlaying((p) => !p)}>
+          {playing ? "PAUSE" : "PLAY"}
+        </button>
+        <button type="button" className="chip" disabled={i >= steps.length - 1} onClick={() => setI(i + 1)}>
+          NEXT →
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={Math.max(0, steps.length - 1)}
+          value={i}
+          aria-label="Replay position"
+          onChange={(e) => setI(Number(e.target.value))}
+        />
+        {h.data.eli5_enabled ? (
+          <button type="button" className="chip" onClick={explain}>
+            {plain ? "ORIGINAL WORDS" : "EXPLAIN LIKE I'M 5"}
+          </button>
+        ) : (
+          <span className="dimtext">Plain-English replays: Settings → AI models (uses extra AI calls)</span>
+        )}
+      </div>
+      {msg && <p className="note-line amber">{msg}</p>}
+    </div>
+  );
+}
+
+function Replays() {
+  const list = useResource<HearingRow[]>("/api/hearings?limit=30", 60_000);
+  const [open, setOpen] = useState<string | null>(null);
+  if (open) return <Replay id={open} onClose={() => setOpen(null)} />;
+  if (list.loading && !list.data) return <Loading />;
+  if (list.error) return <Failed error={list.error} />;
+  if ((list.data ?? []).length === 0)
+    return (
+      <p className="empty">
+        No hearings recorded yet. Each hearing the court holds can be replayed here, step by step.
+      </p>
+    );
+  return (
+    <ul className="plain-list replay-list">
+      {(list.data ?? []).map((r) => (
+        <li key={r.sprint_id}>
+          <button type="button" className="chip" onClick={() => setOpen(r.sprint_id)}>
+            ▶ {r.symbol}
+          </button>{" "}
+          <span className="dimtext">{when(r.started_at)}</span>{" "}
+          <span className={r.ok ? "green" : "dimtext"}>{r.verdict.split("\n")[0]?.slice(0, 120)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function FunnelPage() {
   const court = useResource<CourtRow[]>("/api/court", 60_000);
   const rej = useResource<RejectionRow[]>("/api/rejections", 60_000);
   return (
     <div className="sd-grid">
+      <section className="sd-block">
+        <h4>Court replays</h4>
+        <Replays />
+      </section>
       <section className="sd-block">
         <h4>Court sessions</h4>
         {court.loading && !court.data ? (

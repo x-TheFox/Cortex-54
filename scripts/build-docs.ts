@@ -60,6 +60,13 @@ function shell(title: string, body: string, current: string, titles: Record<stri
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'" />
 <title>${esc(title)} · Savant</title>
 <meta name="description" content="${esc(title)}: help for Savant, the autonomous trading agent you run on your own computer." />
+<link rel="canonical" href="https://getsavant.pro/docs/${current === "index" ? "" : `${current}/`}" />
+<meta property="og:type" content="article" />
+<meta property="og:site_name" content="Savant" />
+<meta property="og:title" content="${esc(title)} · Savant" />
+<meta property="og:url" content="https://getsavant.pro/docs/${current === "index" ? "" : `${current}/`}" />
+<meta property="og:image" content="https://getsavant.pro/og.png" />
+<meta name="twitter:card" content="summary" />
 <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
 <style>
 :root { color-scheme: light dark; --ink:#15130f; --paper:#efebe3; --paper2:#e7e2d6; --rule:#d3cbbb; --dim:#5e574b; }

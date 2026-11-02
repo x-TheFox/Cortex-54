@@ -250,7 +250,7 @@ export function App() {
                 </span>
               </p>
               <p className="alert-action">OPEN THE DASHBOARD FROM THE SAVANT APP (TRAY → OPEN)</p>
-              <p className="alert-action">OR RUN `savant link` · OR /terminal IN DISCORD</p>
+              <p className="alert-action">OR RUN `savant link` IN A TERMINAL</p>
               <p className="alert-action">EACH LINK WORKS ONCE, FOR 10 MINUTES</p>
             </div>
           </div>

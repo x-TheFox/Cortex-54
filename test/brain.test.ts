@@ -16,6 +16,7 @@ import { HOT_SCHEMA } from "../src/cortex/hot-schema.ts";
 import { labDoctrine } from "../src/cortex/lab.ts";
 import { buildEvidence } from "../src/court/evidence.ts";
 import { type LlmProvider, LlmRouter } from "../src/court/llm.ts";
+import { replaySteps } from "../src/court/replay.ts";
 import { NullNotifier } from "../src/discord/notifier.ts";
 import { Journal, verifyChain } from "../src/journal/Journal.ts";
 import type { AccountId } from "../src/lib/ids.ts";
@@ -61,6 +62,7 @@ function setup(
     clairic?: ClairicApi;
     adoptAccountSize?: boolean;
     budgetScope?: "cloudflare" | "workers_ai" | "none";
+    background?: boolean;
   } = {},
 ) {
   let now = T0;
@@ -95,6 +97,7 @@ function setup(
     clairic: opts.clairic ?? null,
     ...(opts.adoptAccountSize ? { adoptAccountSize: true } : {}),
     ...(opts.budgetScope ? { budgetScope: opts.budgetScope } : {}),
+    ...(opts.background ? { background: true } : {}),
   });
   brain.init({ test: true });
   return {
@@ -955,6 +958,32 @@ describe("court end-to-end (Phase 3)", () => {
     async complete(model, req) {
       calls.push(model);
       const sys = req.system;
+      if (sys.includes("5-year-old")) {
+        const ids = [...req.user.matchAll(/"id":(\d+)/g)].map((m) => Number(m[1]));
+        return {
+          text: JSON.stringify({
+            summary: "Two robots argued about buying bitcoin and a judge decided.",
+            steps: ids.map((id) => ({ id, plain: `step ${id} in plain words` })),
+          }),
+          inputTokens: 100,
+          outputTokens: 50,
+        };
+      }
+      if (sys.includes("OPEN COURT PROTOCOL"))
+        return {
+          text: req.user.includes("[Quant Analyst")
+            ? JSON.stringify({ action: "no_objection" })
+            : sys.includes("Quant Analyst")
+              ? JSON.stringify({
+                  action: "speak",
+                  statement: "Checked: reward to risk is 1.5 on the calculator.",
+                  stance: "support",
+                  confidence: 0.7,
+                })
+              : JSON.stringify({ action: "no_objection" }),
+          inputTokens: 100,
+          outputTokens: 20,
+        };
       const out = sys.includes("Bull Advocate again")
         ? rebuttalJson
         : sys.includes("expert panel")
@@ -1001,6 +1030,67 @@ describe("court end-to-end (Phase 3)", () => {
     source: "benzinga",
     url: null,
   };
+
+  it("open court (ADR-096): the opening runs in the pulse, the debate in the background, the jury at the next pulse", async () => {
+    const calls: string[] = [];
+    let now = T0;
+    const llm = new LlmRouter(
+      { gemini: provider(bullJson, calls), groq: provider(bearJson, calls) },
+      doctrine,
+      () => now,
+    );
+    const clef = new ScriptedClef(answers);
+    const t = setup({ clef, llm, background: true });
+    await t.brain.ingestBatch(cryptoBatch);
+    t.market.set("BTC/USD", 130, 130.02);
+    t.market.news.push(btcNews);
+    const r1 = await t.brain.pulse();
+    expect(r1.courtContracts).toBe(0); // the floor is open; nothing is decided inside this pulse
+    expect(t.brain.hearingList()).toHaveLength(0); // no ruling yet (the fake models may already have rested)
+    for (let i = 0; i < 50 && t.brain.hearingsRunning() > 0; i++)
+      await new Promise((res) => setTimeout(res, 0));
+    expect(t.brain.hearingsRunning()).toBe(0);
+    t.advance(60_000);
+    now = T0 + 60_000;
+    const r2 = await t.brain.pulse();
+    expect(r2.courtContracts).toBe(1);
+    const kinds = t.d1.db
+      .prepare("SELECT kind FROM journal WHERE kind LIKE 'OPEN_COURT%' OR kind = 'SEATS' ORDER BY seq")
+      .all() as { kind: string }[];
+    expect(kinds.map((k) => k.kind)).toEqual(["SEATS", "OPEN_COURT_START", "OPEN_COURT"]);
+    const list = t.brain.hearingList();
+    expect(list).toHaveLength(1);
+    const rec = t.brain.hearing(list[0]?.sprint_id as string);
+    const oc = rec?.session.openCourt;
+    expect(oc?.ended).toBe("unanimous");
+    expect(oc?.turns.some((x) => x.kind === "statement" && x.title === "Quant Analyst")).toBe(true);
+    expect(JSON.stringify(oc)).not.toContain("NO_OBJECTION");
+    expect(rec?.session.seats?.map((s) => s.id).slice(0, 8)).toEqual([
+      "bull",
+      "bear",
+      "quant",
+      "risk",
+      "macro",
+      "devil",
+      "execution",
+      "clerk",
+    ]);
+    const card = t.notifier.sent.find(
+      (m) => m.channel === "court" && m.msg.embeds?.[0]?.title?.startsWith("⚖️ Savant COURT"),
+    );
+    expect(JSON.stringify(card?.msg)).toContain("Open court");
+    // ADR-098: the replay, and its plain-English layer (made once, then kept)
+    const steps = replaySteps(rec?.session as never);
+    expect(steps[0]?.kind).toBe("case");
+    expect(steps.at(-1)?.kind).toBe("verdict");
+    expect(steps.some((x) => x.kind === "rest")).toBe(true);
+    const e1 = await t.brain.explainHearing(list[0]?.sprint_id as string);
+    expect(e1.ok).toBe(true);
+    expect(e1.eli5?.steps).toHaveLength(steps.length);
+    const n = calls.length;
+    expect((await t.brain.explainHearing(list[0]?.sprint_id as string)).eli5?.summary).toMatch(/bitcoin/);
+    expect(calls.length).toBe(n); // cached
+  });
 
   it("headline → Tier 1 → Tier 2 → bull/bear/synth → COURT contract → paper order", async () => {
     const calls: string[] = [];
@@ -1689,9 +1779,14 @@ describe("batch dispatcher (ADR-032)", () => {
     await t.brain.pulse();
     const stale = t.notifier.sent.filter((m) => m.msg.content?.includes("research job `kronos`"));
     expect(stale).toHaveLength(1);
-    expect(t.d1.db.prepare("SELECT COUNT(*) AS n FROM journal WHERE kind = 'DISPATCH_STALE'").get()).toEqual({
-      n: 1,
-    });
+    // every warm-up job (audit AGT-01) is watched the same way; kronos is reported exactly once
+    expect(
+      t.d1.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM journal WHERE kind = 'DISPATCH_STALE' AND payload_json LIKE '%kronos%'",
+        )
+        .get(),
+    ).toEqual({ n: 1 });
   });
 
   it("audit W1-08: main's doctrine differing from the running one for > 2 h raises DEPLOY LAGGING", async () => {

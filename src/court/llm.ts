@@ -27,13 +27,55 @@ export interface LlmProvider {
 
 export type Fetcher = (url: string, init?: RequestInit) => Promise<Response>;
 
+/** Audit UX-09 / SEC-03: account and organisation ids, keys and emails never reach the FEED, alarms or logs. Pure. */
+export function scrubIds(s: string): string {
+  return s
+    .replace(/\b(org|organization|proj|project|user|acct|account)[-_][A-Za-z0-9]{6,}\b/gi, "$1_…")
+    .replace(
+      /"(organization|org_id|organization_id|project_id|user_id|request_id)"\s*:\s*"[^"]*"/gi,
+      '"$1":"…"',
+    )
+    .replace(/\b(sk|gsk|nvapi|AIza|AQ)[-_.][A-Za-z0-9_-]{10,}/g, "[key]")
+    .replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, "[email]");
+}
+
+/** A provider error as a person reads it: what happened, in words, plus a short scrubbed detail. Pure. */
+export function humanProviderError(provider: string, status: number, body: string): string {
+  const name =
+    (
+      { gemini: "Google Gemini", groq: "Groq", nim: "NVIDIA NIM", openrouter: "OpenRouter" } as Record<
+        string,
+        string
+      >
+    )[provider.replace(/~bear$/, "")] ?? provider;
+  let detail = "";
+  try {
+    const j = JSON.parse(body) as { error?: { message?: string } | string; message?: string };
+    detail = typeof j.error === "string" ? j.error : (j.error?.message ?? j.message ?? "");
+  } catch {
+    detail = body;
+  }
+  detail = scrubIds(detail.replace(/\s+/g, " ")).slice(0, 140);
+  const what =
+    status === 429
+      ? `${name} is rate-limiting this model right now; the court tries the next one`
+      : status === 401 || status === 403
+        ? `${name} rejected the key (check it in Settings → AI models)`
+        : status === 404
+          ? `${name} doesn't offer this model any more; the court uses another`
+          : status >= 500
+            ? `${name} is busy or down right now; the court tries the next model`
+            : `${name} refused the request`;
+  return detail ? `${what} (${detail})` : what;
+}
+
 export class ProviderError extends Error {
   constructor(
     readonly provider: string,
     readonly status: number,
     message: string,
   ) {
-    super(`${provider} ${status}: ${message.slice(0, 200)}`);
+    super(`${provider} ${status}: ${humanProviderError(provider, status, message)}`);
   }
 }
 
@@ -288,6 +330,37 @@ export class LlmRouter {
    */
   readonly cooldownMs = 5 * 60_000;
   private readonly cooling = new Map<string, number>();
+  /** ADR-097: providers whose every key is exhausted, until when */
+  private readonly providerCooling = new Map<string, number>();
+
+  /**
+   * ADR-097: true when every model the court could use is cooling down, rate-limited, over its daily quota or spend cap
+   * right now. The brain then holds new entries (REDUCE_ONLY semantics) until a provider recovers.
+   */
+  depleted(): boolean {
+    const r = this.d.llm_routing;
+    const hops = [...r.bull_chain, ...r.bear_chain, ...r.panel.chain].filter(
+      (h) => this.providers[h.provider],
+    );
+    if (hops.length === 0) return false;
+    const t = this.now();
+    return hops.every(
+      (h) =>
+        (this.cooling.get(`${h.provider}/${h.model}`) ?? 0) > t ||
+        (this.providerCooling.get(h.provider.replace(/~bear$/, "")) ?? 0) > t ||
+        (this.gate !== null && !this.gate.allow(h.provider)) ||
+        this.overBudget(h.provider),
+    );
+  }
+
+  /** ADR-097: the provider-level state the settings page shows. */
+  providerStatus(): { provider: string; cooling_until: number | null }[] {
+    const t = this.now();
+    return Object.keys(this.providers).map((p) => {
+      const u = this.providerCooling.get(p) ?? 0;
+      return { provider: p, cooling_until: u > t ? u : null };
+    });
+  }
 
   constructor(
     private readonly providers: Partial<Record<string, LlmProvider>>,
@@ -316,7 +389,8 @@ export class LlmRouter {
     }
     const t = this.now();
     const hot = (h: { provider: string; model: string }) =>
-      (this.cooling.get(`${h.provider}/${h.model}`) ?? 0) > t;
+      (this.cooling.get(`${h.provider}/${h.model}`) ?? 0) > t ||
+      (this.providerCooling.get(h.provider.replace(/~bear$/, "")) ?? 0) > t;
     chain = [...chain.filter((h) => !hot(h)), ...chain.filter(hot)];
     for (const hop of chain) {
       const family = this.familyOf(hop.provider, hop.model);
@@ -379,6 +453,12 @@ export class LlmRouter {
           log({ ...base, latencyMs: this.now() - t0, outcome, error: msg.slice(0, 200) });
           if (outcome !== "ERROR") {
             this.cooling.set(`${hop.provider}/${hop.model}`, this.now() + this.cooldownMs);
+            // ADR-097 outer tier: every key of this provider is exhausted → the whole provider sits out
+            if (
+              /all \d+ keys? rate-limited|keys? (?:rate-limited|revoked)/i.test(msg) ||
+              /\b(401|403)\b/.test(msg)
+            )
+              this.providerCooling.set(hop.provider.replace(/~bear$/, ""), this.now() + this.cooldownMs);
             break; // rate limits / timeouts: don't hammer, go to the next hop
           }
         }

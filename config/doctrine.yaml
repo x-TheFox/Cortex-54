@@ -182,7 +182,6 @@ llm_routing:
   families:
     gemini: google
     groq/openai/gpt-oss-120b: openai-oss
-    groq/qwen/qwen3.8-27b: qwen
     groq/openai/gpt-oss-20b: openai-oss
     nim/nvidia/nemotron-3-ultra-550b-a55b: nvidia
   # Probe 2026-10-26 (bull prompt, live BTC): gemini-3.5 ok in ~14 s (503 at peak), qwen ok in ~2 s, gpt-oss-20b ok in
@@ -191,16 +190,16 @@ llm_routing:
   # Canary 2026-10-26 (ADR-070): both Gemini models 503 "high demand", Qwen hit Groq's JSON validation and TPM caps,
   # Nemotron is reliable once NIM gets a 4,096-token output budget (it reasons first). Ordered so a cross-family
   # pair always exists: if only Groq's gpt-oss family answers for the bull, Nemotron (nvidia) takes the bear.
+  # Audit AGT-02 (2026-11-02): qwen3.8-27b is out of both chains: Groq's free tier allows it ~1,000 output tokens a
+  # minute (exhausted within two minutes of setup) and it fails Groq's JSON validation.
   bull_chain:
     - { provider: gemini, model: gemini-3.5-flash }
-    - { provider: groq, model: qwen/qwen3.8-27b }
     - { provider: groq, model: openai/gpt-oss-20b }
     - { provider: nim, model: nvidia/nemotron-3-ultra-550b-a55b }
   bear_chain:
     - { provider: groq, model: openai/gpt-oss-120b }
     - { provider: nim, model: nvidia/nemotron-3-ultra-550b-a55b }
     - { provider: gemini, model: gemini-3.5-flash }
-    - { provider: groq, model: qwen/qwen3.8-27b }
   panel: # ADR-044: the bull answers the bear, then three experts weigh in (in parallel) before the Clef judge
     rebuttal: true
     seats: [quant, risk, macro]
@@ -218,6 +217,20 @@ llm_routing:
   daily_call_caps: { gemini: 250, groq: 900, nim: 800, openrouter: 45 } # audit W2-06: under each free RPD
   max_retries_per_provider: 1
   timeout_ms: 60000
+  # ADR-096: open court. After the opening (bull, bear, rebuttal, panel), every seat — the 8 core seats plus up to 6
+  # specialists Clef picks from the 100+ pool for this case — debates with tools until all rest (NO_OBJECTION). At 30 min
+  # the clerk calls time; at 35 min the jury (Clef) rules on the record as it stands. Runs in the background in the app
+  # (never inside a pulse, so stops keep running); the cloud brain keeps the bounded hearing above.
+  open_court:
+    enabled: true
+    soft_minutes: 30
+    grace_minutes: 5
+    max_specialist_seats: 6
+    shortlist: 16
+    min_relevance: 0.35
+    max_context_chars: 24000
+    max_concurrent: 1
+    web_tools: true
 
 regime_gates:
   crypto_composite_min_for_longs: 40

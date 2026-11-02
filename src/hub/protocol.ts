@@ -120,13 +120,12 @@ export const unsigned = <T extends { sig: string }>(x: T): Omit<T, "sig"> => {
   return rest;
 };
 
-/** Journal kinds an agent publishes: what it decided and how it turned out. Never keys, never account ids. */
-export const PUBLIC_KINDS = new Set([
-  "CONTRACT",
-  "COURT",
-  "EXIT",
-  "EXCURSIONS",
-  "REVIEW",
-  "ROTATE",
-  "DAY_ROLL",
-]);
+/**
+ * Journal kinds an agent publishes: what it decided and how it turned out. Never keys, never account ids, never the
+ * account balance (audit HUB-02: DAY_ROLL carried daily equity, so it is no longer published). The hub enforces the
+ * same list (audit HUB-07).
+ */
+export const PUBLIC_KINDS = new Set(["CONTRACT", "COURT", "EXIT", "EXCURSIONS", "REVIEW", "ROTATE"]);
+
+/** Payload fields that would reveal an account's size; a row carrying one is never stored by the hub. */
+export const PRIVATE_FIELDS = /"(equity_cents|cash_cents|buying_power|balance|account_number)"\s*:/;

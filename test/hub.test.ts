@@ -28,6 +28,7 @@ function hubDb(): HubDb & { db: DatabaseSync } {
   const db = new DatabaseSync(":memory:");
   db.exec(readFileSync("hub/migrations/0001_hub.sql", "utf8"));
   db.exec(readFileSync("hub/migrations/0002_quotas.sql", "utf8"));
+  db.exec(readFileSync("hub/migrations/0003_moderation.sql", "utf8"));
   return {
     db,
     all: async <T>(q: string, ...b: unknown[]) => db.prepare(q).all(...(b as never[])) as T[],
@@ -40,17 +41,28 @@ function hubDb(): HubDb & { db: DatabaseSync } {
 const call = (db: HubDb, now: number) => async (url: string, init?: RequestInit) =>
   handleHub(new Request(url.startsWith("http") ? url : `https://hub.test${url}`, init), db, now);
 
-function chain(n: number, start = 0, prev = "0".repeat(64), t0 = 1_000): FeedRow[] {
+function chain(
+  n: number,
+  start = 0,
+  prev = "0".repeat(64),
+  t0 = 1_000,
+  pay: (i: number) => Record<string, unknown> = (i) => ({
+    symbol: "BTC/USD",
+    pnl_cents: i % 2 ? 40 : -20,
+    ret_pct: i % 2 ? 2 : -1,
+  }),
+  kind = "EXIT",
+): FeedRow[] {
   const rows: FeedRow[] = [];
   for (let i = 1; i <= n; i++) {
     const seq = start + i;
-    const payload = JSON.stringify({ symbol: "BTC/USD", pnl_cents: i % 2 ? 40 : -20 });
-    const sha = rowHash(prev, seq, t0 + seq, "EXIT", payload);
+    const payload = JSON.stringify(pay(i));
+    const sha = rowHash(prev, seq, t0 + seq, kind, payload);
     rows.push({
       seq,
       ts: t0 + seq,
       account: "PAPER",
-      kind: "EXIT",
+      kind,
       ref_id: null,
       payload_json: payload,
       prev_row_sha256: prev,
@@ -166,7 +178,71 @@ describe("hub API (ADR-068)", () => {
       packs: number;
       trades: number;
     };
-    expect(r).toEqual({ agents: 0, packs: 0, trades: 0 });
+    expect(r).toEqual({ agents: 0, packs: 0, trades: 0, show_counts: false });
+  });
+
+  it("ranks by return per trade, never ranks a forged huge trade, and labels the board self-reported (audit HUB-06)", async () => {
+    const db = hubDb();
+    const now = 5_000_000;
+    const h = call(db, now);
+    const honest = await generateAgentKey();
+    await h("/v1/feed", {
+      method: "POST",
+      body: await batch(honest, chain(6, 0, undefined, now - 1000), now),
+    });
+    const forger = await generateAgentKey();
+    const forged = chain(6, 0, undefined, now - 1000, () => ({
+      symbol: "BTC/USD",
+      pnl_cents: 1_000_000_000,
+      ret_pct: 900,
+    }));
+    await h("/v1/feed", { method: "POST", body: await batch(forger, forged, now, "rich") });
+    const lb = (await (await h("/v1/leaderboard")).json()) as {
+      note: string;
+      agents: { agent_id: string; avg_ret_pct: number }[];
+    };
+    expect(lb.note).toMatch(/Self-reported/);
+    expect(lb.agents.map((a) => a.agent_id)).toEqual([honest.agentId]);
+    expect(lb.agents[0]?.avg_ret_pct).toBe(0.5);
+  });
+
+  it("stores only public kinds and never a row that carries the balance (audit HUB-02/07)", async () => {
+    const db = hubDb();
+    const now = 5_000_000;
+    const h = call(db, now);
+    const k = await generateAgentKey();
+    const rows = chain(2, 0, undefined, now - 1000, () => ({ equity_cents: 5400 }), "DAY_ROLL");
+    const r = (await (await h("/v1/feed", { method: "POST", body: await batch(k, rows, now) })).json()) as {
+      stored: number;
+      dropped: number;
+    };
+    expect(r).toMatchObject({ stored: 0, dropped: 2 });
+    expect(db.db.prepare("SELECT COUNT(*) AS n FROM rows").get()).toEqual({ n: 0 });
+  });
+
+  it("takes reports, hides agents, limits new agents per network (audit HUB-01/03)", async () => {
+    const db = hubDb();
+    const now = 5_000_000;
+    const h = call(db, now);
+    const k = await generateAgentKey();
+    await h("/v1/feed", { method: "POST", body: await batch(k, chain(6, 0, undefined, now - 1000), now) });
+    expect(
+      (await h("/v1/report", { method: "POST", body: JSON.stringify({ target: k.agentId, reason: "spam" }) }))
+        .status,
+    ).toBe(200);
+    db.db.exec(`UPDATE agents SET hidden = 1 WHERE agent_id = '${k.agentId}'`);
+    expect((await h(`/v1/agents/${k.agentId}`)).status).toBe(404);
+    expect(((await (await h("/v1/leaderboard")).json()) as { agents: unknown[] }).agents).toEqual([]);
+    const cap = LIMITS.newAgentsPerIpPerDay;
+    LIMITS.newAgentsPerIpPerDay = 1;
+    try {
+      const k2 = await generateAgentKey();
+      expect((await h("/v1/feed", { method: "POST", body: await batch(k2, chain(2), now) })).status).toBe(
+        429,
+      );
+    } finally {
+      LIMITS.newAgentsPerIpPerDay = cap;
+    }
   });
 
   it("packs: signed publish, browse, download count", async () => {
@@ -194,6 +270,7 @@ describe("hub API (ADR-068)", () => {
     expect(((await (await h(`/v1/packs/${r.pack_id}`)).json()) as { title: string }).title).toBe(
       "Crypto scars",
     );
+    await h(`/v1/packs/${r.pack_id}`); // the same address again the same day: not counted twice (audit HUB-04)
     expect(
       ((await (await h("/v1/packs")).json()) as { packs: { downloads: number }[] }).packs[0]?.downloads,
     ).toBe(1);
@@ -225,7 +302,7 @@ function brain(
 }
 
 describe("agents on the hub (ADR-068)", () => {
-  it("a leader publishes its court contracts; a follower gets them as Tier 2 leads, never as orders", async () => {
+  it("a leader publishes its court contracts; a follower gets them as Tier 1 leads, never as orders", async () => {
     const db = hubDb();
     let t = Date.UTC(2026, 9, 26, 15);
     const now = () => t;
@@ -278,7 +355,7 @@ describe("agents on the hub (ADR-068)", () => {
       "SELECT candidate_id, tier, payload_json FROM triage_queue",
     );
     expect(q).toHaveLength(1);
-    expect(q[0]?.tier).toBe(2);
+    expect(q[0]?.tier).toBe(1); // audit HUB-05: triaged like any headline
     expect(JSON.parse(q[0]?.payload_json ?? "{}").headline).toMatch(/Followed agent .*ETH\/USD: ETF inflows/);
     // the same lead never comes twice
     t += 31 * 60_000;

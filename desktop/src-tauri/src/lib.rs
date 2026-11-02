@@ -207,7 +207,23 @@ pub fn run() {
             if intact && local_get(port, "/health", None).is_none() {
                 let logs = cortex_home().join("logs");
                 let _ = std::fs::create_dir_all(&logs);
-                let log = std::fs::File::create(logs.join("desktop-daemon.log")).ok();
+                // audit SEC-03: the daemon log is readable by this user only
+                let mut opts = std::fs::OpenOptions::new();
+                opts.write(true).create(true).truncate(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    opts.mode(0o600);
+                }
+                let log = opts.open(logs.join("desktop-daemon.log")).ok();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(
+                        logs.join("desktop-daemon.log"),
+                        std::fs::Permissions::from_mode(0o600),
+                    );
+                }
                 let mut cmd = cortex_cmd(&p, &["start"]);
                 cmd.env("CORTEX_PARENT_PID", std::process::id().to_string());
                 if let Some(f) = log {

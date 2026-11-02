@@ -1273,60 +1273,422 @@ export function AlertsSection({ s, save, saving }: { s: SettingsView; save: Save
 
 export function CourtSection({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
   const def = s.court?.default_per_day ?? 12;
+  const unlimitedNow = s.court?.unlimited ?? s.court?.unlimited_default ?? false;
+  const [unlimited, setUnlimited] = useState(unlimitedNow);
   const [n, setN] = useState(s.court?.max_per_day ?? def);
   const [r, setR] = useState<Result | null>(null);
   const rows = useResource<ScoreRow[]>("/api/models", 120_000);
   const prices = pricesOf(s);
-  // cost per model call over 7 days on priced endpoints → a rough cost per hearing (~9 calls)
   const priced = (rows.data ?? []).filter((x) => prices[x.provider.replace(/~bear$/, "")]);
   const calls = priced.reduce((a, x) => a + x.calls, 0);
   const spent = priced.reduce((a, x) => {
     const p = prices[x.provider.replace(/~bear$/, "")] as { in: number; out: number };
     return a + ((x.input_tokens ?? 0) * p.in + (x.output_tokens ?? 0) * p.out) / 1_000_000;
   }, 0);
-  const perHearing = calls ? (spent / calls) * 9 : null;
-  const paid = (s.llm?.endpoints ?? []).some((e) => e.tier === "paid" && e.enabled);
+  const perCall = calls ? spent / calls : null;
+  const changed = unlimited !== unlimitedNow || (!unlimited && n !== (s.court?.max_per_day ?? def));
   return (
     <section className="set-sec">
       <h4>How many trades the court hears</h4>
       <p className="cost">
-        Every candidate trade gets a full hearing (about 9 AI calls). The default, {def} a day, keeps free
-        tiers from running out. With paid models you can let it hear more; it never makes trades bigger, only
-        looks at more of them.
+        Every candidate trade gets a full hearing: opening statements, then an open floor where every seat can
+        speak and check facts until all of them rest (up to 35 minutes). More hearings never make trades
+        bigger; the robot only looks at more of them.
       </p>
-      <label className="set-field">
-        <span className="label dim">
-          HEARINGS PER DAY: {n}
-          {n === def ? " (default)" : ""}
+      <label className="toggle">
+        <input type="checkbox" checked={unlimited} onChange={(e) => setUnlimited(e.target.checked)} />
+        <span>
+          <b>Unlimited hearings</b>
+          {s.court?.unlimited === null || s.court?.unlimited === undefined ? " (your default)" : ""}
         </span>
-        <input
-          type="range"
-          min={4}
-          max={60}
-          step={1}
-          value={n}
-          onChange={(e) => setN(Number(e.target.value))}
-          aria-valuetext={`${n} hearings per day`}
-        />
       </label>
+      {!unlimited && (
+        <label className="set-field">
+          <span className="label dim">
+            HEARINGS PER DAY: {n}
+            {n === def ? " (default)" : ""}
+          </span>
+          <input
+            type="range"
+            min={4}
+            max={200}
+            step={1}
+            value={n}
+            onChange={(e) => setN(Number(e.target.value))}
+            aria-valuetext={`${n} hearings per day`}
+          />
+        </label>
+      )}
       <p className="cost">
-        {perHearing !== null
-          ? `On your paid models a hearing has cost about ${usd(perHearing)}, so ${n} a day is up to ~${usd(perHearing * n)} a day (free models cost nothing).`
-          : paid
-            ? "Add prices to your paid endpoints (AI models) to see a cost estimate here."
-            : `Only free models are set up: above ${def} a day they may run out before midnight UTC, and then hearings wait.`}
+        {perCall !== null
+          ? `On your paid models a call has cost about ${usd(perCall)}; an open-court hearing makes roughly 20–60 calls.`
+          : unlimited
+            ? "With only free models, hearings pause when a free tier runs out for the day, and resume when it resets."
+            : `With only free models, ${def} a day keeps free tiers from running out before midnight UTC.`}
       </p>
       <div className="set-actions">
         <button
           type="button"
           className="chip go"
-          disabled={saving || n === (s.court?.max_per_day ?? def)}
-          onClick={async () => setR(await save({ court: { max_per_day: n === def ? null : n } }))}
+          disabled={saving || !changed}
+          onClick={async () =>
+            setR(await save({ court: { unlimited, max_per_day: unlimited || n === def ? null : n } }))
+          }
         >
           SAVE
         </button>
       </div>
       <Note r={r} />
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ SEC filings contact (audit AGT-07)
+
+export function SecSection({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
+  const [email, setEmail] = useState("");
+  const [r, setR] = useState<Result | null>(null);
+  const set = s.keys?.SEC_USER_AGENT?.set ?? false;
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  return (
+    <section className="set-sec">
+      <h4>Company filings (SEC EDGAR)</h4>
+      <p className="cost">
+        The research desk reads new SEC filings (8-Ks, earnings) for the stocks it follows. The SEC asks every
+        reader to give a contact email; it is sent only to sec.gov, with each request.{" "}
+        {set ? "An email is set." : "Without one, filings are skipped."}
+      </p>
+      <label className="set-field">
+        <span className="label dim">CONTACT EMAIL</span>
+        <input
+          className="field plain"
+          type="email"
+          autoComplete="email"
+          value={email}
+          placeholder={set ? "set — type to replace" : "you@example.com"}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+      </label>
+      <div className="set-actions">
+        <button
+          type="button"
+          className="chip go"
+          disabled={saving || !valid}
+          onClick={async () =>
+            setR(await save({ keys: { SEC_USER_AGENT: `Savant research ${email.trim()}` } }))
+          }
+        >
+          SAVE
+        </button>
+      </div>
+      <Note r={r} />
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ keep awake + plain-English replays (ADR-096/098)
+
+export function AwakeSection({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
+  const [r, setR] = useState<Result | null>(null);
+  const cur = s.power?.keep_awake ?? "hearings";
+  const opts: [typeof cur, string, string][] = [
+    [
+      "hearings",
+      "During hearings",
+      "Stay awake while the court is in session, then let the computer sleep as usual.",
+    ],
+    ["always", "Always", "Stay awake while Savant runs (best for a computer that is left on to trade)."],
+    ["off", "Never", "Let the computer sleep; a hearing cut short by sleep is ruled on when it wakes."],
+  ];
+  return (
+    <section className="set-sec">
+      <h4>Keep this computer awake</h4>
+      <p className="cost">
+        Only system sleep is held; the screen can still turn off. Open positions keep their stops either way.
+      </p>
+      <div className="set-radio" role="radiogroup" aria-label="Keep this computer awake">
+        {opts.map(([v, label, why]) => (
+          <label key={v} className="toggle">
+            <input
+              type="radio"
+              name="keep-awake"
+              checked={cur === v}
+              disabled={saving}
+              onChange={async () => setR(await save({ power: { keep_awake: v } }))}
+            />
+            <span>
+              <b>{label}</b> <span className="dim">{why}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <Note r={r} />
+    </section>
+  );
+}
+
+export function Eli5Section({ s, save, saving }: { s: SettingsView; save: Save; saving: boolean }) {
+  const [r, setR] = useState<Result | null>(null);
+  const on = s.eli5?.enabled ?? false;
+  return (
+    <section className="set-sec">
+      <h4>Explain like I'm 5</h4>
+      <p className="cost">
+        Court replays can come with a plain-English explanation of every statement, fact check and log line.
+        <b> This costs extra:</b> each explanation is one more call to your AI models when you open a replay
+        (free models: it uses some of their daily quota; paid models: it is billed like any other call).
+      </p>
+      <label className="toggle">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={saving}
+          onChange={async (e) => setR(await save({ eli5: { enabled: e.target.checked } }))}
+        />
+        <span>
+          <b>Plain-English replays</b> (uses extra AI tokens)
+        </span>
+      </label>
+      <Note r={r} />
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------ the model browser (ADR-099)
+
+interface CatalogView {
+  ok: boolean;
+  message: string;
+  cost_scope: "free_only" | "all";
+  providers: {
+    id: string;
+    name: string;
+    endpoint: boolean;
+    mode: string;
+    picked: number;
+    listed: number;
+    free: number;
+    ok: boolean | null;
+  }[];
+  page?: {
+    provider: string;
+    ok: boolean;
+    total: number;
+    page: number;
+    pages: number;
+    free_count: number;
+    items: { id: string; free: boolean; picked: boolean; score: number | null }[];
+    at: number | null;
+  };
+  bench_at: number | null;
+}
+
+const MODES: [string, string][] = [
+  ["recommended", "Recommended (tested models only)"],
+  ["free", "Every free model it lists"],
+  ["all", "Every model it lists"],
+  ["pick", "Only the models I pick"],
+];
+
+export function CatalogSection({ reload }: { reload: () => void }) {
+  const [v, setV] = useState<CatalogView | null>(null);
+  const [provider, setProvider] = useState("");
+  const [search, setSearch] = useState("");
+  const [freeOnly, setFreeOnly] = useState(false);
+  const [page, setPage] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<Result | null>(null);
+  const load = async (body: Record<string, unknown> = {}) => {
+    setBusy(true);
+    const res = await post<CatalogView>("/api/settings/catalog", {
+      ...(provider ? { provider } : {}),
+      search,
+      free: freeOnly,
+      page,
+      ...body,
+    });
+    setBusy(false);
+    if (res.ok) setV(res);
+    if (res.message) setNote({ ok: res.ok, message: res.message });
+    return res;
+  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reload when the query changes
+  useEffect(() => {
+    const t = setTimeout(() => void load(), search ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [provider, search, freeOnly, page]);
+  useEffect(() => {
+    if (!provider && v?.providers[0]) setProvider(v.providers[0].id);
+  }, [v, provider]);
+  const change = async (body: Record<string, unknown>) => {
+    const res = await load(body);
+    if (res.ok) {
+      await waitForBrain();
+      reload();
+    }
+  };
+  const p = v?.providers.find((x) => x.id === provider);
+  const pg = v?.page;
+  return (
+    <section className="set-sec">
+      <h4>Which models the court may use</h4>
+      <p className="cost">
+        Savant checks every provider's model list daily and tests new and current models weekly. Models a
+        provider drops are replaced automatically by its best-scoring one; slow or failing models move to the
+        back.
+      </p>
+      <div className="set-radio" role="radiogroup" aria-label="Free or paid models">
+        <label className="toggle">
+          <input
+            type="radio"
+            name="cost-scope"
+            checked={(v?.cost_scope ?? "all") === "free_only"}
+            disabled={busy}
+            onChange={() => change({ cost_scope: "free_only" })}
+          />
+          <span>
+            <b>Free models only</b> <span className="dim">paid models and paid endpoints sit out</span>
+          </span>
+        </label>
+        <label className="toggle">
+          <input
+            type="radio"
+            name="cost-scope"
+            checked={(v?.cost_scope ?? "all") === "all"}
+            disabled={busy}
+            onChange={() => change({ cost_scope: "all" })}
+          />
+          <span>
+            <b>Free and paid</b> <span className="dim">paid models bill the account behind their key</span>
+          </span>
+        </label>
+      </div>
+      {v && v.providers.length === 0 && (
+        <p className="cost">Add a model provider above to choose its models.</p>
+      )}
+      {v && v.providers.length > 0 && (
+        <>
+          <div className="set-tabs" role="tablist" aria-label="Provider">
+            {v.providers.map((x) => (
+              <button
+                key={x.id}
+                type="button"
+                role="tab"
+                aria-selected={x.id === provider}
+                className={`chip${x.id === provider ? " go" : ""}`}
+                onClick={() => {
+                  setProvider(x.id);
+                  setPage(1);
+                }}
+              >
+                {x.name} <span className="dim">{x.listed ? `${x.listed}` : "—"}</span>
+              </button>
+            ))}
+          </div>
+          {p && !p.endpoint && (
+            <label className="set-field">
+              <span className="label dim">{p.name.toUpperCase()}: WHICH MODELS</span>
+              <select
+                className="field plain"
+                value={p.mode}
+                disabled={busy}
+                onChange={(e) => change({ provider, mode: e.target.value })}
+              >
+                {MODES.map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {p?.endpoint && <p className="cost">Ticked models are the ones this endpoint offers the court.</p>}
+          <div className="set-grid">
+            <label className="set-field">
+              <span className="label dim">SEARCH</span>
+              <input
+                className="field plain"
+                value={search}
+                placeholder="e.g. llama, 70b, claude"
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </label>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={freeOnly}
+                onChange={(e) => {
+                  setFreeOnly(e.target.checked);
+                  setPage(1);
+                }}
+              />
+              <span>Show free models only{pg ? ` (${pg.free_count} free)` : ""}</span>
+            </label>
+          </div>
+          {pg && !pg.ok && pg.total === 0 && (
+            <p className="cost">
+              This provider's model list hasn't been read yet. Use <b>Check for new models now</b>.
+            </p>
+          )}
+          {pg && pg.items.length > 0 && (
+            <ul className="plain-list model-list">
+              {pg.items.map((m) => (
+                <li key={m.id}>
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={m.picked}
+                      disabled={busy}
+                      onChange={(e) => change({ provider, [e.target.checked ? "pick" : "unpick"]: [m.id] })}
+                    />
+                    <span>
+                      <code className="mono">{m.id}</code>{" "}
+                      {m.free ? <span className="tag-free">FREE</span> : <span className="dim">paid</span>}
+                      {m.score !== null && <span className="dim"> · test score {m.score}</span>}
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+          {pg && (
+            <div className="set-actions">
+              <button
+                type="button"
+                className="chip"
+                disabled={busy || pg.page <= 1}
+                onClick={() => setPage(pg.page - 1)}
+              >
+                ← PREV
+              </button>
+              <span className="dim">
+                Page {pg.page} of {pg.pages} · {pg.total} models
+              </span>
+              <button
+                type="button"
+                className="chip"
+                disabled={busy || pg.page >= pg.pages}
+                onClick={() => setPage(pg.page + 1)}
+              >
+                NEXT →
+              </button>
+            </div>
+          )}
+          {p && !p.endpoint && p.mode !== "pick" && (
+            <p className="cost">Ticking a model switches this provider to "Only the models I pick".</p>
+          )}
+        </>
+      )}
+      <div className="set-actions">
+        <button type="button" className="chip" disabled={busy} onClick={() => load({ refresh: true })}>
+          CHECK FOR NEW MODELS NOW
+        </button>
+        {v?.bench_at && <span className="dim">Last tested {new Date(v.bench_at).toLocaleDateString()}</span>}
+      </div>
+      <Note r={note} />
     </section>
   );
 }
@@ -2207,12 +2569,20 @@ export function SettingsPage({
           {saving && <span className="note-line cyan">Applying…</span>}
         </header>
         {cur.id === "account" && <LicenseSection s={s} reload={reload} />}
-        {cur.id === "trading" && <TradingSection {...props} />}
+        {cur.id === "trading" && (
+          <>
+            <TradingSection {...props} />
+            {s.mode === "paper" && <SecSection {...props} />}
+          </>
+        )}
         {cur.id === "ai" && (
           <>
             <ModelsSection {...props} />
+            <CatalogSection reload={reload} />
             <ClefSection {...props} />
             <CourtSection {...props} />
+            <AwakeSection {...props} />
+            <Eli5Section {...props} />
           </>
         )}
         {cur.id === "governor" &&

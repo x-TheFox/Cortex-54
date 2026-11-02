@@ -1644,6 +1644,39 @@ tbody tr:last-child > * {
 }
 
 /* ── risk ───────────────────────────────────────────────────────────────── */
+/* ADR-101: FAQ (the same answers feed the page's FAQPage data) */
+.faq {
+  margin: clamp(80px, 10vw, 150px) 0 0;
+  padding: 0 var(--gutter);
+}
+.faq-inner {
+  max-width: calc(var(--max) - 2 * var(--gutter));
+  margin: 0 auto;
+}
+.faq h2 {
+  font-size: clamp(2rem, 4vw, 3.4rem);
+  margin-bottom: 28px;
+}
+.faq-item {
+  border-top: 1px solid var(--rule);
+  padding: 18px 0;
+  max-width: 72ch;
+}
+.faq-item:last-child {
+  border-bottom: 1px solid var(--rule);
+}
+.faq-item summary {
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.faq-item p {
+  margin: 12px 0 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
 .risk {
   margin: clamp(96px, 12vw, 180px) 0 0;
   padding: clamp(64px, 8vw, 120px) var(--gutter);
@@ -2298,4 +2331,147 @@ html.has-dialog {
   gap: 8px;
   padding-left: 20px;
   max-width: 62ch;
+}
+
+/* ADR-102: getsavant.pro/impact — a public ledger */
+.imp-tracker {
+  margin: 28px 0 8px;
+  padding: clamp(20px, 3vw, 32px);
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--ink);
+  border-radius: 4px;
+}
+.imp-figs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 18px 28px;
+  margin: 12px 0 22px;
+}
+.imp-figs dt {
+  font: 500 12px / 1.2 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.imp-figs dd {
+  margin: 6px 0 0;
+  font: 400 clamp(1.9rem, 4vw, 2.8rem) / 1 var(--serif);
+  color: var(--ink);
+}
+.imp-figs .imp-pool {
+  color: var(--pass);
+}
+.imp-bar {
+  height: 10px;
+  background: var(--paper-3);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.imp-bar span {
+  display: block;
+  height: 100%;
+  background: var(--pass);
+  transition: width 0.6s ease;
+}
+.imp-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+  max-width: 760px;
+}
+.imp-form label {
+  display: grid;
+  gap: 6px;
+  font: 500 13px / 1.2 var(--mono);
+  color: var(--ink-2);
+}
+.imp-form .imp-wide {
+  grid-column: 1 / -1;
+}
+.imp-input {
+  font: 400 16px / 1.4 var(--sans, system-ui);
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.imp-input:focus {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.imp-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  counter-reset: imp;
+}
+.imp-list li {
+  counter-increment: imp;
+  display: grid;
+  grid-template-columns: 2.4rem 1fr auto auto;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 14px 0;
+  border-top: 1px solid var(--rule);
+}
+.imp-list li::before {
+  content: counter(imp);
+  font: 400 1.4rem / 1 var(--serif);
+  color: var(--muted);
+}
+.imp-list li.imp-lead::before {
+  color: var(--pass);
+}
+.imp-who a {
+  margin-left: 10px;
+  font: 400 13px var(--mono);
+}
+.imp-who p {
+  margin: 4px 0 0;
+}
+.imp-tag {
+  display: inline-block;
+  margin-left: 10px;
+  font: 500 11px / 1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--pass);
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  padding: 3px 5px;
+}
+.imp-votes {
+  font: 400 14px var(--mono);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.imp-votes b {
+  font: 400 1.3rem var(--serif);
+  color: var(--ink);
+  margin-right: 4px;
+}
+.imp-month {
+  margin: 20px 0 32px;
+}
+.imp-month h3 {
+  font: 400 1.6rem / 1.2 var(--serif);
+  margin: 0;
+}
+.imp-fine li {
+  margin: 6px 0;
+}
+@media (max-width: 640px) {
+  .imp-form {
+    grid-template-columns: 1fr;
+  }
+  .imp-list li {
+    grid-template-columns: 1.8rem 1fr;
+  }
+  .imp-list li .imp-votes,
+  .imp-list li .btn {
+    grid-column: 2;
+    justify-self: start;
+  }
 }

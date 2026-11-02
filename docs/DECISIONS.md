@@ -1293,3 +1293,53 @@ follow and unfollow agents (checked against the hub), and memory packs: fetch on
 leaderboard and the packs; /community/agent/?id= an agent's record and recent public rows; /docs/community/ explains
 what a record proves and what is shared. The site reads the hub through a `/hub/*` rewrite (CSP stays 'self'). The
 privacy policy now says a user can ask for their agent to be removed (published rows are otherwise permanent).
+
+## ADR-096 — Open court, core seats and the specialist pool (2026-11-02)
+After the opening (bull, bear, rebuttal, panel) the floor opens: every seat is asked in turn whether it has anything
+further, may use read-only tools (calc, evidence, web/news search, read a page, Wikipedia) as often as it needs, and
+the hearing ends when one full round rests (NO_OBJECTION, shown as courtroom phrasing), the bull withdraws, or at the
+hard cutoff (30 min wrap-up call, 35 min cutoff; the Clef jury rules on the record as it stands). The record is compacted
+automatically. Core seats: bull, bear, quant, risk, macro, Devil's Advocate, Execution & Fee Auditor, Evidence Clerk; up
+to 6 specialists from a pool of 106, shortlisted by the case and picked by Clef. Open court runs in the background in
+the app (never inside a pulse) and the next pulse hands the record to the jury and routes; the cloud brain keeps the
+bounded hearing. An OS power assertion keeps the computer awake during hearings (Settings: hearings / always / never).
+
+## ADR-097 — Two-tier key routing; unlimited hearings (2026-11-02)
+Each provider may hold several keys (inner round robin; a 429/401/403 key is skipped at once); a provider whose keys are
+all exhausted sits out and the router moves to the next provider. When every provider is exhausted, new entries are
+held until one recovers (exits, stops and breakers untouched): tighter, never looser (constitution 6). Hearings are
+unlimited by default once the pool has a paid or local model, and on a switch for anyone; a free-only pool keeps the
+daily default that protects its providers' quotas. The fail-closed free-tier budget rule is unchanged.
+
+## ADR-098 — Court replays and plain-English explanations (2026-11-02)
+Every hearing is kept and replayable step by step (FUNNEL → Court replays). "Explain like I'm 5" is opt-in (onboarding
+and Settings, with a cost note): one model call per hearing, cached.
+
+## ADR-099 — Model catalog, weekly benchmarks, self-healing chains, model chooser (2026-11-02)
+Provider model lists are read daily; allowed models are benchmarked weekly and on change (brief schema, arithmetic,
+tool protocol, injection probe). Removed models are replaced by the provider's best scorer, degraded ones move last.
+Users choose free only or free and paid, and per provider recommended / all free / all / picked, in a paginated browser.
+
+## ADR-100 — Billing on getsavant.pro (2026-11-02)
+The account page lists payments with receipts and refunds any charge from the last 14 days at once (server-enforced,
+caller's own payments only, idempotent). The licence server's Whop key needs `payment:manage` for refunds.
+
+## ADR-101 — Technical SEO (2026-11-02)
+JSON-LD (Organization, WebSite, SoftwareApplication, Product with offers, FAQPage) from checkout.ts, a visible FAQ,
+Twitter cards, canonicals and Open Graph on community and docs, sitemap and robots updates.
+
+## ADR-102 — Community impact pledge (2026-11-02)
+Monthly, 20% of Savant's gross revenue (collected charges before processor fees, less that month's refunds) is given
+by the company to community-suggested foundations: one per $250 of pool (1–10), most-supported eligible suggestions,
+equal shares, winners sit out 3 months. Suggestions dedupe by domain or cleaned name. Allocations are an append-only
+public record; receipts are attached with `pnpm impact paid`. A corporate pledge: no donations taken, nobody's money
+held. Operator: set the hub's read-only `WHOP_API_KEY` secret before the first close.
+
+## ADR-103 — Pre-release audit fixes (2026-11-02)
+Pulse watchdog and time-boxed steps (AGT-04); hub integrity (HUB-01…07); licence refresh every 3 h, clock rollback,
+removed computers stay removed, machine-bound device credentials (LIC-01/02/04/05/06); first-run warm-up (AGT-01);
+small-account guidance (RISK-01); qwen out of the chains (AGT-02); high-quota Clef stand-in (AGT-05); overnight
+catalysts (AGT-06); SEC contact (AGT-07); hindsight masking for historical court runs (AGT-03); human provider errors
+and scrubbed ids, 0600 daemon log without the login token (UX-09, SEC-03); product sign-in wording (STALE-01).
+Still open (operator or follow-up): code signing/notarization (INS-01), Whop sandbox (PAY-01), remaining UX and
+marketing copy items in the audit report.

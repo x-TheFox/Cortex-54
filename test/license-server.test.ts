@@ -143,7 +143,7 @@ describe("licence server (ADR-086)", () => {
     );
   });
 
-  it("the app activates, refreshes daily, keeps working offline, and drops a refunded licence", async () => {
+  it("the app activates, asks the server every few hours, keeps working offline, and drops a refunded licence", async () => {
     const home = mkdtempSync(join(tmpdir(), "savant-lic-"));
     const w = fakeWhop(member());
     const server = async (u: string, i?: RequestInit) => handle(new Request(u, i), env(), w.f);
@@ -161,7 +161,14 @@ describe("licence server (ADR-086)", () => {
         fetcher: server,
         pubkey: keys.publicKeyB64,
       }),
-    ).toBe("fresh");
+    ).toBe("renewed"); // audit LIC-01: asks on every 3-hour check, not only after 24 h
+    expect(
+      await refreshLicense(home, "KEY-1234-5678", {
+        server: "https://lic.example",
+        fetcher: server,
+        pubkey: keys.publicKeyB64,
+      }),
+    ).toBe("fresh"); // …but not twice inside 2.5 h
     const later = Date.now() + 2 * 86_400_000;
     const offline = async () => {
       throw new Error("offline");
@@ -184,6 +191,22 @@ describe("licence server (ADR-086)", () => {
       }),
     ).toBe("revoked");
     expect(readLicense(home, keys.publicKeyB64)).toMatchObject({ ok: false });
+  });
+
+  it("a clock set back before the last check doesn't keep a licence alive (audit LIC-02)", async () => {
+    const home = mkdtempSync(join(tmpdir(), "savant-lic-"));
+    const w = fakeWhop(member());
+    const server = async (u: string, i?: RequestInit) => handle(new Request(u, i), env(), w.f);
+    await activateKey(home, "KEY-1234-5678", {
+      server: "https://lic.example",
+      fetcher: server,
+      pubkey: keys.publicKeyB64,
+    });
+    expect(readLicense(home, keys.publicKeyB64)).toMatchObject({ ok: true });
+    expect(readLicense(home, keys.publicKeyB64, Date.now() - 3 * 86_400_000)).toMatchObject({
+      ok: false,
+      reason: expect.stringMatching(/clock/),
+    });
   });
 });
 
@@ -230,7 +253,7 @@ describe("Savant accounts and device sign-in (ADR-093)", () => {
       delete: async (k: string) => void m.delete(k),
     };
   };
-  const accEnv = (DEVICES = kv()) =>
+  const accEnv = (_DEVICES = kv()) =>
     env({
       WHOP_PAID_PLAN_IDS: "plan_monthly,plan_yearly",
       WHOP_OAUTH_CLIENT_ID: "app_test",
@@ -274,7 +297,7 @@ describe("Savant accounts and device sign-in (ADR-093)", () => {
     const acct = (await (await handle(as("alice", "/v1/account"), e, w.f)).json()) as {
       plans: { id: string; plan: string; trial: boolean; license_key: string }[];
     };
-    expect(acct.plans.map((p) => [p.id, p.plan, p.trial])).toEqual([["mem_alice", "Monthly", true]]);
+    expect(acct.plans.map((p) => [p.id, p.plan, p.trial])).toEqual([["mem_alice", "Free trial", true]]);
     // bob can't touch alice's plan
     expect((await handle(as("bob", "/v1/account/cancel", { membership: "mem_alice" }), e, w.f)).status).toBe(
       404,
@@ -286,9 +309,15 @@ describe("Savant accounts and device sign-in (ADR-093)", () => {
     await handle(as("alice", "/v1/account/undo-cancel", { membership: "mem_alice" }), e, w.f);
     expect(w.ms[0]?.cancel_at_period_end).toBe(false);
     expect((await handle(new Request("https://lic.example/v1/account"), e, w.f)).status).toBe(401);
+    // audit LIC-04: a computer removed from the account can't re-bind itself at its next check
+    await handle(post("/v1/activate", { key: "KEY-ALICE-0001", machine: M1 }), e, w.f);
+    await handle(as("alice", "/v1/account/deactivate", { membership: "mem_alice" }), e, w.f);
+    const again = await handle(post("/v1/activate", { key: "KEY-ALICE-0001", machine: M1 }), e, w.f);
+    expect(again.status).toBe(403);
+    expect(await again.json()).toMatchObject({ code: "removed_from_account" });
   });
 
-  it("device sign-in: the app gets a code, the user approves on the site, the app picks up its key; moving needs a yes", async () => {
+  it("device sign-in: the app gets a code, the user approves on the site, the app picks up a machine-bound credential; moving needs a yes", async () => {
     const w = whopWithUsers([alice]);
     const e = { ...accEnv(), DEVICES: kv() };
     const start = async (machine: string, name: string) =>
@@ -308,19 +337,22 @@ describe("Savant accounts and device sign-in (ADR-093)", () => {
       await (await handle(as("alice", `/v1/device/info?code=${a.user_code}`), e, w.f)).json(),
     ).toMatchObject({
       device: "Studio Mac",
-      plan: "Monthly",
+      plan: "Free trial",
       elsewhere: null,
     });
     expect((await handle(as("alice", "/v1/device/approve", { code: a.user_code }), e, w.f)).status).toBe(200);
-    expect(
-      await (await handle(post("/v1/device/poll", { device_secret: a.device_secret }), e, w.f)).json(),
-    ).toMatchObject({
-      status: "approved",
-      key: "KEY-ALICE-0001",
-    });
-    // the key then activates through the normal path, on the bound machine only
-    expect((await handle(post("/v1/activate", { key: "KEY-ALICE-0001", machine: M1 }), e, w.f)).status).toBe(
+    const polled = (await (
+      await handle(post("/v1/device/poll", { device_secret: a.device_secret }), e, w.f)
+    ).json()) as { status: string; credential: string; key?: string };
+    // audit LIC-05: never the licence key itself, only a credential that works on this machine
+    expect(polled.status).toBe("approved");
+    expect(polled.key).toBeUndefined();
+    expect(polled.credential).toMatch(/^dk\.mem_alice\./);
+    expect((await handle(post("/v1/activate", { key: polled.credential, machine: M1 }), e, w.f)).status).toBe(
       200,
+    );
+    expect((await handle(post("/v1/activate", { key: polled.credential, machine: M2 }), e, w.f)).status).toBe(
+      404,
     );
     // a second computer must confirm the move; then the first one is refused at its next check
     const b = await start(M2, "Laptop");
@@ -331,7 +363,7 @@ describe("Savant accounts and device sign-in (ADR-093)", () => {
       (await handle(as("alice", "/v1/device/approve", { code: b.user_code, move: true }), e, w.f)).status,
     ).toBe(200);
     expect((await handle(post("/v1/activate", { key: "KEY-ALICE-0001", machine: M1 }), e, w.f)).status).toBe(
-      409,
+      409, // bound to the new computer now (and the old one is on the removed list: audit LIC-04)
     );
     // a user with only the free demo plan is told to start the trial
     const demo = whopWithUsers([{ ...alice, variant_id: "plan_free_demo" }]);
@@ -351,10 +383,91 @@ describe("Savant accounts and device sign-in (ADR-093)", () => {
     expect(await pollDeviceSignIn(s.secret, o)).toEqual({ status: "pending" });
     expect((await handle(as("alice", "/v1/device/approve", { code: s.code }), e, w.f)).status).toBe(200);
     const p = await pollDeviceSignIn(s.secret, o);
-    expect(p).toEqual({ status: "approved", key: "KEY-ALICE-0001" });
+    expect(p).toMatchObject({ status: "approved", key: expect.stringMatching(/^dk\./) });
     const a = await activateKey(home, p.key as string, { ...o, pubkey: keys.publicKeyB64 });
     expect(a.ok).toBe(true);
     expect(readLicense(home, keys.publicKeyB64)).toMatchObject({ required: true, ok: true });
     expect(await pollDeviceSignIn(s.secret, o)).toEqual({ status: "expired" }); // used once
+  });
+
+  it("shows the caller's payments and refunds inside 14 days, only their own (ADR-100)", async () => {
+    const day = 86_400_000;
+    const pays: Record<string, Record<string, unknown>> = {
+      pay_new: {
+        id: "pay_new",
+        status: "paid",
+        membership_id: "mem_alice",
+        user_id: "user_alice",
+        paid_at: new Date(Date.now() - 3 * day).toISOString(),
+        total: 35,
+        currency: "usd",
+      },
+      pay_old: {
+        id: "pay_old",
+        status: "paid",
+        membership_id: "mem_alice",
+        user_id: "user_alice",
+        paid_at: new Date(Date.now() - 40 * day).toISOString(),
+        total: 35,
+        currency: "usd",
+      },
+      pay_bob: {
+        id: "pay_bob",
+        status: "paid",
+        membership_id: "mem_bob",
+        user_id: "user_bob",
+        paid_at: new Date().toISOString(),
+        total: 35,
+        currency: "usd",
+      },
+    };
+    const refunds: { id: string; key: string | null }[] = [];
+    const base = whopWithUsers([
+      alice,
+      { ...alice, id: "mem_bob", user_id: "user_bob", license_key: "KEY-BOB" },
+    ]);
+    const f = async (u: string, i?: RequestInit) => {
+      const url = new URL(u);
+      const path = url.pathname.replace(/^\/api\/v1/, "");
+      if (path === "/payments")
+        return Response.json({
+          data: Object.values(pays).filter((x) => x.membership_id === url.searchParams.get("membership_id")),
+        });
+      const m = /^\/payments\/(pay_\w+)(\/refund)?$/.exec(path);
+      if (m) {
+        const pay = pays[m[1] as string];
+        if (!pay) return new Response("{}", { status: 404 });
+        if (m[2]) {
+          refunds.push({ id: m[1] as string, key: new Headers(i?.headers).get("idempotency-key") });
+          pay.status = "paid";
+          pay.refunded_amount = pay.total;
+        }
+        return Response.json(pay);
+      }
+      return base.f(u, i);
+    };
+    const e = { ...accEnv(), DEVICES: kv() };
+    const list = (await (await handle(as("alice", "/v1/account/payments"), e, f)).json()) as {
+      payments: { id: string; refundable: boolean }[];
+    };
+    expect(list.payments.map((x) => [x.id, x.refundable])).toEqual([
+      ["pay_new", true],
+      ["pay_old", false],
+    ]);
+    expect((await handle(as("alice", "/v1/account/refund", { payment: "pay_bob" }), e, f)).status).toBe(404);
+    expect((await handle(as("alice", "/v1/account/refund", { payment: "pay_old" }), e, f)).status).toBe(409);
+    const ok = await handle(
+      as("alice", "/v1/account/refund", { payment: "pay_new", reason: "not for me" }),
+      e,
+      f,
+    );
+    expect(ok.status).toBe(200);
+    expect(refunds).toEqual([{ id: "pay_new", key: "savant-refund-pay_new" }]);
+    expect(
+      await (await handle(as("alice", "/v1/account/refund", { payment: "pay_new" }), e, f)).json(),
+    ).toMatchObject({
+      message: "This payment was already refunded.",
+    });
+    expect(refunds).toHaveLength(1);
   });
 });

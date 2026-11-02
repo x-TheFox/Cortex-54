@@ -13,7 +13,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
-import { AlpacaClient } from "../src/broker/AlpacaClient.ts";
 import { type ApiFormat, listModels, normalizeUrl, PRESETS, presetForKey } from "../src/court/models.ts";
 import { buildPool } from "../src/court/pool.ts";
 import { buildProviders } from "../src/court/providers.ts";
@@ -214,6 +213,7 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
     sql: () => c.sql, // ADR-095: memory packs
     pairLink: () => c.pairLink(),
     cashOnly: (acct) => c.makeCashOnly(acct),
+    refreshModels: () => c.refreshModels(true),
     liveAccount: () => {
       const a = c.brain.status().accounts.find((x) => x.account === "LIVE" && x.configured);
       return a
@@ -233,7 +233,7 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
         write();
         cfg = loadConfig(home) ?? cfg;
         seen = JSON.stringify(cfg);
-        c = new LocalCortex({ home, root: ROOT, cfg, settings });
+        c = new LocalCortex({ home, root: ROOT, cfg, settings, onModelsChanged: () => settings.reloadNow() });
         await c.start();
       } finally {
         reloading = false;
@@ -256,7 +256,13 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
           await c.stop();
           cfg = loadConfig(home) ?? cfg;
           seen = JSON.stringify(cfg);
-          c = new LocalCortex({ home, root: ROOT, cfg, settings });
+          c = new LocalCortex({
+            home,
+            root: ROOT,
+            cfg,
+            settings,
+            onModelsChanged: () => settings.reloadNow(),
+          });
           await c.start();
           console.log(`[settings] applied (${cfg.mode} mode)`);
         } catch (e) {
@@ -267,7 +273,7 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
       })();
     },
   });
-  c = new LocalCortex({ home, root: ROOT, cfg, settings });
+  c = new LocalCortex({ home, root: ROOT, cfg, settings, onModelsChanged: () => settings.reloadNow() });
   await c.start();
   // ADR-073: changes made outside the app (an agent running `savant llm add`, `savant setup --set …`) apply live
   let seen = JSON.stringify(cfg);
@@ -281,7 +287,8 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
       /* half-written file: the next tick reads it whole */
     }
   });
-  // ADR-086: keep a Whop licence fresh (daily; a lapsed purchase reaches the app within a day while online)
+  // ADR-086 / audit LIC-01: check the licence with the server every 3 hours, so a refund, cancellation or a
+  // computer removed from the account reaches the app within a few hours while online
   const refresh = () =>
     void refreshLicense(home, cfg.keys.SAVANT_LICENSE_KEY)
       .then((r) => {
@@ -292,7 +299,8 @@ async function start(home: string, first: LocalConfig, minutes?: number): Promis
   setInterval(refresh, 3 * 3_600_000).unref();
   const link = await c.loginLink();
   out(
-    `Savant ${cfg.mode} mode running at ${c.url()}\nWeb app (single-use login, 10 min): ${link}\nStop with Ctrl+C.`,
+    // audit SEC-03: under the desktop app stdout goes to a log file, so the one-time login token is never written there
+    `Savant ${cfg.mode} mode running at ${c.url()}\nWeb app (single-use login, 10 min): ${process.env.CORTEX_PARENT_PID ? `${c.url()} (open it from the app)` : link}\nStop with Ctrl+C.`,
     {
       ok: true,
       url: c.url(),
