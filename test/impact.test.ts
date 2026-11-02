@@ -49,10 +49,12 @@ const NOV = Date.UTC(2026, 10, 10);
 const DEC2 = Date.UTC(2026, 11, 2);
 
 describe("impact pledge (ADR-102)", () => {
-  it("slots and splits: one foundation per $250 of pool, 1–10, cents never lost", () => {
+  it("slots and splits: each share at most $250 until 10 foundations, then 10 share everything; cents never lost", () => {
     expect(slotsFor(0)).toBe(0);
     expect(slotsFor(5_000)).toBe(1);
-    expect(slotsFor(74_000)).toBe(2);
+    expect(slotsFor(74_000)).toBe(3); // $740 → 3 × $246.67
+    expect(slotsFor(25_001)).toBe(2);
+    expect(slotsFor(25_000)).toBe(1);
     expect(slotsFor(10_000_000)).toBe(10);
     expect(split(100_001, 3)).toEqual([33_334, 33_334, 33_333]);
     expect(split(100_001, 3).reduce((a, b) => a + b, 0)).toBe(100_001);
